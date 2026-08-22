@@ -13,12 +13,35 @@ import { useI18n } from '../i18n'
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
 const TWO_FINGER_THRESHOLD = 14
-const TWO_FINGER_TAP_MAX_MS = 260
-const TWO_FINGER_DOUBLE_TAP_GAP_MS = 350
+const TWO_FINGER_TAP_MAX_MS = 300
+const TWO_FINGER_DOUBLE_TAP_GAP_MS = 400
 
 interface Pt {
   x: number
   y: number
+}
+
+function angleBetween(a: Pt, b: Pt): number {
+  return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+}
+
+function rotationPair(pts: Pt[]): [Pt, Pt] {
+  if (pts.length < 2) return [pts[0] ?? { x: 0, y: 0 }, pts[0] ?? { x: 0, y: 0 }]
+  if (pts.length === 2) return [pts[0], pts[1]]
+  let bestA = pts[0]
+  let bestB = pts[1]
+  let bestD = -1
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const d = (pts[i].x - pts[j].x) ** 2 + (pts[i].y - pts[j].y) ** 2
+      if (d > bestD) {
+        bestD = d
+        bestA = pts[i]
+        bestB = pts[j]
+      }
+    }
+  }
+  return [bestA, bestB]
 }
 
 interface SelectionState {
@@ -45,6 +68,9 @@ export function Editor() {
   const lastThreeFingerTapAtRef = useRef(0)
   const pinchRotationUndoPushedRef = useRef(false)
   const pageRotateUndoPushedRef = useRef(false)
+  const dragOwnerIdRef = useRef<number | null>(null)
+  const dragInterruptedByTouchRef = useRef(false)
+  const multiTouchDownAtRef = useRef(0)
 
   const notebook = useAppStore((s) =>
     s.notebooks.find((n) => n.id === s.selectedNotebookId),
@@ -1328,6 +1354,21 @@ export function Editor() {
 
     const multiTouch = activePointersRef.current.size >= 2
     if (multiTouch) {
+      const drag = dragRef.current
+      if (drag?.kind === 'pan' && drag.multiTouch) {
+        pinchRef.current = null
+        twoFingerDownAtRef.current = null
+        threeFingerDownAtRef.current = null
+        pendingTwoFingerRef.current = { id: e.pointerId, start: pos }
+        return
+      }
+      if (
+        drag &&
+        (drag.kind === 'draw' || drag.kind === 'erase' || drag.kind === 'region-draw')
+      ) {
+        dragInterruptedByTouchRef.current = true
+        if (multiTouchDownAtRef.current === 0) multiTouchDownAtRef.current = Date.now()
+      }
       if (activePointersRef.current.size === 2) {
         const otherId = [...activePointersRef.current.keys()].find((id) => id !== e.pointerId)
         const otherPos = otherId !== undefined ? activePointersRef.current.get(otherId) : undefined
@@ -1338,13 +1379,20 @@ export function Editor() {
             : false
         twoFingerDownAtRef.current = otherMoved ? null : Date.now()
         threeFingerDownAtRef.current = null
+      } else if (activePointersRef.current.size === 3) {
+        twoFingerDownAtRef.current = null
+        threeFingerDownAtRef.current = Date.now()
       } else {
         twoFingerDownAtRef.current = null
-        threeFingerDownAtRef.current = activePointersRef.current.size === 3 ? Date.now() : null
+        threeFingerDownAtRef.current = null
       }
       pendingTwoFingerRef.current = { id: e.pointerId, start: pos }
       return
     }
+
+    dragOwnerIdRef.current = e.pointerId
+    dragInterruptedByTouchRef.current = false
+    multiTouchDownAtRef.current = 0
 
     if (e.altKey || e.button === 1 || tool === 'pan') {
       lastInteractionPanRef.current = { ...panRef.current }
@@ -1846,6 +1894,7 @@ export function Editor() {
         const a = pts[0]
         const b = pts[1]
         const startMid = a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : a ?? pos
+        const [ra, rb] = rotationPair(pts)
         pinchRotationUndoPushedRef.current = false
         dragRef.current = {
           kind: 'pan',
@@ -1857,9 +1906,12 @@ export function Editor() {
           imageId: null,
           handle: null,
           startPan: { ...panRef.current },
-          startAngle: a && b ? (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI : undefined,
+          startAngle: ra && rb ? angleBetween(ra, rb) : undefined,
           startRotation: pageRef.current?.rotation ?? 0,
         }
+        dragOwnerIdRef.current = e.pointerId
+        dragInterruptedByTouchRef.current = false
+        multiTouchDownAtRef.current = 0
         pinchRef.current = null
         canvas.style.cursor = 'grabbing'
       }
@@ -1916,7 +1968,8 @@ export function Editor() {
             panRef.current.x += mid.x - prev.prevMid.x
             panRef.current.y += mid.y - prev.prevMid.y
           } else {
-            drag.startAngle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+            const [ra, rb] = rotationPair(pts)
+            drag.startAngle = angleBetween(ra, rb)
             drag.startRotation = pageRef.current?.rotation ?? 0
             pinchRotationUndoPushedRef.current = false
             panRef.current = {
@@ -1924,8 +1977,13 @@ export function Editor() {
               y: drag.startPan.y + (mid.y - drag.startY),
             }
           }
-          if (drag.startAngle !== undefined && drag.startRotation !== undefined) {
-            const ang = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+          if (
+            activePointersRef.current.size >= 3 &&
+            drag.startAngle !== undefined &&
+            drag.startRotation !== undefined
+          ) {
+            const [ra, rb] = rotationPair(pts)
+            const ang = angleBetween(ra, rb)
             let delta = ang - drag.startAngle
             delta = ((delta + 540) % 360) - 180
             const pg = pageRef.current
@@ -2141,6 +2199,11 @@ export function Editor() {
     const multiTouch = activePointersRef.current.size >= 2
     activePointersRef.current.delete(e.pointerId)
     pointerDownPosRef.current.delete(e.pointerId)
+    const isOwner = dragOwnerIdRef.current === e.pointerId
+    const multiTouchTap =
+      dragInterruptedByTouchRef.current &&
+      (activePointersRef.current.size >= 1 ||
+        Date.now() - multiTouchDownAtRef.current <= TWO_FINGER_TAP_MAX_MS)
     if (drag?.kind === 'pan' && multiTouch && activePointersRef.current.size >= 1) {
       const rem = [...activePointersRef.current.values()][0]
       drag.startX = rem.x
@@ -2153,49 +2216,71 @@ export function Editor() {
       pinchRef.current = null
     }
     if (drag?.kind === 'draw') {
-      const stroke = engine.endStroke()
-      const drawPage = pageRef.current
-      if (stroke && stroke.points.length >= 2 && drawPage) {
-        pushUndo()
-        getActiveLayer(drawPage).strokes.push(stroke as Stroke)
-        drawPage.updatedAt = Date.now()
-        dirtyRef.current = true
+      if (isOwner) {
+        if (multiTouchTap) {
+          engine.endStroke()
+        } else {
+          const stroke = engine.endStroke()
+          const drawPage = pageRef.current
+          if (stroke && stroke.points.length >= 2 && drawPage) {
+            pushUndo()
+            getActiveLayer(drawPage).strokes.push(stroke as Stroke)
+            drawPage.updatedAt = Date.now()
+            dirtyRef.current = true
+          }
+        }
       }
     }
     if (drag?.kind === 'region-draw') {
-      finalizeRegion()
-    }
-    if (drag?.kind === 'erase') {
-      const session = eraseSessionRef.current
-      const pending = erasePendingRef.current
-      if (session && pending.to) {
-        eraseSegment(pending.from, pending.to, session)
-        pending.from = pending.to
-        pending.to = null
-        requestRender()
-      }
-      if (session) {
-        const changed = session.commit()
-        const pg = pageRef.current
-        if (pg && changed.length) {
-          pushUndo()
-          for (const { element, newUrl } of changed) {
-            engine.clearImageCache(element.dataUrl)
-            element.dataUrl = newUrl
-            const ov = engine.getOverrideCanvas(element.id)
-            if (ov) engine.setImageOverride(element.id, newUrl, ov)
-            engine.warmImage(element.id, newUrl)
-          }
-          pg.updatedAt = Date.now()
-          notebookRef.current!.updatedAt = Date.now()
-          dirtyRef.current = true
+      if (isOwner) {
+        if (multiTouchTap) {
+          selectionRegionRef.current = null
+          delimitedSnapshotRef.current = null
+        } else {
+          finalizeRegion()
         }
       }
-      eraseSessionRef.current = null
-      erasePendingRef.current.to = null
-      erasePendingRef.current.scheduled = false
     }
-    dragRef.current = null
+    if (drag?.kind === 'erase') {
+      if (isOwner) {
+        const session = eraseSessionRef.current
+        const pending = erasePendingRef.current
+        if (session && pending.to) {
+          eraseSegment(pending.from, pending.to, session)
+          pending.from = pending.to
+          pending.to = null
+          requestRender()
+        }
+        if (session) {
+          const changed = session.commit()
+          const pg = pageRef.current
+          if (pg && changed.length) {
+            pushUndo()
+            for (const { element, newUrl } of changed) {
+              engine.clearImageCache(element.dataUrl)
+              element.dataUrl = newUrl
+              const ov = engine.getOverrideCanvas(element.id)
+              if (ov) engine.setImageOverride(element.id, newUrl, ov)
+              engine.warmImage(element.id, newUrl)
+            }
+            pg.updatedAt = Date.now()
+            notebookRef.current!.updatedAt = Date.now()
+            dirtyRef.current = true
+          }
+        }
+        eraseSessionRef.current = null
+        erasePendingRef.current.to = null
+        erasePendingRef.current.scheduled = false
+      }
+    }
+    if (drag?.kind === 'pan') {
+      dragRef.current = null
+    } else if (isOwner) {
+      dragRef.current = null
+      dragOwnerIdRef.current = null
+      dragInterruptedByTouchRef.current = false
+      multiTouchDownAtRef.current = 0
+    }
 
     if (dirtyRef.current) {
       dirtyRef.current = false

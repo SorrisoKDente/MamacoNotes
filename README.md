@@ -29,7 +29,7 @@ This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-ass
     -   Multi-selection support for bulk actions (copy, move, delete).
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
-    -   Custom gestures, such as two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, and two-finger rotation for **Page rotation**.
+    -   Custom gestures: two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, two fingers to move/zoom, and three-finger twist for **Page rotation**.
     -   Full localization in **English** and **Portuguese (pt-BR)**.
     -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
     -   Option to hide the tool cursor for a cleaner drawing experience.

@@ -395,13 +395,22 @@ Key points:
   (previous distance/midpoint) and `pendingTwoFingerRef` (candidate finger to confirm
   gesture). The canvas performs `preventDefault` on touch/pen `pointerdown` and only uses
   explicit `setPointerCapture` for mouse (touch/pen use browser implicit capture).
+  The pointer that started a drag is tracked in `dragOwnerIdRef`; **only the owner's
+  `pointerup` commits the content drag** (draw/erase/region selection) — a non-owner
+  finger lifting no longer prematurely ends or commits the stroke. When a second finger
+  joins a content drag (`dragInterruptedByTouchRef`), the gesture is considered a
+  potential tap/palm: on the owner's `pointerup`, if the multi-touch was tap-like
+  (other fingers still down, or `multiTouchDownAtRef` within `TWO_FINGER_TAP_MAX_MS`),
+  the in-progress content is **discarded** (stroke not committed, region not finalized),
+  so a multi-finger tap never creates stray strokes/selections nor clears the
+  undo/redo stacks.
   - **Two-finger double tap = Undo**: a 2-finger "tap" is recognized when both pointers
     go up without significant displacement (`pointerDownPosRef` stores the initial
     position of each finger; if the first finger has already moved more than
     `TWO_FINGER_THRESHOLD`, the candidate is discarded to not confuse with the palm)
     and the time between the second finger going down and all going up is ≤
-    `TWO_FINGER_TAP_MAX_MS` (260ms). Two such taps with an interval ≤
-    `TWO_FINGER_DOUBLE_TAP_GAP_MS` (350ms) between the end of one and the end of the other
+    `TWO_FINGER_TAP_MAX_MS` (300ms). Two such taps with an interval ≤
+    `TWO_FINGER_DOUBLE_TAP_GAP_MS` (400ms) between the end of one and the end of the other
     trigger `useAppStore.undo()` — the equivalent of "Undo". The first tap only sets the
     timer; `lastTwoFingerTapAtRef` stores the instant of the last tap.
   - **Three-finger double tap = Redo**: mirrors the 2-finger gesture, but the candidate
@@ -409,20 +418,24 @@ Key points:
     pan/pinch starts). Two 3-finger taps within the same time windows
     (`TWO_FINGER_TAP_MAX_MS` / `TWO_FINGER_DOUBLE_TAP_GAP_MS`) trigger
     `useAppStore.redo()`. `lastThreeFingerTapAtRef` stores the instant of the last tap.
-  - **2 fingers + rotation = rotate the page**: during a 2-finger pan/pinch, the
-    rotation of the angle between the fingers (`Math.atan2` of the difference in
-    positions) is applied to `page.rotation` (degrees), following the `page-rotate`
-    gesture convention (clockwise rotation on the screen increases the angle). The
-    base angle and rotation are captured in `drag.startAngle`/`drag.startRotation`
-    when the gesture is confirmed (and recaptured when a new multi-touch phase
-    begins, avoiding jumps). `pushUndo()` is called **only once per gesture**, just
-    when the rotation starts to be applied (`pinchRotationUndoPushedRef` flag), and
-    the change is persisted via `schedulePersist()`.
+    Because multi-finger taps discard the in-progress content drag, they no longer push
+    a spurious undo entry that would clear the redo stack before `redo()` runs.
+  - **Gesture split: 2 fingers move/zoom, 3 fingers rotate**: the two-finger pan/pinch
+    applies **only** pan and zoom. Page rotation is a **three-finger** gesture: while 3
+    pointers are down, the rotation of the angle between the two farthest fingers
+    (`rotationPair`/`angleBetween` in `Editor.tsx`) is applied to `page.rotation`
+    (degrees), following the `page-rotate` convention (clockwise rotation on the screen
+    increases the angle). The base angle/rotation are captured in
+    `drag.startAngle`/`drag.startRotation` when the gesture is confirmed and recaptured
+    when a new multi-touch phase begins (a new finger joining resets `pinchRef`,
+    avoiding jumps). `pushUndo()` is called **only once per gesture**, just when the
+    rotation starts to be applied (`pinchRotationUndoPushedRef` flag), and the change
+    is persisted via `schedulePersist()`.
   - **Rotations never push empty undo**: `pushUndo()` is called **only when a real
     change is applied** to the page. Strokes are pushed on commit in `onPointerUp`
     (only if `stroke.points.length >= 2`); the eraser pushes only if `session.commit()`
     returned changed elements (both at the end of the gesture and on abort by
-    2-finger pan); and both the 2-finger rotation gesture and `page-rotate` (free
+    multi-finger pan); and both the 3-finger rotation gesture and `page-rotate` (free
     rotation selection) push on the first movement that changes the real angle
     (`|delta| > 1°`, `pinchRotationUndoPushedRef`/`pageRotateUndoPushedRef` flags).
     This avoids undo entries identical to the current page — the root cause of "2-finger
@@ -534,7 +547,7 @@ Flow and files involved:
 | Page rotation (screen) | `Toolbar.tsx` (`RotationPanel`) + `Editor.tsx` (`page-rotate`) |
 | Inline text (typing in place) | `Editor.tsx` (`InlineTextInput`, `commitInlineText`) |
 | Text formatting (font, markers, direction) | `src/utils/drawText.ts` + `Toolbar.tsx` |
-| Undo/redo | `src/store.ts` (`pushUndo`, `undo`, `redo`); on touch, two consecutive two-finger taps on the canvas equal Undo (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); two taps with 3 fingers = Redo (`useAppStore.redo()`); `pushUndo` is only called when the stroke/eraser/rotation actually changes the page |
+| Undo/redo | `src/store.ts` (`pushUndo`, `undo`, `redo`); on touch, two consecutive two-finger taps on the canvas equal Undo (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); two taps with 3 fingers = Redo (`useAppStore.redo()`); `pushUndo` is only called when the stroke/eraser/rotation actually changes the page; multi-finger taps discard the in-progress content drag (no stray stroke/undo entry) |
 | Layers: model and helpers (legacy page normalization) | `src/types.ts` (`Layer`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
 | Layers: state actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
 

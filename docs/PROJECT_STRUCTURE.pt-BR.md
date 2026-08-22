@@ -119,7 +119,7 @@ Fluxo de inicialização:
 | `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável), botões Imagem/PDF/Página/Exportar/Sincronizar/Configurações/tela cheia |
 | `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`) |
 | `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir) |
-| `Editor.tsx` | **Maior componente (~2900 linhas)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer e 2 dedos + rotação = girar a página), todos os drags |
+| `Editor.tsx` | **Maior componente (~2900 linhas)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags |
 | `Toolbar.tsx` | Barra de ferramentas lateral: caneta/marcador/borracha/texto/selecionar/mover/rotação, undo/redo, painéis de configuração por ferramenta |
 | `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline, alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas; rodapé fixo com a cor de fundo da página |
 | `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação |
@@ -263,6 +263,11 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*` e depois
     ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
     aberta (com fallback para nada selecionado quando o registro não existe ou o caderno foi
     excluído).
+  - **Restauração de sessão**: um segundo `useAppStore.subscribe` salva no `localStorage`
+    (chave `mamaco-notes.last-session`) o par `{ notebookId, pageId }` sempre que o caderno
+    ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
+    aberta (com fallback para nada selecionado quando o registro não existe ou o caderno foi
+    excluído).
 - **`useUiStore`** (`src/uiStore.ts`) — qual modal está aberto + dados do modal.
 - **`useTextStore`** (`src/textStore.ts`) — rascunho de texto, posição/rotação do draft,
   texto selecionado, modo de edição.
@@ -380,8 +385,8 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   `toScreenCoords` (aplica pan, zoom, offset da página e rotação da página).
 - **Interação**: `Editor.tsx` implementa todos os gestos via handlers de `PointerEvent`
   (`onPointerDown/Move/Up`), um `dragRef` com `kind` que identifica a operação:
-  `pan \| draw \| erase \| select-move \| select-resize \| select-rotate \| region-draw \|
-  region-move \| text-rotate \| text-resize \| page-rotate \| group-resize \| group-rotate`.
+  `pan | draw | erase | select-move | select-resize | select-rotate | region-draw |
+  region-move | text-rotate | text-resize | page-rotate | group-resize | group-rotate`.
 - **Multi-toque (celular)**: `Editor.tsx` rastreia os ponteiros ativos em
   `activePointersRef` (atualizado em `onPointerDown`/`onPointerMove`). Um segundo dedo
   não interrompe um traço imediatamente: só ativa o gesto de mover/pinça depois de se
@@ -393,13 +398,22 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   `pendingTwoFingerRef` (dedo candidato a confirmar o gesto). O canvas faz
   `preventDefault` no `pointerdown` de toque/caneta e só usa `setPointerCapture`
   explícito para mouse (toque/caneta usam captura implícita do navegador).
+  O ponteiro que iniciou um drag é rastreado em `dragOwnerIdRef`; **só o `pointerup` do
+  dono efetiva o drag de conteúdo** (desenho/borracha/seleção por região) — um dedo que
+  não é o dono, ao ser levantado, não encerra nem efetiva o traço prematuramente. Quando
+  um segundo dedo se junta a um drag de conteúdo (`dragInterruptedByTouchRef`), o gesto
+  passa a ser tratado como possível toque/palma: no `pointerup` do dono, se o multi-toque
+  foi tipo-toque (outros dedos ainda abaixados, ou `multiTouchDownAtRef` dentro de
+  `TWO_FINGER_TAP_MAX_MS`), o conteúdo em andamento é **descartado** (traço não
+  efetivado, região não finalizada), de modo que um toque de vários dedos nunca cria
+  traços/seleções espúrios nem limpa as pilhas de desfazer/refazer.
   - **Toque duplo com 2 dedos = Desfazer**: um "toque" de 2 dedos é reconhecido quando
     os dois ponteiros sobem sem deslocamento relevante (`pointerDownPosRef` guarda a
     posição inicial de cada dedo; se o primeiro dedo já se moveu mais de
     `TWO_FINGER_THRESHOLD`, o candidato é descartado para não confundir com palma da
     mão) e o tempo entre o segundo dedo descer e todos subirem é ≤
-    `TWO_FINGER_TAP_MAX_MS` (260ms). Dois desses toques com intervalo ≤
-    `TWO_FINGER_DOUBLE_TAP_GAP_MS` (350ms) entre o fim de um e o fim do outro disparam
+    `TWO_FINGER_TAP_MAX_MS` (300ms). Dois desses toques com intervalo ≤
+    `TWO_FINGER_DOUBLE_TAP_GAP_MS` (400ms) entre o fim de um e o fim do outro disparam
     `useAppStore.undo()` — o equivalente ao "Desfazer". O primeiro toque apenas arma o
     cronômetro; `lastTwoFingerTapAtRef` guarda o instante do último toque.
   - **Toque duplo com 3 dedos = Refazer**: espelha o gesto de 2 dedos, mas o candidato
@@ -407,20 +421,25 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     pan/pinça começa). Dois toques de 3 dedos nas mesmas janelas de tempo
     (`TWO_FINGER_TAP_MAX_MS` / `TWO_FINGER_DOUBLE_TAP_GAP_MS`) disparam
     `useAppStore.redo()`. `lastThreeFingerTapAtRef` guarda o instante do último toque.
-  - **2 dedos + rotação = girar a página**: durante o pan/pinça de 2 dedos, a rotação do
-    ângulo entre os dedos (`Math.atan2` da diferença de posições) é aplicada em
-    `page.rotation` (graus), mantendo a convenção do gesto `page-rotate`
-    (rotação no sentido horário na tela aumenta o ângulo). A base do ângulo e da rotação
-    são capturadas em `drag.startAngle`/`drag.startRotation` quando o gesto se confirma
-    (e recapturadas quando uma nova fase de multi-toque começa, evitando saltos).
-    `pushUndo()` é chamado **uma única vez por gesto**, apenas quando a rotação começa a
-    ser aplicada (flag `pinchRotationUndoPushedRef`), e a mudança é persistida via
-    `schedulePersist()`.
+    Como toques de vários dedos descartam o drag de conteúdo em andamento, eles não
+    empurram mais uma entrada de undo espúria que limparia a pilha de refazer antes de
+    `redo()` rodar.
+  - **Divisão de gestos: 2 dedos mover/zoom, 3 dedos rotacionar**: o pan/pinça de 2
+    dedos aplica **apenas** pan e zoom. A rotação da página é um gesto de **3 dedos**:
+    com 3 ponteiros abaixados, a rotação do ângulo entre os dois dedos mais afastados
+    (`rotationPair`/`angleBetween` em `Editor.tsx`) é aplicada em `page.rotation`
+    (graus), mantendo a convenção do `page-rotate` (rotação no sentido horário na tela
+    aumenta o ângulo). A base do ângulo e da rotação são capturadas em
+    `drag.startAngle`/`drag.startRotation` quando o gesto se confirma e recapturadas
+    quando uma nova fase de multi-toque começa (um dedo novo zerando `pinchRef`, evitando
+    saltos). `pushUndo()` é chamado **uma única vez por gesto**, apenas quando a rotação
+    começa a ser aplicada (flag `pinchRotationUndoPushedRef`), e a mudança é persistida
+    via `schedulePersist()`.
   - **Rotações nunca empurram undo vazio**: `pushUndo()` é chamado **somente quando uma
     mudança real é aplicada** à página. Traços são empurrados no commit em `onPointerUp`
     (só se `stroke.points.length >= 2`); a borracha empurra apenas se
     `session.commit()` retornou elementos alterados (tanto no fim do gesto quanto no
-    aborto por pan de 2 dedos); e tanto o gesto de rotação por 2 dedos quanto o
+    aborto por pan de vários dedos); e tanto o gesto de rotação por 3 dedos quanto o
     `page-rotate` (seleção com rotação livre) empurram no primeiro movimento que muda o
     ângulo real (`|delta| > 1°`, flags `pinchRotationUndoPushedRef`/
     `pageRotateUndoPushedRef`). Isso evita entradas de undo idênticas à página atual —
@@ -580,6 +599,7 @@ Fluxo e arquivos envolvidos:
 | Composição da tela | `src/App.tsx` |
 | Ocultar barras / painéis | Configurações (aba Geral, `Modals.tsx` `SettingsModal`, seção Aparência) → `settings.hideTopBar`, `settings.hideToolbar`, `settings.hideSidebar`, `settings.hidePageList`; render condicional em `src/App.tsx`; toggles de sidebar/preview na `TopBar.tsx` sempre visíveis (o clique reexibe o painel quando oculto pelas configurações) e **um botão flutuante por barra oculta** em `App.tsx` (`.ui-restore-btn`): barra superior → centro superior (`top-center`, para não sobrepor a barra de ferramentas lateral), ferramentas → meio da borda direita (`right-center`), cadernos/preview → meio da borda esquerda (`left-center`, com `left-center-top`/`left-center-bottom` empilhados quando os dois estão ocultos) |
 | Ocultar nº de páginas do caderno | Configurações (aba Geral, seção Aparência) → `settings.hidePageCount`; render condicional do `<span className="page-count">` em `src/components/Sidebar.tsx` |
+| Ocultar o cursor da ferramenta | Configurações (aba Geral, seção Aparência) → `settings.hideToolCursor`; usado em `Editor.tsx` para esconder o indicador visual da ferramenta sobre a página |
 | Áreas seguras do celular (status bar / notch / gestos) | `index.html` usa `viewport-fit=cover`; `src/styles.css` respeita `env(safe-area-inset-top)` na `.topbar` (altura/padding) e no botão flutuante `.ui-restore-btn.top-center`, e `env(safe-area-inset-bottom)` na `.toolbar` no modo mobile — evita que a barra superior fique coberta/inacessível em celulares com a barra de notificações oculta (edge-to-edge) |
 | Barra superior | `src/components/TopBar.tsx` |
 | Painel de camadas (lateral direita; botão "Camadas" na `TopBar` alterna `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (ações de camada) |
