@@ -1,4 +1,4 @@
-name: Build Desktop and Release
+name: Build Desktop, Android and Release
 
 on:
   push:
@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-desktop:
-    name: Build Desktop (${{ matrix.os }})
+  build:
+    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -21,6 +21,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Setup Java
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,6 +47,39 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release: true
 
+      - name: Build and Sign Android APK
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          npx cap sync android
+          cd android
+          
+          # Decodifica a chave de volta para um arquivo
+          echo $KEYSTORE_BASE64 | base64 -d > release.jks
+          
+          chmod +x gradlew
+          # Passa as credenciais diretamente para o Gradle
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/release.jks \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+
+      - name: Upload Android APK
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          for i in {1..10}; do
+            gh release view "$TAG" && break || sleep 20
+          done
+          gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
+
       - name: Update Release Notes
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -47,10 +87,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          # Busca a tag anterior para o link de comparação
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
-          
-          # Extrai a mensagem completa do commit da tag (Subject + Body)
           MESSAGE=$(git log -1 --pretty=format:"%B")
           
           echo "$MESSAGE" > release_notes.md
@@ -60,6 +97,5 @@ jobs:
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
           fi
           
-          # Pequeno delay para garantir que o release foi criado pelo passo anterior
-          sleep 15
+          sleep 60
           gh release edit "$TAG" --notes-file release_notes.md
