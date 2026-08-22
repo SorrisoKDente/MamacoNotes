@@ -190,6 +190,11 @@ android/captures/
 *.apk
 *.aab
 
+# Force include gradlew files (previously ignored by general rules)
+!android/gradlew
+!android/gradlew.bat
+!android/gradle/wrapper/gradle-wrapper.jar
+
 # Vite
 dist/
 .vite/
