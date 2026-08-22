@@ -71,6 +71,10 @@ If you find this project useful and would like to support its development financ
 - ☕ **Ko-fi**: [ko-fi.com/yabaihonyaku](https://ko-fi.com/yabaihonyaku)
 - 💸 **Pix (Brazil)**: `yabaihonyaku@gmail.com`
 
+<p align="center">
+  <img src="build-resources/YABAIPIX.png" alt="Pix QR Code" width="200"/>
+</p>
+
 ## 🤖 Developed with AI
 
 Mamaco Notes is a testament to the power of AI in modern software engineering. The entire architecture, drawing logic, synchronization algorithms, and UI components were developed through a collaborative process using **MonkeyCodeAI** and **Google Gemini**.

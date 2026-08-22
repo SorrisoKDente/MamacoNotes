@@ -71,6 +71,10 @@ Se você achar este projeto útil e quiser apoiar financeiramente o seu desenvol
 - ☕ **Ko-fi**: [ko-fi.com/yabaihonyaku](https://ko-fi.com/yabaihonyaku)
 - 💸 **Pix (Brasil)**: `yabaihonyaku@gmail.com`
 
+<p align="center">
+  <img src="build-resources/YABAIPIX.png" alt="Pix QR Code" width="200"/>
+</p>
+
 ## 🤖 Desenvolvido com IA
 
 O Mamaco Notes é um testemunho do poder da IA na engenharia de software moderna. Toda a arquitetura, lógica de desenho, algoritmos de sincronização e componentes de UI foram desenvolvidos através de um processo colaborativo com o **MonkeyCodeAI** e o **Google Gemini**.
