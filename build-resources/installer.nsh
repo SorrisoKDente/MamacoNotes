@@ -7,8 +7,8 @@
 
 Function CreateDesktopShortcut
   ; Cria o atalho apontando para o executável instalado
-  ; ${APP_EXECUTABLE_FILENAME} é uma variável automática do electron-builder
-  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  ; Usamos ${APP_FILENAME}.exe que é o padrão do electron-builder
+  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_FILENAME}.exe"
 FunctionEnd
 
 !macro customUnInstall
