@@ -1,0 +1,348 @@
+import type { CloudSettings } from '../types'
+import { t } from '../i18n'
+
+const NOTEBOOKS_DIR = 'notebooks'
+const FOLDERS_DIR = 'folders'
+
+const MIME_MAP: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  webp: 'image/webp',
+  txt: 'text/plain',
+  json: 'application/json',
+}
+
+function joinUrl(base: string, path: string): string {
+  const cleanBase = base.replace(/\/+$/, '')
+  const cleanPath = path.replace(/^\/+/, '')
+  return cleanBase + '/' + cleanPath
+}
+
+function authHeader(settings: CloudSettings): string {
+  if (settings.webdavUsername && settings.webdavPassword) {
+    return 'Basic ' + btoa(`${settings.webdavUsername}:${settings.webdavPassword}`)
+  }
+  return ''
+}
+
+const PROPFIND_BODY =
+  '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>'
+
+interface KoofrMount {
+  id: string
+  name: string
+  isPrimary?: boolean
+}
+
+interface KoofrInfo {
+  apiBase: string
+  mountId: string
+  mountName: string
+}
+
+function koofrApiBase(settings: CloudSettings): string | null {
+  let host = ''
+  try {
+    host = new URL(settings.webdavUrl).hostname
+  } catch {
+    return null
+  }
+  if (host === 'app.koofr.net' || host === 'storage.rcs-rds.ro') {
+    try {
+      return new URL(settings.webdavUrl).origin
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+const koofrInfoCache = new WeakMap<CloudSettings, KoofrInfo>()
+
+async function koofrFetch<T>(
+  apiBase: string,
+  path: string,
+  settings: CloudSettings,
+  init?: RequestInit,
+): Promise<{ status: number; data?: T }> {
+  const res = await fetch(apiBase + path, {
+    ...init,
+    headers: {
+      Authorization: authHeader(settings),
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  const data =
+    res.status === 204 ? undefined : ((await res.json().catch(() => undefined)) as T | undefined)
+  return { status: res.status, data }
+}
+
+async function koofrInfo(settings: CloudSettings): Promise<KoofrInfo> {
+  const cached = koofrInfoCache.get(settings)
+  if (cached) return cached
+  const apiBase = koofrApiBase(settings)
+  if (!apiBase) throw new Error(t('error.koofrServerNotRecognized'))
+  const { status, data } = await koofrFetch<{ mounts?: KoofrMount[] }>(
+    apiBase,
+    '/api/v2/mounts',
+    settings,
+  )
+  if (status !== 200) throw new Error(t('error.koofrListFoldersFailed', { status }))
+  const mounts = data?.mounts ?? []
+  const primary = mounts.find((m) => m.isPrimary) ?? mounts[0]
+  if (!primary) throw new Error(t('error.koofrNoRootMount'))
+  const info: KoofrInfo = { apiBase, mountId: primary.id, mountName: primary.name }
+  koofrInfoCache.set(settings, info)
+  return info
+}
+
+async function koofrFileExists(settings: CloudSettings, dirPath: string): Promise<boolean> {
+  const { apiBase, mountId } = await koofrInfo(settings)
+  const { status } = await koofrFetch(
+    apiBase,
+    `/api/v2/mounts/${encodeURIComponent(mountId)}/files/info?path=${encodeURIComponent(dirPath)}`,
+    settings,
+  )
+  return status === 200
+}
+
+async function koofrCreateFolderTree(settings: CloudSettings, dirPath: string): Promise<void> {
+  const { apiBase, mountId } = await koofrInfo(settings)
+  const segments = dirPath.split('/').filter(Boolean)
+  let parent = '/'
+  for (const segment of segments) {
+    const full = parent === '/' ? `/${segment}` : `${parent}/${segment}`
+    if (!(await koofrFileExists(settings, full))) {
+      const { status } = await koofrFetch<unknown>(
+        apiBase,
+        `/api/v2/mounts/${encodeURIComponent(mountId)}/files/folder?path=${encodeURIComponent(parent)}`,
+        settings,
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: segment }),
+        },
+      )
+      if (status !== 200 && status !== 201 && !(await koofrFileExists(settings, full))) {
+        throw new Error(t('error.koofrCreateFolderFailed', { path: full, status }))
+      }
+    }
+    parent = full
+  }
+}
+
+async function effectiveBaseUrl(settings: CloudSettings): Promise<string> {
+  const apiBase = koofrApiBase(settings)
+  if (!apiBase) return settings.webdavUrl
+  const info = await koofrInfo(settings)
+  return `${info.apiBase}/dav/${encodeURIComponent(info.mountName)}`
+}
+
+async function directoryExists(settings: CloudSettings, dirPath: string): Promise<boolean> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, dirPath)
+  try {
+    const res = await fetch(url, {
+      method: 'PROPFIND',
+      headers: {
+        Authorization: authHeader(settings),
+        Depth: '0',
+        'Content-Type': 'application/xml',
+      },
+      body: PROPFIND_BODY,
+    })
+    if (res.ok || res.status === 207) return true
+    const g = await fetch(url, { headers: { Authorization: authHeader(settings) } })
+    return g.ok || g.status === 207
+  } catch {
+    return false
+  }
+}
+
+export async function ensureDirectory(
+  settings: CloudSettings,
+  dirPath: string,
+): Promise<void> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, dirPath)
+  const res = await fetch(url, {
+    method: 'MKCOL',
+    headers: { Authorization: authHeader(settings) },
+  })
+  if (res.status === 201) return
+  if (res.status === 405 || res.ok) {
+    if (await directoryExists(settings, dirPath)) return
+    const trailing = await fetch(`${url}/`, {
+      method: 'MKCOL',
+      headers: { Authorization: authHeader(settings) },
+    })
+    if (trailing.status === 201 || (await directoryExists(settings, dirPath))) return
+    const apiBase = koofrApiBase(settings)
+    if (apiBase) {
+      await koofrCreateFolderTree(settings, dirPath)
+      if (await directoryExists(settings, dirPath)) return
+      const info = await koofrInfo(settings).catch(() => null)
+      throw new Error(
+        t('error.koofrFolderNotVisible', {
+          dirPath,
+          davUrl: `${koofrApiBase(settings)}/dav`,
+          mountName: info?.mountName ?? '',
+        }),
+      )
+    }
+    throw new Error(
+      t('error.remoteFolderCreateFailed', { dirPath, basePath: settings.webdavPath }),
+    )
+  }
+  throw new Error(t('error.createDirFailed', { dirPath, status: res.status }))
+}
+
+export async function ensureRemoteStructure(
+  settings: CloudSettings,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    await ensureDirectory(settings, settings.webdavPath)
+    await ensureDirectory(settings, `${settings.webdavPath}/${NOTEBOOKS_DIR}`)
+    await ensureDirectory(settings, `${settings.webdavPath}/${FOLDERS_DIR}`)
+    return { ok: true, message: t('error.foldersCreated') }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export async function listDirectory(
+  settings: CloudSettings,
+  dirPath: string,
+): Promise<string[]> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, dirPath)
+  const res = await fetch(url, {
+    method: 'PROPFIND',
+    headers: {
+      Authorization: authHeader(settings),
+      Depth: '1',
+      'Content-Type': 'application/xml',
+    },
+    body: PROPFIND_BODY,
+  })
+  if (!res.ok) return []
+  const text = await res.text()
+  const names: string[] = []
+  const re = /<d:displayname[^>]*>([^<]*)<\/d:displayname>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    names.push(m[1])
+  }
+  return names.filter((n) => n)
+}
+
+export async function uploadFile(
+  settings: CloudSettings,
+  filePath: string,
+  bytes: Uint8Array | Blob,
+  contentType: string,
+): Promise<void> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, filePath)
+  const body = bytes instanceof Blob ? bytes : new Uint8Array(bytes)
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: authHeader(settings),
+      'Content-Type': contentType,
+    },
+    body,
+  })
+  if (!res.ok && res.status !== 201 && res.status !== 204) {
+    if (res.status === 404) {
+      throw new Error(
+        t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
+      )
+    }
+    throw new Error(t('error.uploadFailed', { filePath, status: res.status }))
+  }
+}
+
+export async function downloadFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<string> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, filePath)
+  const res = await fetch(url, {
+    headers: { Authorization: authHeader(settings) },
+  })
+  if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+  return res.text()
+}
+
+export async function deleteRemoteFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<void> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, filePath)
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: authHeader(settings) },
+  })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(t('error.deleteFailed', { filePath, status: res.status }))
+  }
+}
+
+export async function testWebdavConnection(
+  settings: CloudSettings,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const base = await effectiveBaseUrl(settings)
+    const res = await fetch(joinUrl(base, ''), {
+      method: 'PROPFIND',
+      headers: {
+        Authorization: authHeader(settings),
+        Depth: '0',
+        'Content-Type': 'application/xml',
+      },
+      body: PROPFIND_BODY,
+    })
+    if (!res.ok && res.status !== 207) {
+      return {
+        ok: false,
+        message: t('error.webdavAccessFailed', { status: res.status }),
+      }
+    }
+    const basePathExists = await directoryExists(settings, settings.webdavPath)
+    return {
+      ok: true,
+      message: basePathExists
+        ? t('error.connectionOkBaseExists')
+        : t('error.connectionOkBaseMissing', { path: settings.webdavPath }),
+    }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export interface Transport {
+  ensureDirectory: (dirPath: string) => Promise<void>
+  listDirectory: (dirPath: string) => Promise<string[]>
+  uploadFile: (filePath: string, bytes: Uint8Array | Blob, contentType: string) => Promise<void>
+  downloadFile: (filePath: string) => Promise<string>
+  deleteRemoteFile: (filePath: string) => Promise<void>
+}
+
+export function makeTransport(settings: CloudSettings): Transport {
+  return {
+    ensureDirectory: (dirPath) => ensureDirectory(settings, dirPath),
+    listDirectory: (dirPath) => listDirectory(settings, dirPath),
+    uploadFile: (filePath, bytes, contentType) =>
+      uploadFile(settings, filePath, bytes, contentType),
+    downloadFile: (filePath) => downloadFile(settings, filePath),
+    deleteRemoteFile: (filePath) => deleteRemoteFile(settings, filePath),
+  }
+}
+
+export { MIME_MAP }
