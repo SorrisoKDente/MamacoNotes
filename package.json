@@ -4,6 +4,7 @@
   "version": "1.0.67",
   "author": "Mamaco Team <yabaihonyaku@gmail.com>",
   "description": "Mamaco Notes - app de anotações digitais com suporte a caneta para Windows, Linux e Android",
+  "homepage": "https://github.com/SorrisoKDente/MamacoNotes",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -80,8 +81,7 @@
       ],
       "icon": "build-resources/icon.png",
       "category": "Office",
-      "maintainer": "Mamaco Team <yabaihonyaku@gmail.com>",
-      "desktopName": "Mamaco Notes"
+      "maintainer": "Mamaco Team <yabaihonyaku@gmail.com>"
     }
   },
   "overrides": {
