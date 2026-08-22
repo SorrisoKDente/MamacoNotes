@@ -70,4 +70,5 @@ O Mamaco Notes é um testemunho do poder da IA na engenharia de software moderna
 
 ---
 
-*Feito com 🍌 pela Equipe Mamaco.*
+*Feito com 🍌 pela Equipe Mamaco.*  
+*P.S.: Se você também "veio ver o macaco", sinta-se em casa!*

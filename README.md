@@ -70,4 +70,5 @@ Mamaco Notes is a testament to the power of AI in modern software engineering. T
 
 ---
 
-*Made with 🍌 by the Mamaco Team.*
+*Made with 🍌 by the Mamaco Team.*  
+*P.S.: If you also came to see the monkey, you're in the right place!*
