@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,3 +39,27 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release: true
+
+      - name: Update Release Notes
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          # Busca a tag anterior para o link de comparação
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
+          
+          # Extrai a mensagem completa do commit da tag (Subject + Body)
+          MESSAGE=$(git log -1 --pretty=format:"%B")
+          
+          echo "$MESSAGE" > release_notes.md
+          echo "" >> release_notes.md
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
+          fi
+          
+          # Pequeno delay para garantir que o release foi criado pelo passo anterior
+          sleep 15
+          gh release edit "$TAG" --notes-file release_notes.md
