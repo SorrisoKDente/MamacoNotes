@@ -6,6 +6,8 @@ O **Mamaco Notes** é um aplicativo de anotações digitais projetado para escri
 
 Este projeto foi desenvolvido quase 100% usando o **MonkeyCodeAI**, aproveitando o desenvolvimento assistido por IA para criar uma aplicação robusta e rica em recursos.
 
+Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprendizado. Como um desenvolvedor explorando o mundo do desenvolvimento multiplataforma (Windows, Linux e Android) pela primeira vez, estou usando este projeto como uma forma prática de dominar novas ferramentas, arquiteturas e os desafios de criar uma experiência fluida em diferentes dispositivos.
+
 ## 🚀 Principais Funcionalidades
 
 -   **Suporte Multiplataforma**: Disponível como app Desktop (Electron para Windows/Linux), app Mobile (Capacitor para Android) e PWA (Progressive Web App).
@@ -60,7 +62,9 @@ Este projeto é **código aberto** e livre para usar à vontade. Embora tenha co
 
 ## 💡 Sugestões e Suporte
 
-Estou sempre aberto a sugestões e feedback! Se você tiver ideias de melhorias ou quiser reportar um problema, por favor, me avise.
+Estou sempre aberto a sugestões e feedback! Por ser um projeto de aprendizado, existem muitas funcionalidades que ainda não foram testadas extensivamente e podem não funcionar 100% como esperado. O seu feedback ao testar o app é extremamente importante para me ajudar a identificar e corrigir problemas.
+
+Se você tiver ideias de melhorias ou quiser reportar um erro, por favor, me avise.
 
 Se você achar este projeto útil e quiser apoiar financeiramente o seu desenvolvimento, você pode doar através de:
 - ☕ **Ko-fi**: [ko-fi.com/yabaihonyaku](https://ko-fi.com/yabaihonyaku)

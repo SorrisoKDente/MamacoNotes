@@ -6,6 +6,8 @@
 
 This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-assisted development to create a robust and feature-rich application.
 
+Beyond the technology, **Mamaco Notes** represents a personal learning journey. As a developer exploring the world of multi-platform development (Windows, Linux, and Android) for the first time, I am using this project as a hands-on way to master new tools, architectures, and the challenges of creating a seamless experience across different devices.
+
 ## 🚀 Key Features
 
 -   **Multi-Platform Support**: Available as a Desktop app (Electron for Windows/Linux), a Mobile app (Capacitor for Android), and a PWA (Progressive Web App).
@@ -60,7 +62,9 @@ This project is **open-source** and free to use at your convenience. Although it
 
 ## 💡 Suggestions & Support
 
-I am always open to suggestions and feedback! If you have ideas for improvements or want to report an issue, please let me know.
+I am always open to suggestions and feedback! Since this is a learning project, there are many features that have not been extensively tested yet, and some may not work 100% as expected. Your feedback after testing the app is extremely important to help me identify and fix issues.
+
+If you have ideas for improvements or want to report a bug, please let me know.
 
 If you find this project useful and would like to support its development financially, you can donate through:
 - ☕ **Ko-fi**: [ko-fi.com/yabaihonyaku](https://ko-fi.com/yabaihonyaku)
