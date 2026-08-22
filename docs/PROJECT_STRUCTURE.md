@@ -93,7 +93,7 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including interactive NSIS installer) |
 | `vite.config.ts` | React/PWA plugins, `base: './'`, dev server (port 5173, `allowedHosts` for preview) |
 | `tsconfig.json` | TypeScript config (strict) |
 | `index.html` | Base HTML; loads `src/main.tsx` |

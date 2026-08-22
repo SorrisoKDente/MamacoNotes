@@ -93,7 +93,7 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder (incluindo instalador NSIS interativo) |
 | `vite.config.ts` | Plugins React/PWA, `base: './'`, dev server (porta 5173, `allowedHosts` para preview) |
 | `tsconfig.json` | Config TypeScript (strict) |
 | `index.html` | HTML base; carrega `src/main.tsx` |
