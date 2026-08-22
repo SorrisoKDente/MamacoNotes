@@ -32,6 +32,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
 -   **UI & UX Inteligente**:
     -   Suporte a multi-toque para tablets e celulares (zoom de pinça, pan).
     -   Gestos customizados: toque duplo com 2 dedos para **Desfazer**, toque duplo com 3 dedos para **Refazer**, 2 dedos para mover/zoom e giro com 3 dedos para **Girar a página**.
+    -   Sistema de Atualização: verificação automática ao iniciar em todas as plataformas, com prévia das notas da versão.
     -   Localização completa em **Português (pt-BR)** e **Inglês**.
     -   Suporte a modo Escuro/Claro e visibilidade customizável de barras (com botões flutuantes para restauração rápida).
     -   Opção para ocultar o cursor da ferramenta para uma experiência de desenho mais limpa.
@@ -72,7 +73,7 @@ Se você achar este projeto útil e quiser apoiar financeiramente o seu desenvol
 
 ## 🤖 Desenvolvido com IA
 
-O Mamaco Notes é um testemunho do poder da IA na engenharia de software moderna. Toda a arquitetura, lógica de desenho, algoritmos de sincronização e componentes de UI foram desenvolvidos através de um processo colaborativo com o **MonkeyCodeAI**.
+O Mamaco Notes é um testemunho do poder da IA na engenharia de software moderna. Toda a arquitetura, lógica de desenho, algoritmos de sincronização e componentes de UI foram desenvolvidos através de um processo colaborativo com o **MonkeyCodeAI** e o **Google Gemini**.
 
 ---
 

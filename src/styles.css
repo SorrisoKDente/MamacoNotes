@@ -2536,3 +2536,26 @@ body {
     }
   }
 }
+
+.update-notes {
+  margin-top: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.update-notes h3 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+}
+
+.update-notes-content {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.update-notes-content p {
+  margin: 4px 0;
+}

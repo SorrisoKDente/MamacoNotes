@@ -10,7 +10,7 @@ import type {
   SyncConflictItem,
   TemplateId,
 } from '../types'
-import { makePage, newId, getActiveLayer } from '../types'
+import { makePage, newId, getActiveLayer, APP_VERSION } from '../types'
 import { DEFAULT_SHORTCUTS } from '../types'
 import { renderPdfPages } from '../utils/pdf'
 import type { RenderedPdfPage } from '../utils/pdf'
@@ -22,6 +22,7 @@ import { pickSaveDirectory } from '../utils/localSave'
 import { exportBackup, importBackup } from '../utils/backup'
 import { useI18n } from '../i18n'
 import { SUPPORTED_LANGUAGES } from '../i18n/languages'
+import { checkForUpdates } from '../utils/updateCheck'
 
 function templateOptions(t: (key: string, params?: Record<string, string | number>) => string): { id: TemplateId; label: string; hint: string }[] {
   return [
@@ -261,6 +262,7 @@ export function ModalsHost() {
         {openModal === 'syncConflict' && <SyncConflictModal />}
         {openModal === 'prompt' && <PromptModal />}
         {openModal === 'confirmDelete' && <ConfirmDeleteModal />}
+        {openModal === 'update' && <UpdateModal />}
       </ModalShell>
       <span className="modal-data-keep" data-json={JSON.stringify(modalData)} />
     </div>
@@ -1283,6 +1285,37 @@ function SettingsModal() {
               </button>
             </div>
           </div>
+          <div className="settings-section">
+            <div className="settings-section-title">{t('modal.sectionVersion')}</div>
+            <div className="settings-reset">
+              <div className="panel-label">{t('modal.currentVersion', { version: APP_VERSION })}</div>
+              <p className="modal-hint">
+                {backupMsg || t('modal.upToDate')}
+              </p>
+              <button
+                className="btn"
+                disabled={backupBusy}
+                onClick={async () => {
+                  setBackupBusy(true)
+                  setBackupMsg(t('modal.checkingUpdates'))
+                  const res = await checkForUpdates()
+                  setBackupBusy(false)
+                  if (!res) {
+                    setBackupMsg(t('modal.noUpdateFound'))
+                    return
+                  }
+                  if (res.available) {
+                    setBackupMsg(t('modal.updateFound', { version: res.latestVersion }))
+                    useUiStore.getState().open('update', { info: res })
+                  } else {
+                    setBackupMsg(t('modal.upToDate'))
+                  }
+                }}
+              >
+                {backupBusy ? t('modal.checkingUpdates') : t('modal.checkForUpdates')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1676,6 +1709,95 @@ function safeName(name: string): string {
 
 function formatShortcut(s: string): string {
   return s.replace(/\+/g, '+')
+}
+
+function UpdateModal() {
+  const { t } = useI18n()
+  const close = useUiStore((s) => s.close)
+  const modalData = useUiStore((s) => s.modalData)
+  const setSettings = useAppStore((s) => s.setSettings)
+  const [downloading, setDownloading] = useState(false)
+  const [downloaded, setDownloaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const info = modalData.info as { latestVersion: string; releaseNotes: string; url: string }
+  const isDesktop = !!window.inkfolioDesktop
+
+  useEffect(() => {
+    if (!isDesktop || !window.inkfolioDesktop) return
+    const desktop = window.inkfolioDesktop
+    const unA = desktop.onUpdateAvailable(() => setDownloading(true))
+    const unD = desktop.onUpdateDownloaded(() => {
+      setDownloading(false)
+      setDownloaded(true)
+    })
+    const unE = desktop.onUpdateError((msg: string) => {
+      setDownloading(false)
+      setError(msg)
+    })
+    return () => {
+      unA()
+      unD()
+      unE()
+    }
+  }, [isDesktop])
+
+  function doUpdate() {
+    if (isDesktop && window.inkfolioDesktop) {
+      if (downloaded) {
+        window.inkfolioDesktop.installUpdate()
+      } else {
+        setDownloading(true)
+        void window.inkfolioDesktop.downloadUpdate()
+      }
+    } else {
+      window.open(info.url, '_blank')
+      close()
+    }
+  }
+
+  function ignore() {
+    void setSettings({ ignoreVersion: info.latestVersion })
+    close()
+  }
+
+  return (
+    <>
+      <h2>{t('modal.updateAvailable')}</h2>
+      <p className="modal-hint">
+        {t('modal.updateAvailableDesc', { version: info.latestVersion })}
+      </p>
+
+      {info.releaseNotes && (
+        <div className="update-notes">
+          <h3>{t('modal.updateNotes')}</h3>
+          <div className="update-notes-content">
+            {info.releaseNotes.split('\n').map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && <div className="modal-result error">{error}</div>}
+
+      <div className="modal-actions">
+        <button className="btn primary" onClick={doUpdate} disabled={downloading}>
+          {downloading
+            ? t('modal.processing')
+            : downloaded
+              ? t('modal.apply')
+              : t('modal.downloadUpdate')}
+        </button>
+        <button className="btn" onClick={close} disabled={downloading}>
+          {t('modal.later')}
+        </button>
+        <button className="btn" onClick={ignore} disabled={downloading}>
+          {t('modal.dontShowAgain')}
+        </button>
+      </div>
+    </>
+  )
 }
 
 function EyeIcon() {

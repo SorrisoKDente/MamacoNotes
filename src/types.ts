@@ -1,5 +1,7 @@
 export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
+export const APP_VERSION = '1.0.71'
+
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
 export interface Rect {
@@ -156,6 +158,7 @@ export interface AppSettings {
   lastTextAlign: TextAlign
   lastTextMarker: TextMarker
   lastTextDirection: TextDirection
+  ignoreVersion: string | null
   shortcuts: ShortcutMap
   cloud: CloudSettings
 }
@@ -329,6 +332,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastTextAlign: 'left',
   lastTextMarker: 'none',
   lastTextDirection: 'horizontal',
+  ignoreVersion: null,
   shortcuts: { ...DEFAULT_SHORTCUTS },
   cloud: {
     enabled: false,

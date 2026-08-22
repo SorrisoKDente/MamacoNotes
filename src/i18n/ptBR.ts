@@ -402,6 +402,21 @@ export const ptBRMessages: Record<string, string> = {
   'modal.deleteAlsoCloud': 'Também da nuvem',
   'modal.deleteAlsoCloudHint': 'Remove da nuvem e sincroniza agora para todos os dispositivos.',
 
+  // ===== Atualização de Software =====
+  'modal.updateAvailable': 'Atualização disponível',
+  'modal.updateAvailableDesc': 'Uma nova versão do Mamaco Notes está disponível: **v{{version}}**',
+  'modal.downloadUpdate': 'Baixar e atualizar',
+  'modal.later': 'Mais tarde',
+  'modal.dontShowAgain': 'Não mostrar para esta versão',
+  'modal.updateNotes': 'Notas da versão',
+  'modal.sectionVersion': 'Sobre e Atualizações',
+  'modal.currentVersion': 'Versão atual: v{{version}}',
+  'modal.checkForUpdates': 'Verificar atualizações',
+  'modal.checkingUpdates': 'Verificando...',
+  'modal.upToDate': 'O app está atualizado.',
+  'modal.noUpdateFound': 'Nenhuma atualização encontrada.',
+  'modal.updateFound': 'Nova versão encontrada: v{{version}}',
+
   // ===== Atalhos (shortcuts.ts) =====
   'shortcut.pen': 'Caneta',
   'shortcut.eraser': 'Borracha',

@@ -402,6 +402,21 @@ export const enMessages: Record<string, string> = {
   'modal.deleteAlsoCloud': 'Also from the cloud',
   'modal.deleteAlsoCloudHint': 'Removes from the cloud and syncs now to all devices.',
 
+  // ===== Software Update =====
+  'modal.updateAvailable': 'Update available',
+  'modal.updateAvailableDesc': 'A new version of Mamaco Notes is available: **v{{version}}**',
+  'modal.downloadUpdate': 'Download and update',
+  'modal.later': 'Later',
+  'modal.dontShowAgain': 'Don\'t show for this version',
+  'modal.updateNotes': 'Release notes',
+  'modal.sectionVersion': 'About and Updates',
+  'modal.currentVersion': 'Current version: v{{version}}',
+  'modal.checkForUpdates': 'Check for updates',
+  'modal.checkingUpdates': 'Checking...',
+  'modal.upToDate': 'The app is up to date.',
+  'modal.noUpdateFound': 'No update found.',
+  'modal.updateFound': 'New version found: v{{version}}',
+
   // ===== Shortcuts (shortcuts.ts) =====
   'shortcut.pen': 'Pen',
   'shortcut.eraser': 'Eraser',

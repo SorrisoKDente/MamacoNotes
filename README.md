@@ -32,6 +32,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
     -   Custom gestures: two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, two fingers to move/zoom, and three-finger twist for **Page rotation**.
+    -   Software Update system: automatic check on startup for all platforms with release notes preview.
     -   Full localization in **English** and **Portuguese (pt-BR)**.
     -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
     -   Option to hide the tool cursor for a cleaner drawing experience.
@@ -72,7 +73,7 @@ If you find this project useful and would like to support its development financ
 
 ## 🤖 Developed with AI
 
-Mamaco Notes is a testament to the power of AI in modern software engineering. The entire architecture, drawing logic, synchronization algorithms, and UI components were developed through a collaborative process with **MonkeyCodeAI**.
+Mamaco Notes is a testament to the power of AI in modern software engineering. The entire architecture, drawing logic, synchronization algorithms, and UI components were developed through a collaborative process using **MonkeyCodeAI** and **Google Gemini**.
 
 ---
 

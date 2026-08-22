@@ -11,6 +11,7 @@ import { ModalsHost } from './components/Modals'
 import { initGlobalShortcuts } from './hooks/useShortcuts'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useI18n } from './i18n'
+import { checkForUpdates } from './utils/updateCheck'
 
 export default function App() {
   const { t } = useI18n()
@@ -39,6 +40,13 @@ export default function App() {
       if (cloud.enabled && cloud.autoSync && cloud.webdavUrl) {
         void s.syncNow()
       }
+
+      // Check for updates
+      void checkForUpdates().then((res) => {
+        if (res && res.available && res.latestVersion !== s.settings.ignoreVersion) {
+          useUiStore.getState().open('update', { info: res })
+        }
+      })
     })
     const cleanup = initGlobalShortcuts()
     const onEsc = (e: KeyboardEvent) => {

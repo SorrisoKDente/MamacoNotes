@@ -1,6 +1,10 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { autoUpdater } = require('electron-updater')
+
+autoUpdater.autoDownload = false
+autoUpdater.autoInstallOnAppQuit = true
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -189,6 +193,39 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+
+  // --- Auto-Updater Logic ---
+  autoUpdater.on('update-available', (info) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.webContents.send('update-available', info)
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.webContents.send('update-downloaded', info)
+  })
+
+  autoUpdater.on('error', (err) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.webContents.send('update-error', err?.message || 'Update error')
+  })
+
+  ipcMain.handle('check-for-updates', async () => {
+    try {
+      return await autoUpdater.checkForUpdates()
+    } catch (err) {
+      console.error('Failed to check for updates:', err)
+      return null
+    }
+  })
+
+  ipcMain.handle('download-update', async () => {
+    return await autoUpdater.downloadUpdate()
+  })
+
+  ipcMain.on('install-update', () => {
+    autoUpdater.quitAndInstall()
   })
 })
 

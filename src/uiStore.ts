@@ -18,6 +18,7 @@ export type ModalName =
   | 'syncConflict'
   | 'prompt'
   | 'confirmDelete'
+  | 'update'
 
 interface UiState {
   openModal: ModalName | null

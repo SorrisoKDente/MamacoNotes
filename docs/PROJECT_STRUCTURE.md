@@ -201,7 +201,7 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF used as page background (resides **at page level**, below all layers; not a `Layer`).
-- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`).
+- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — sync data.
 
 > Whenever you need to change the format of persisted data, start with `src/types.ts`
@@ -606,6 +606,7 @@ Flow and files involved:
 | Resize notebook bar | `src/components/Sidebar.tsx` (`.sidebar-resizer` handle on right edge, drag to increase/decrease; width saved in `settings.sidebarWidth` via `setSettings` at end of drag; limit 160–min(520, 50% of window); hidden on touch/`pointer: coarse`) |
 | Page preview (fixed thumbnail size, multiple selection with CTRL/SHIFT and selection bar) | `src/components/PageList.tsx` + `src/renderer/thumbnail.ts` (`.page-thumb-wrap` with `flex-shrink: 0` so it doesn't shrink with many pages) |
 | Modals (all) | `src/components/Modals.tsx` + `src/uiStore.ts`; close with `Esc`/back button (`ink:esc` event → `ModalsHost` calls `close()`; for `prompt`/`confirmDelete`, resolves the resolver with `null`) |
+| Software Updates | `src/utils/updateCheck.ts` (GitHub API check) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); automatically checks on startup (`App.tsx`) and allows manual check in Settings |
 | Translation (i18n, dictionaries, language switching) | `src/i18n/` (`languages.ts`, `ptBR.ts`, `en.ts`, `index.ts`) + `settings.language` |
 | CSS / Styles | `src/styles.css` |
 | Mobile detection | `src/hooks/useIsMobile.ts` |

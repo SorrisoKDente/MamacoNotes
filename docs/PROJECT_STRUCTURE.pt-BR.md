@@ -199,7 +199,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF usado como fundo da página (fica **no nível da página**, abaixo de todas as camadas; não é uma `Layer`).
-- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
+- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, ignorar uma versão específica de atualização via `ignoreVersion`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — dados do sync.
 
 > Sempre que precisar alterar o formato de um dado persistido, comece por `src/types.ts`
@@ -609,6 +609,7 @@ Fluxo e arquivos envolvidos:
 | Redimensionar a barra de cadernos | `src/components/Sidebar.tsx` (handle `.sidebar-resizer` na borda direita, arraste para aumentar/diminuir; largura salva em `settings.sidebarWidth` via `setSettings` no fim do arrasto; limite 160–min(520, 50% da janela); oculto em touch/`pointer: coarse`) |
 | Preview de páginas (tamanho fixo das miniaturas, seleção múltipla com CTRL/SHIFT e barra de seleção) | `src/components/PageList.tsx` + `src/renderer/thumbnail.ts` (`.page-thumb-wrap` com `flex-shrink: 0` para não encolher com muitas páginas) |
 | Modais (todos) | `src/components/Modals.tsx` + `src/uiStore.ts`; fecham com `Esc`/botão de voltar (evento `ink:esc` → `ModalsHost` chama `close()`; para `prompt`/`confirmDelete` resolve o resolver com `null`) |
+| Atualizações de software | `src/utils/updateCheck.ts` (checagem via API do GitHub) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); verifica automaticamente ao iniciar (`App.tsx`) e permite busca manual nas Configurações |
 | Tradução (i18n, dicionários, troca de idioma) | `src/i18n/` (`languages.ts`, `ptBR.ts`, `en.ts`, `index.ts`) + `settings.language` |
 | CSS / estilos | `src/styles.css` |
 | Detecção mobile | `src/hooks/useIsMobile.ts` |
