@@ -195,6 +195,9 @@ android/captures/
 !android/gradlew.bat
 !android/gradle/wrapper/gradle-wrapper.jar
 
+# Ignore Gradle Daemon JVM properties (causes CI conflicts)
+android/gradle/gradle-daemon-jvm.properties
+
 # Vite
 dist/
 .vite/
