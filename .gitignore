@@ -178,11 +178,17 @@
 **/release/
 
 # Capacitor / Android
-/android/
+# /android/  <-- Removido para permitir o build no CI (GitHub Actions)
 android/.gradle/
 android/local.properties
 android/app/build/
 android/build/
+android/.idea/
+android/*.iml
+android/captures/
+**/build/
+*.apk
+*.aab
 
 # Vite
 dist/
