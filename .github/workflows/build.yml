@@ -58,12 +58,8 @@ jobs:
         run: |
           npx cap sync android
           cd android
-          
-          # Decodifica a chave de volta para um arquivo
           echo $KEYSTORE_BASE64 | base64 -d > release.jks
-          
           chmod +x gradlew
-          # Passa as credenciais diretamente para o Gradle
           ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/release.jks \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
@@ -76,8 +72,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          for i in {1..10}; do
-            gh release view "$TAG" && break || sleep 20
+          echo "Aguardando o release $TAG ser criado..."
+          for i in {1..20}; do
+            gh release view "$TAG" && break || sleep 30
           done
           gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
 
@@ -89,14 +86,25 @@ jobs:
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
-          MESSAGE=$(git log -1 --pretty=format:"%B")
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            MESSAGE=$(git log "$PREVIOUS_TAG..$TAG" --grep="^release:" -1 --pretty=format:"%B")
+          else
+            MESSAGE=$(git log "$TAG" --grep="^release:" -1 --pretty=format:"%B")
+          fi
+          
+          if [ -z "$MESSAGE" ]; then
+            MESSAGE=$(git log -1 --pretty=format:"%B")
+          fi
           
           echo "$MESSAGE" > release_notes.md
           echo "" >> release_notes.md
-          
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
           fi
           
-          sleep 60
+          echo "Aguardando o release $TAG estar disponível para edição..."
+          for i in {1..20}; do
+            gh release view "$TAG" && break || sleep 30
+          done
           gh release edit "$TAG" --notes-file release_notes.md
