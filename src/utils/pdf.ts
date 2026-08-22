@@ -13,7 +13,7 @@ export async function renderPdfPages(file: File): Promise<RenderedPdfPage[]> {
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
   const pages: RenderedPdfPage[] = []
-  const scale = 1.5
+  const scale = 3.0
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
     const viewport = page.getViewport({ scale })

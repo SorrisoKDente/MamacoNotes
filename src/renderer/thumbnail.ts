@@ -72,7 +72,17 @@ function loadPdfImage(
       const s = Math.min((page.width * scale) / img.width, (page.height * scale) / img.height)
       const w = img.width * s
       const h = img.height * s
-      ctx.drawImage(img, (page.width * scale - w) / 2, (page.height * scale - h) / 2, w, h)
+      ctx.save()
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(
+        img,
+        Math.floor((page.width * scale - w) / 2),
+        Math.floor((page.height * scale - h) / 2),
+        Math.floor(w),
+        Math.floor(h),
+      )
+      ctx.restore()
       resolve()
     }
     img.onerror = () => resolve()
@@ -97,17 +107,19 @@ function loadImagesSequentially(
       const img = new Image()
       img.onload = () => {
         ctx.save()
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
         ctx.translate(
-          (imgEl.x + imgEl.width / 2) * scale,
-          (imgEl.y + imgEl.height / 2) * scale,
+          Math.floor((imgEl.x + imgEl.width / 2) * scale),
+          Math.floor((imgEl.y + imgEl.height / 2) * scale),
         )
         ctx.rotate((imgEl.rotation * Math.PI) / 180)
         ctx.drawImage(
           img,
-          (-imgEl.width / 2) * scale,
-          (-imgEl.height / 2) * scale,
-          imgEl.width * scale,
-          imgEl.height * scale,
+          Math.floor((-imgEl.width / 2) * scale),
+          Math.floor((-imgEl.height / 2) * scale),
+          Math.floor(imgEl.width * scale),
+          Math.floor(imgEl.height * scale),
         )
         ctx.restore()
         next()

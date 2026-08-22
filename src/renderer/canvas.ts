@@ -446,7 +446,16 @@ export class PageCanvas {
     const w = img.width * scale
     const h = img.height * scale
     ctx.save()
-    ctx.drawImage(img, (page.width - w) / 2, (page.height - h) / 2, w, h)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    // Arredondamos para evitar borrões causados por sub-pixel rendering
+    ctx.drawImage(
+      img,
+      Math.floor((page.width - w) / 2),
+      Math.floor((page.height - h) / 2),
+      Math.floor(w),
+      Math.floor(h),
+    )
     ctx.restore()
   }
 
@@ -454,9 +463,17 @@ export class PageCanvas {
     const ov = this.imageOverrides.get(imgEl.id)
     if (ov && ov.dataUrl === imgEl.dataUrl) {
       ctx.save()
-      ctx.translate(imgEl.x + imgEl.width / 2, imgEl.y + imgEl.height / 2)
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.translate(Math.floor(imgEl.x + imgEl.width / 2), Math.floor(imgEl.y + imgEl.height / 2))
       ctx.rotate((imgEl.rotation * Math.PI) / 180)
-      ctx.drawImage(ov.canvas, -imgEl.width / 2, -imgEl.height / 2, imgEl.width, imgEl.height)
+      ctx.drawImage(
+        ov.canvas,
+        Math.floor(-imgEl.width / 2),
+        Math.floor(-imgEl.height / 2),
+        Math.floor(imgEl.width),
+        Math.floor(imgEl.height),
+      )
       ctx.restore()
       return
     }
@@ -464,9 +481,17 @@ export class PageCanvas {
     const img = this.getImage(imgEl.dataUrl)
     if (!img) return
     ctx.save()
-    ctx.translate(imgEl.x + imgEl.width / 2, imgEl.y + imgEl.height / 2)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.translate(Math.floor(imgEl.x + imgEl.width / 2), Math.floor(imgEl.y + imgEl.height / 2))
     ctx.rotate((imgEl.rotation * Math.PI) / 180)
-    ctx.drawImage(img, -imgEl.width / 2, -imgEl.height / 2, imgEl.width, imgEl.height)
+    ctx.drawImage(
+      img,
+      Math.floor(-imgEl.width / 2),
+      Math.floor(-imgEl.height / 2),
+      Math.floor(imgEl.width),
+      Math.floor(imgEl.height),
+    )
     ctx.restore()
   }
 

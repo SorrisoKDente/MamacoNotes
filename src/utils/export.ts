@@ -37,7 +37,17 @@ function loadAndDrawPdf(ctx: CanvasRenderingContext2D, page: Page, scale: number
       const s = Math.min((page.width * scale) / img.width, (page.height * scale) / img.height)
       const w = img.width * s
       const h = img.height * s
-      ctx.drawImage(img, (page.width * scale - w) / 2, (page.height * scale - h) / 2, w, h)
+      ctx.save()
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(
+        img,
+        Math.floor((page.width * scale - w) / 2),
+        Math.floor((page.height * scale - h) / 2),
+        Math.floor(w),
+        Math.floor(h),
+      )
+      ctx.restore()
       resolve()
     }
     img.onerror = () => resolve()
@@ -54,14 +64,16 @@ function loadAndDrawImage(
     const img = new Image()
     img.onload = () => {
       ctx.save()
-      ctx.translate((el.x + el.width / 2) * scale, (el.y + el.height / 2) * scale)
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.translate(Math.floor((el.x + el.width / 2) * scale), Math.floor((el.y + el.height / 2) * scale))
       ctx.rotate((el.rotation * Math.PI) / 180)
       ctx.drawImage(
         img,
-        (-el.width / 2) * scale,
-        (-el.height / 2) * scale,
-        el.width * scale,
-        el.height * scale,
+        Math.floor((-el.width / 2) * scale),
+        Math.floor((-el.height / 2) * scale),
+        Math.floor(el.width * scale),
+        Math.floor(el.height * scale),
       )
       ctx.restore()
       resolve()
