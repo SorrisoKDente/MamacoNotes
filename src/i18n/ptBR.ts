@@ -299,6 +299,8 @@ export const ptBRMessages: Record<string, string> = {
   'modal.hidePageListHint': 'Esconde a lista de miniaturas das páginas do caderno atual.',
   'modal.hidePageCount': 'Ocultar o nº de páginas',
   'modal.hidePageCountHint': 'Não mostra o número de páginas ao lado do nome do caderno.',
+  'modal.hideToolCursor': 'Ocultar o cursor da ferramenta',
+  'modal.hideToolCursorHint': 'Esconde o indicador circular do tamanho da caneta, do marcador e da borracha sobre a página.',
   'modal.sectionPreferences': 'Preferências',
   'modal.sectionAppearance': 'Aparência',
   'modal.sectionDirectory': 'Diretório de anotações',

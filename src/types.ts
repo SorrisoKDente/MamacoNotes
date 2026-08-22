@@ -140,6 +140,7 @@ export interface AppSettings {
   hideSidebar: boolean
   hidePageList: boolean
   hidePageCount: boolean
+  hideToolCursor: boolean
   sidebarWidth: number
   pageViewMode: PageViewMode
   saveDirectory: string
@@ -312,6 +313,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hideSidebar: false,
   hidePageList: false,
   hidePageCount: false,
+  hideToolCursor: false,
   sidebarWidth: 260,
   pageViewMode: 'vertical',
   saveDirectory: '',

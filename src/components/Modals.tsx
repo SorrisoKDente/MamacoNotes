@@ -1193,6 +1193,17 @@ function SettingsModal() {
               </label>
               <span className="modal-hint">{t('modal.hidePageCountHint')}</span>
             </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hideToolCursor}
+                  onChange={(e) => setSettings({ hideToolCursor: e.target.checked })}
+                />
+                {t('modal.hideToolCursor')}
+              </label>
+              <span className="modal-hint">{t('modal.hideToolCursorHint')}</span>
+            </div>
           </div>
           <div className="settings-section">
             <div className="settings-section-title">{t('modal.sectionDirectory')}</div>

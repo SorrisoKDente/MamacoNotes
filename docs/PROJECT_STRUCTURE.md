@@ -201,7 +201,7 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF used as page background (resides **at page level**, below all layers; not a `Layer`).
-- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`).
+- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — sync data.
 
 > Whenever you need to change the format of persisted data, start with `src/types.ts`
@@ -260,6 +260,11 @@ All data writes in the app go through `store.ts`, which calls `db.*` and then
   - Persistence: `persistNotebook`, `updateNotebookStorage`, `saveSettings`.
   - **Auto-sync**: `useAppStore.subscribe` watches `dataVersion` and triggers `syncNow()`
     with a 20s debounce (`syncRunning`/`syncQueued` guards).
+  - **Session restoration**: a second `useAppStore.subscribe` saves to `localStorage`
+    (key `mamaco-notes.last-session`) the `{ notebookId, pageId }` pair whenever the
+    current notebook or page changes; `init()` uses this record to reopen the last
+    opened note/page (falling back to nothing selected if the record doesn't exist or
+    the notebook was deleted).
 - **`useUiStore`** (`src/uiStore.ts`) — which modal is open + modal data.
 - **`useTextStore`** (`src/textStore.ts`) — text draft, draft position/rotation, selected
   text, editing mode.
@@ -399,6 +404,29 @@ Key points:
     `TWO_FINGER_DOUBLE_TAP_GAP_MS` (350ms) between the end of one and the end of the other
     trigger `useAppStore.undo()` — the equivalent of "Undo". The first tap only sets the
     timer; `lastTwoFingerTapAtRef` stores the instant of the last tap.
+  - **Three-finger double tap = Redo**: mirrors the 2-finger gesture, but the candidate
+    is only armed when the third pointer goes down (`threeFingerDownAtRef`; reset if a
+    pan/pinch starts). Two 3-finger taps within the same time windows
+    (`TWO_FINGER_TAP_MAX_MS` / `TWO_FINGER_DOUBLE_TAP_GAP_MS`) trigger
+    `useAppStore.redo()`. `lastThreeFingerTapAtRef` stores the instant of the last tap.
+  - **2 fingers + rotation = rotate the page**: during a 2-finger pan/pinch, the
+    rotation of the angle between the fingers (`Math.atan2` of the difference in
+    positions) is applied to `page.rotation` (degrees), following the `page-rotate`
+    gesture convention (clockwise rotation on the screen increases the angle). The
+    base angle and rotation are captured in `drag.startAngle`/`drag.startRotation`
+    when the gesture is confirmed (and recaptured when a new multi-touch phase
+    begins, avoiding jumps). `pushUndo()` is called **only once per gesture**, just
+    when the rotation starts to be applied (`pinchRotationUndoPushedRef` flag), and
+    the change is persisted via `schedulePersist()`.
+  - **Rotations never push empty undo**: `pushUndo()` is called **only when a real
+    change is applied** to the page. Strokes are pushed on commit in `onPointerUp`
+    (only if `stroke.points.length >= 2`); the eraser pushes only if `session.commit()`
+    returned changed elements (both at the end of the gesture and on abort by
+    2-finger pan); and both the 2-finger rotation gesture and `page-rotate` (free
+    rotation selection) push on the first movement that changes the real angle
+    (`|delta| > 1°`, `pinchRotationUndoPushedRef`/`pageRotateUndoPushedRef` flags).
+    This avoids undo entries identical to the current page — the root cause of "2-finger
+    Undo doing nothing and Redo flashing without effect".
 - **Selection**: `Set` structures of IDs (`strokes`, `images`, `texts`) in `selectionRef`;
   regions (rect/circle/lasso) in `selectionRegionRef`; internal selection clipboard.
   Region selection (`computeSelection` in `Editor.tsx`) tests, for images, rotated center
@@ -506,7 +534,7 @@ Flow and files involved:
 | Page rotation (screen) | `Toolbar.tsx` (`RotationPanel`) + `Editor.tsx` (`page-rotate`) |
 | Inline text (typing in place) | `Editor.tsx` (`InlineTextInput`, `commitInlineText`) |
 | Text formatting (font, markers, direction) | `src/utils/drawText.ts` + `Toolbar.tsx` |
-| Undo/redo | `src/store.ts` (`pushUndo`, `undo`, `redo`); on touch, two consecutive two-finger taps on the canvas equal Undo (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`) |
+| Undo/redo | `src/store.ts` (`pushUndo`, `undo`, `redo`); on touch, two consecutive two-finger taps on the canvas equal Undo (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); two taps with 3 fingers = Redo (`useAppStore.redo()`); `pushUndo` is only called when the stroke/eraser/rotation actually changes the page |
 | Layers: model and helpers (legacy page normalization) | `src/types.ts` (`Layer`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
 | Layers: state actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
 
@@ -555,6 +583,7 @@ Flow and files involved:
 | Screen composition | `src/App.tsx` |
 | Hide bars / panels | Settings (General tab, `Modals.tsx` `SettingsModal`, Appearance section) → `settings.hideTopBar`, `settings.hideToolbar`, `settings.hideSidebar`, `settings.hidePageList`; conditional rendering in `src/App.tsx`; sidebar/preview toggles in `TopBar.tsx` always visible (clicking re-shows panel when hidden by settings) and **a floating button per hidden bar** in `App.tsx` (`.ui-restore-btn`): top bar → top center (`top-center`, not to overlap side toolbar), tools → middle of right edge (`right-center`), notebooks/preview → middle of left edge (`left-center`, with `left-center-top`/`left-center-bottom` stacked when both are hidden) |
 | Hide notebook page count | Settings (General tab, Appearance section) → `settings.hidePageCount`; conditional rendering of `<span className="page-count">` in `src/components/Sidebar.tsx` |
+| Hide tool cursor | Settings (General tab, Appearance section) → `settings.hideToolCursor`; used in `Editor.tsx` to conditionally hide the tool indicator |
 | Mobile safe areas (status bar / notch / gestures) | `index.html` uses `viewport-fit=cover`; `src/styles.css` respects `env(safe-area-inset-top)` in `.topbar` (height/padding) and in the `.ui-restore-btn.top-center` floating button, and `env(safe-area-inset-bottom)` in `.toolbar` in mobile mode — prevents the top bar from being covered/inaccessible on phones with a hidden notification bar (edge-to-edge) |
 | Top bar | `src/components/TopBar.tsx` |
 | Layers panel (right side; "Layers" button in `TopBar` toggles `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (layer actions) |
@@ -656,7 +685,7 @@ Flow and files involved:
 | File | What it contains | String examples |
 |---|---|---|
 | `src/components/Toolbar.tsx` | Tool names, panels, tips, tooltips, titles | "Pen", "Highlighter", "Eraser", "Text", "Select", "Move", "Rotation", "Undo", "Redo", "Selection mode", "Select delimited only", "Actions", "Bold", "Underline", "Writing direction", "Hex code" |
-| `src/components/Modals.tsx` | **All modals**: titles, labels, buttons, tips, placeholders, options | "Settings", "New page", "Export notes", "Cloud synchronization", "Sync conflicts", "First page template", "Português (Brasil)", "Test connection", "Also from cloud", import tips |
+| `src/components/Modals.tsx` | **All modals**: titles, labels, buttons, tips, placeholders, options | "Settings", "New page", "Export notes", "Cloud synchronization", "Sync conflicts", "First page template", "Português (Brasil)", "Test connection", "Also from cloud", "Hide tool cursor" (`modal.hideToolCursor` + `modal.hideToolCursorHint`), import tips |
 | `src/components/Sidebar.tsx` | Context menus, prompts, confirmations, section titles | "My Notebooks", "No folders", "New folder", "Rename", "Copy to folder...", "Move to folder...", "Duplicate", "Delete", "Delete note ...?", "Drag to resize", "Drag to reorder. Long touch selects multiple items on touch." (`sidebar.dragHint`) |
 | `src/components/TopBar.tsx` | Tooltips, app title, placeholder | "Toggle sidebar", "Show/hide page preview", "Layers" (`topbar.toggleLayers`), "Hide top bar", "Hide toolbar", "Show top bar", "Show toolbar", "Show notebook bar", "Show page preview", "Fullscreen (F11)", "Mamaco Notes", "Select or create a notebook" |
 | `src/components/PageList.tsx` | Title, search placeholder, empty messages, multiple page selection bar | "Pages", "Go to page (no.)...", "No pages found", "{{count}} page(s) selected", "Clear page selection", "Duplicate selected pages", "Delete {{count}} selected page(s)?" |

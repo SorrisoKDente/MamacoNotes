@@ -29,11 +29,13 @@ Este projeto foi desenvolvido quase 100% usando o **MonkeyCodeAI**, aproveitando
     -   Suporte a seleção múltipla para ações em lote (copiar, mover, excluir).
 -   **UI & UX Inteligente**:
     -   Suporte a multi-toque para tablets e celulares (zoom de pinça, pan).
-    -   Gestos customizados, como toque duplo com dois dedos para **Desfazer**.
+    -   Gestos customizados: toque duplo com 2 dedos para **Desfazer**, toque duplo com 3 dedos para **Refazer** e rotação com 2 dedos para **Girar a página**.
     -   Localização completa em **Português (pt-BR)** e **Inglês**.
-    -   Suporte a modo Escuro/Claro e visibilidade customizável de barras.
+    -   Suporte a modo Escuro/Claro e visibilidade customizável de barras (com botões flutuantes para restauração rápida).
+    -   Opção para ocultar o cursor da ferramenta para uma experiência de desenho mais limpa.
 -   **Segurança e Persistência**:
     -   Dados armazenados localmente usando **IndexedDB**.
+    -   Restauração de sessão para reabrir automaticamente o último caderno e página.
     -   Backups automáticos em disco (Electron) ou diretório do navegador.
     -   Importação/exportação de backup manual completo (JSON).
 

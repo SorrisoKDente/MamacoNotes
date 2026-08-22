@@ -1,5 +1,3 @@
-[English](PROJECT_STRUCTURE.md) | **Português**
-
 # Estrutura do Projeto — Mamaco Notes
 
 Este documento descreve como o projeto **Mamaco Notes** está organizado. O objetivo é
@@ -93,7 +91,7 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder (incluindo instalador NSIS interativo) |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder |
 | `vite.config.ts` | Plugins React/PWA, `base: './'`, dev server (porta 5173, `allowedHosts` para preview) |
 | `tsconfig.json` | Config TypeScript (strict) |
 | `index.html` | HTML base; carrega `src/main.tsx` |
@@ -121,7 +119,7 @@ Fluxo de inicialização:
 | `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável), botões Imagem/PDF/Página/Exportar/Sincronizar/Configurações/tela cheia |
 | `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`) |
 | `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir) |
-| `Editor.tsx` | **Maior componente (~2900 linhas)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer), todos os drags |
+| `Editor.tsx` | **Maior componente (~2900 linhas)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer e 2 dedos + rotação = girar a página), todos os drags |
 | `Toolbar.tsx` | Barra de ferramentas lateral: caneta/marcador/borracha/texto/selecionar/mover/rotação, undo/redo, painéis de configuração por ferramenta |
 | `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline, alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas; rodapé fixo com a cor de fundo da página |
 | `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação |
@@ -201,7 +199,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF usado como fundo da página (fica **no nível da página**, abaixo de todas as camadas; não é uma `Layer`).
-- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
+- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — dados do sync.
 
 > Sempre que precisar alterar o formato de um dado persistido, comece por `src/types.ts`
@@ -260,6 +258,11 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*` e depois
   - Persistência: `persistNotebook`, `updateNotebookStorage`, `saveSettings`.
   - **Auto-sync**: `useAppStore.subscribe` observa `dataVersion` e dispara `syncNow()` com
     debounce de 20s (guardas `syncRunning`/`syncQueued`).
+  - **Restauração de sessão**: um segundo `useAppStore.subscribe` salva no `localStorage`
+    (chave `mamaco-notes.last-session`) o par `{ notebookId, pageId }` sempre que o caderno
+    ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
+    aberta (com fallback para nada selecionado quando o registro não existe ou o caderno foi
+    excluído).
 - **`useUiStore`** (`src/uiStore.ts`) — qual modal está aberto + dados do modal.
 - **`useTextStore`** (`src/textStore.ts`) — rascunho de texto, posição/rotação do draft,
   texto selecionado, modo de edição.
@@ -377,8 +380,8 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   `toScreenCoords` (aplica pan, zoom, offset da página e rotação da página).
 - **Interação**: `Editor.tsx` implementa todos os gestos via handlers de `PointerEvent`
   (`onPointerDown/Move/Up`), um `dragRef` com `kind` que identifica a operação:
-  `pan | draw | erase | select-move | select-resize | select-rotate | region-draw |
-  region-move | text-rotate | text-resize | page-rotate | group-resize | group-rotate`.
+  `pan \| draw \| erase \| select-move \| select-resize \| select-rotate \| region-draw \|
+  region-move \| text-rotate \| text-resize \| page-rotate \| group-resize \| group-rotate`.
 - **Multi-toque (celular)**: `Editor.tsx` rastreia os ponteiros ativos em
   `activePointersRef` (atualizado em `onPointerDown`/`onPointerMove`). Um segundo dedo
   não interrompe um traço imediatamente: só ativa o gesto de mover/pinça depois de se
@@ -399,6 +402,29 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     `TWO_FINGER_DOUBLE_TAP_GAP_MS` (350ms) entre o fim de um e o fim do outro disparam
     `useAppStore.undo()` — o equivalente ao "Desfazer". O primeiro toque apenas arma o
     cronômetro; `lastTwoFingerTapAtRef` guarda o instante do último toque.
+  - **Toque duplo com 3 dedos = Refazer**: espelha o gesto de 2 dedos, mas o candidato
+    só é armado quando o terceiro ponteiro desce (`threeFingerDownAtRef`; zerado se um
+    pan/pinça começa). Dois toques de 3 dedos nas mesmas janelas de tempo
+    (`TWO_FINGER_TAP_MAX_MS` / `TWO_FINGER_DOUBLE_TAP_GAP_MS`) disparam
+    `useAppStore.redo()`. `lastThreeFingerTapAtRef` guarda o instante do último toque.
+  - **2 dedos + rotação = girar a página**: durante o pan/pinça de 2 dedos, a rotação do
+    ângulo entre os dedos (`Math.atan2` da diferença de posições) é aplicada em
+    `page.rotation` (graus), mantendo a convenção do gesto `page-rotate`
+    (rotação no sentido horário na tela aumenta o ângulo). A base do ângulo e da rotação
+    são capturadas em `drag.startAngle`/`drag.startRotation` quando o gesto se confirma
+    (e recapturadas quando uma nova fase de multi-toque começa, evitando saltos).
+    `pushUndo()` é chamado **uma única vez por gesto**, apenas quando a rotação começa a
+    ser aplicada (flag `pinchRotationUndoPushedRef`), e a mudança é persistida via
+    `schedulePersist()`.
+  - **Rotações nunca empurram undo vazio**: `pushUndo()` é chamado **somente quando uma
+    mudança real é aplicada** à página. Traços são empurrados no commit em `onPointerUp`
+    (só se `stroke.points.length >= 2`); a borracha empurra apenas se
+    `session.commit()` retornou elementos alterados (tanto no fim do gesto quanto no
+    aborto por pan de 2 dedos); e tanto o gesto de rotação por 2 dedos quanto o
+    `page-rotate` (seleção com rotação livre) empurram no primeiro movimento que muda o
+    ângulo real (`|delta| > 1°`, flags `pinchRotationUndoPushedRef`/
+    `pageRotateUndoPushedRef`). Isso evita entradas de undo idênticas à página atual —
+    a causa raiz do "Desfazer de 2 dedos não faz nada e o Refazer pisca sem efeito".
 - **Seleção**: estruturas `Set` de ids (`strokes`, `images`, `texts`) em `selectionRef`;
   regiões (retângulo/círculo/laço) em `selectionRegionRef`; clipboard interno de seleção.
   A seleção por região (`computeSelection` em `Editor.tsx`) testa, para imagens, centro e
@@ -505,7 +531,7 @@ Fluxo e arquivos envolvidos:
 | Rotação de página (tela) | `Toolbar.tsx` (`RotationPanel`) + `Editor.tsx` (`page-rotate`) |
 | Texto inline (digitação no lugar) | `Editor.tsx` (`InlineTextInput`, `commitInlineText`) |
 | Formatação de texto (fonte, marcadores, direção) | `src/utils/drawText.ts` + `Toolbar.tsx` |
-| Desfazer/refazer | `src/store.ts` (`pushUndo`, `undo`, `redo`); no toque, dois toques seguidos com 2 dedos no canvas equivalem ao Desfazer (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`) |
+| Desfazer/refazer | `src/store.ts` (`pushUndo`, `undo`, `redo`); no toque, dois toques seguidos com 2 dedos no canvas equivalem ao Desfazer (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); dois toques com 3 dedos = Refazer (`useAppStore.redo()`); `pushUndo` só é chamado quando o traço/borracha/rotação realmente altera a página |
 | Camadas: modelo e helpers (normalização de páginas legadas) | `src/types.ts` (`Layer`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
 | Camadas: ações de estado (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
 
@@ -652,7 +678,7 @@ Fluxo e arquivos envolvidos:
 | Arquivo | O que contém | Exemplos de strings |
 |---|---|---|
 | `src/components/Toolbar.tsx` | Nomes de ferramentas, painéis, dicas, tooltips, títulos | "Caneta", "Marcador", "Borracha", "Texto", "Selecionar", "Mover", "Rotação", "Desfazer", "Refazer", "Modo de seleção", "Selecionar apenas a parte delimitada", "Ações", "Negrito", "Sublinhado", "Direção da escrita", "Código hexadecimal" |
-| `src/components/Modals.tsx` | **Todos os modais**: títulos, labels, botões, dicas, placeholders, opções | "Configurações", "Nova página", "Exportar anotações", "Sincronização em nuvem", "Conflitos de sincronização", "Modelo da primeira página", "Português (Brasil)", "Testar conexão", "Também da nuvem", dicas de importação |
+| `src/components/Modals.tsx` | **Todos os modais**: títulos, labels, botões, dicas, placeholders, opções | "Configurações", "Nova página", "Exportar anotações", "Sincronização em nuvem", "Conflitos de sincronização", "Modelo da primeira página", "Português (Brasil)", "Testar conexão", "Também da nuvem", "Ocultar o cursor da ferramenta" (`modal.hideToolCursor` + `modal.hideToolCursorHint`), dicas de importação |
 | `src/components/Sidebar.tsx` | Menus de contexto, prompts, confirmações, títulos de seção | "Meus Cadernos", "Sem pastas", "Nova pasta", "Renomear", "Copiar para pasta...", "Mover para pasta...", "Duplicar", "Excluir", "Excluir a nota ...?", "Arraste para redimensionar", "Arraste para reordenar. Em touch, toque longo seleciona vários itens." (`sidebar.dragHint`) |
 | `src/components/TopBar.tsx` | Tooltips, título do app, placeholder | "Alternar barra lateral", "Mostrar/ocultar preview das páginas", "Camadas" (`topbar.toggleLayers`), "Ocultar a barra superior", "Ocultar a barra de ferramentas", "Mostrar a barra superior", "Mostrar a barra de ferramentas", "Mostrar a barra de cadernos", "Mostrar o preview de páginas", "Tela cheia (F11)", "Mamaco Notes", "Selecione ou crie um caderno" |
 | `src/components/PageList.tsx` | Título, placeholder de busca, mensagens vazias, barra de seleção múltipla de páginas | "Páginas", "Ir para a página (nº)...", "Nenhuma página encontrada", "{{count}} página(s) selecionada(s)", "Limpar seleção de páginas", "Duplicar páginas selecionadas", "Excluir {{count}} página(s) selecionada(s)?" |
@@ -690,7 +716,7 @@ Fluxo e arquivos envolvidos:
 1. Adicione a chave em `src/i18n/ptBR.ts` (texto pt-BR, fonte de verdade) e em
    `src/i18n/en.ts` (tradução).
 2. Consuma com `t('chave')` — em componentes via `useI18n()`; em módulos planos
-   (sync/webdav) importe `t` direto.
+   (sync/webdav) importe `t direto.
 3. Se houver parâmetro, use `{{param}}` no texto e `t('chave', { param })` na chamada.
 4. Não deixe string pt-BR hardcoded em JSX; confira ao final com um grep por acentos em
    `src/components` (exceto os nomes nativos dos idiomas no seletor).

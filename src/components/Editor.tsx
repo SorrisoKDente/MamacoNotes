@@ -41,6 +41,10 @@ export function Editor() {
   const pendingTwoFingerRef = useRef<{ id: number; start: Pt } | null>(null)
   const twoFingerDownAtRef = useRef<number | null>(null)
   const lastTwoFingerTapAtRef = useRef(0)
+  const threeFingerDownAtRef = useRef<number | null>(null)
+  const lastThreeFingerTapAtRef = useRef(0)
+  const pinchRotationUndoPushedRef = useRef(false)
+  const pageRotateUndoPushedRef = useRef(false)
 
   const notebook = useAppStore((s) =>
     s.notebooks.find((n) => n.id === s.selectedNotebookId),
@@ -1284,6 +1288,7 @@ export function Editor() {
         const changed = session.commit()
         const pg = pageRef.current
         if (pg && changed.length) {
+          pushUndo()
           for (const { element, newUrl } of changed) {
             engine?.clearImageCache(element.dataUrl)
             element.dataUrl = newUrl
@@ -1332,8 +1337,10 @@ export function Editor() {
             ? Math.hypot(otherPos.x - otherDown.x, otherPos.y - otherDown.y) > TWO_FINGER_THRESHOLD
             : false
         twoFingerDownAtRef.current = otherMoved ? null : Date.now()
+        threeFingerDownAtRef.current = null
       } else {
         twoFingerDownAtRef.current = null
+        threeFingerDownAtRef.current = activePointersRef.current.size === 3 ? Date.now() : null
       }
       pendingTwoFingerRef.current = { id: e.pointerId, start: pos }
       return
@@ -1385,7 +1392,7 @@ export function Editor() {
 
     const st = useAppStore.getState()
     if (tool === 'select' && st.rotationOpen && st.settings.freeRotate) {
-      pushUndo()
+      pageRotateUndoPushedRef.current = false
       dragRef.current = {
         kind: 'page-rotate',
         startX: pos.x,
@@ -1738,7 +1745,6 @@ export function Editor() {
     }
 
     if (tool === 'eraser') {
-      pushUndo()
       dirtyRef.current = false
       const session = new ImageEraseSession()
       eraseSessionRef.current = session
@@ -1772,7 +1778,6 @@ export function Editor() {
       handle: null,
       startPan: { ...panRef.current },
     }
-    pushUndo()
     engine.beginStroke(tool, color, size, pos.x, pos.y)
     requestRender()
   }
@@ -1830,6 +1835,7 @@ export function Editor() {
       if (moved > TWO_FINGER_THRESHOLD) {
         pendingTwoFingerRef.current = null
         twoFingerDownAtRef.current = null
+        threeFingerDownAtRef.current = null
         abortForPan()
         setSelectedImageId(null)
         selectionRef.current = { strokes: new Set(), images: new Set(), texts: new Set() }
@@ -1840,6 +1846,7 @@ export function Editor() {
         const a = pts[0]
         const b = pts[1]
         const startMid = a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : a ?? pos
+        pinchRotationUndoPushedRef.current = false
         dragRef.current = {
           kind: 'pan',
           multiTouch: true,
@@ -1850,6 +1857,8 @@ export function Editor() {
           imageId: null,
           handle: null,
           startPan: { ...panRef.current },
+          startAngle: a && b ? (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI : undefined,
+          startRotation: pageRef.current?.rotation ?? 0,
         }
         pinchRef.current = null
         canvas.style.cursor = 'grabbing'
@@ -1876,13 +1885,19 @@ export function Editor() {
       const a1 = Math.atan2(pos.y - cy, pos.x - cx)
       const a0 = Math.atan2(drag.startY - cy, drag.startX - cx)
       const delta = ((a1 - a0) * 180) / Math.PI
-      const base = drag.startRotation ?? pg.rotation
-      pg.rotation = ((((base + delta) % 360) + 360) % 360)
-      pg.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
-      dirtyRef.current = true
-      requestRender()
-      schedulePersist()
+      if (Math.abs(delta) > 1) {
+        if (!pageRotateUndoPushedRef.current) {
+          pageRotateUndoPushedRef.current = true
+          pushUndo()
+        }
+        const base = drag.startRotation ?? pg.rotation
+        pg.rotation = ((((base + delta) % 360) + 360) % 360)
+        pg.updatedAt = Date.now()
+        notebookRef.current!.updatedAt = Date.now()
+        dirtyRef.current = true
+        requestRender()
+        schedulePersist()
+      }
       return
     }
 
@@ -1901,9 +1916,29 @@ export function Editor() {
             panRef.current.x += mid.x - prev.prevMid.x
             panRef.current.y += mid.y - prev.prevMid.y
           } else {
+            drag.startAngle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+            drag.startRotation = pageRef.current?.rotation ?? 0
+            pinchRotationUndoPushedRef.current = false
             panRef.current = {
               x: drag.startPan.x + (mid.x - drag.startX),
               y: drag.startPan.y + (mid.y - drag.startY),
+            }
+          }
+          if (drag.startAngle !== undefined && drag.startRotation !== undefined) {
+            const ang = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+            let delta = ang - drag.startAngle
+            delta = ((delta + 540) % 360) - 180
+            const pg = pageRef.current
+            if (pg && Math.abs(delta) > 1) {
+              if (!pinchRotationUndoPushedRef.current) {
+                pinchRotationUndoPushedRef.current = true
+                pushUndo()
+              }
+              pg.rotation = ((((drag.startRotation + delta) % 360) + 360) % 360)
+              pg.updatedAt = Date.now()
+              notebookRef.current!.updatedAt = Date.now()
+              dirtyRef.current = true
+              schedulePersist()
             }
           }
           pinchRef.current = { prevDist: dist, prevMid: mid }
@@ -2121,6 +2156,7 @@ export function Editor() {
       const stroke = engine.endStroke()
       const drawPage = pageRef.current
       if (stroke && stroke.points.length >= 2 && drawPage) {
+        pushUndo()
         getActiveLayer(drawPage).strokes.push(stroke as Stroke)
         drawPage.updatedAt = Date.now()
         dirtyRef.current = true
@@ -2142,6 +2178,7 @@ export function Editor() {
         const changed = session.commit()
         const pg = pageRef.current
         if (pg && changed.length) {
+          pushUndo()
           for (const { element, newUrl } of changed) {
             engine.clearImageCache(element.dataUrl)
             element.dataUrl = newUrl
@@ -2179,6 +2216,22 @@ export function Editor() {
           void useAppStore.getState().undo()
         } else {
           lastTwoFingerTapAtRef.current = now
+        }
+      }
+    }
+    if (activePointersRef.current.size === 0 && threeFingerDownAtRef.current !== null) {
+      const downAt = threeFingerDownAtRef.current
+      threeFingerDownAtRef.current = null
+      if (Date.now() - downAt <= TWO_FINGER_TAP_MAX_MS) {
+        const now = Date.now()
+        if (
+          lastThreeFingerTapAtRef.current > 0 &&
+          now - lastThreeFingerTapAtRef.current <= TWO_FINGER_DOUBLE_TAP_GAP_MS
+        ) {
+          lastThreeFingerTapAtRef.current = 0
+          void useAppStore.getState().redo()
+        } else {
+          lastThreeFingerTapAtRef.current = now
         }
       }
     }
@@ -2466,18 +2519,21 @@ export function Editor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
 
+  const showToolCursor = !settings.hideToolCursor
   const cursorClass =
-    tool === 'pen'
-      ? 'cursor-pen'
-      : tool === 'highlighter'
-        ? 'cursor-highlighter'
-        : tool === 'eraser'
-          ? 'cursor-eraser'
-        : tool === 'text'
-          ? 'cursor-text'
-          : tool === 'pan'
-            ? 'cursor-pan'
-            : 'cursor-select'
+    !showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser')
+      ? 'cursor-tool-hidden'
+      : tool === 'pen'
+        ? 'cursor-pen'
+        : tool === 'highlighter'
+          ? 'cursor-highlighter'
+          : tool === 'eraser'
+            ? 'cursor-eraser'
+            : tool === 'text'
+              ? 'cursor-text'
+              : tool === 'pan'
+                ? 'cursor-pan'
+                : 'cursor-select'
 
   return (
     <div ref={editorRef} className={`editor ${cursorClass}`} onMouseMove={trackMouse}>
@@ -2493,7 +2549,7 @@ export function Editor() {
             onMouseDown={(e) => e.preventDefault()}
             style={{ touchAction: 'none' }}
           />
-          {(tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
+          {showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
             <ToolCursor
               size={cursorSize(tool, settings)}
               pos={mousePos}

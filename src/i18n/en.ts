@@ -299,6 +299,8 @@ export const enMessages: Record<string, string> = {
   'modal.hidePageListHint': 'Hides the page thumbnails list of the current notebook.',
   'modal.hidePageCount': 'Hide the page count',
   'modal.hidePageCountHint': "Does not show the page count next to the notebook name.",
+  'modal.hideToolCursor': 'Hide the tool cursor',
+  'modal.hideToolCursorHint': 'Hides the circular size indicator of the pen, highlighter and eraser over the page.',
   'modal.sectionPreferences': 'Preferences',
   'modal.sectionAppearance': 'Appearance',
   'modal.sectionDirectory': 'Notes directory',

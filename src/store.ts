@@ -206,6 +206,32 @@ interface PendingResume {
   manifest: SyncManifest
 }
 
+const LAST_SESSION_KEY = 'mamaco-notes.last-session'
+
+interface LastSession {
+  notebookId: string | null
+  pageId: string | null
+}
+
+function readLastSession(): LastSession | null {
+  try {
+    const raw = localStorage.getItem(LAST_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<LastSession>
+    return { notebookId: parsed.notebookId ?? null, pageId: parsed.pageId ?? null }
+  } catch {
+    return null
+  }
+}
+
+function saveLastSession(notebookId: string, pageId: string | null): void {
+  try {
+    localStorage.setItem(LAST_SESSION_KEY, JSON.stringify({ notebookId, pageId }))
+  } catch {
+    /* noop */
+  }
+}
+
 let syncRunning = false
 let syncQueued = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined
@@ -467,6 +493,7 @@ export const useAppStore = create<AppState>((set, get) => {
         shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...(rawSettings.shortcuts ?? {}) },
       }
       let selectedNotebookId: string | null = null
+      let currentPageIndex = 0
       if (notebooks.length === 0) {
         const initial = makeNotebook('Eu vim ver o macaco', null)
         initial.order = 0
@@ -477,12 +504,26 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const { notebooks: orderedNotebooks } = fillNotebookOrder(notebooks)
       const { folders: orderedFolders } = fillFolderOrder(rawFolders)
+      if (selectedNotebookId === null) {
+        const last = readLastSession()
+        const nb = last?.notebookId
+          ? orderedNotebooks.find((n) => n.id === last.notebookId)
+          : undefined
+        if (nb) {
+          selectedNotebookId = nb.id
+          if (last?.pageId) {
+            const idx = nb.pages.findIndex((p) => p.id === last.pageId)
+            if (idx >= 0) currentPageIndex = idx
+          }
+        }
+      }
       set({
         folders: orderedFolders,
         notebooks: orderedNotebooks,
         templates,
         settings: safeSettings,
         selectedNotebookId,
+        currentPageIndex,
         loaded: true,
       })
       setLanguage(settings.language === 'en' ? 'en' : 'pt-BR')
@@ -1631,4 +1672,16 @@ useAppStore.subscribe((state, prev) => {
     syncDebounceTimer = undefined
     void useAppStore.getState().syncNow()
   }, 20000)
+})
+
+useAppStore.subscribe((state, prev) => {
+  if (
+    state.selectedNotebookId === prev.selectedNotebookId &&
+    state.currentPageIndex === prev.currentPageIndex
+  ) {
+    return
+  }
+  if (!state.selectedNotebookId) return
+  const pages = state.notebooks.find((n) => n.id === state.selectedNotebookId)?.pages ?? []
+  saveLastSession(state.selectedNotebookId, pages[state.currentPageIndex]?.id ?? null)
 })

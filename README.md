@@ -29,11 +29,13 @@ This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-ass
     -   Multi-selection support for bulk actions (copy, move, delete).
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
-    -   Custom gestures, such as two-finger double-tap for **Undo**.
+    -   Custom gestures, such as two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, and two-finger rotation for **Page rotation**.
     -   Full localization in **English** and **Portuguese (pt-BR)**.
-    -   Dark/Light mode support and customizable toolbar/sidebar visibility.
+    -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
+    -   Option to hide the tool cursor for a cleaner drawing experience.
 -   **Security & Persistence**:
     -   Data stored locally using **IndexedDB**.
+    -   Session restoration to automatically reopen the last notebook and page.
     -   Automatic local backups to disk (Electron) or browser directory.
     -   Manual full backup (JSON) import/export.
 
