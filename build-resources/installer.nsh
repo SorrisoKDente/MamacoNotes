@@ -14,5 +14,4 @@ FunctionEnd
 !macro customUnInstall
   ; Remove o atalho se o programa for desinstalado
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
-  Delete "$COMMONDESKTOP\${PRODUCT_NAME}.lnk"
 !macroend
