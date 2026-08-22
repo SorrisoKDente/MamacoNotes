@@ -72,9 +72,10 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "shortcutName": "Mamaco Notes"
+      "shortcutName": "Mamaco Notes",
+      "include": "build-resources/installer.nsh"
     },
     "linux": {
       "target": [
