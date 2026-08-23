@@ -2,6 +2,8 @@
 
 **English** | [Português](README.pt-BR.md)
 
+![Mamaco Notes Preview](assets/mamaco_notes_layout.png)
+
 **Mamaco Notes** is a digital note-taking application designed for hand-writing and drawing, serving as a cross-platform alternative to Samsung Notes. It is built to work seamlessly across **Windows**, **Linux**, **Android**, and the **Web**.
 
 This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-assisted development to create a robust and feature-rich application.
@@ -72,7 +74,7 @@ If you find this project useful and would like to support its development financ
 - 💸 **Pix (Brazil)**: `yabaihonyaku@gmail.com`
 
 <p align="center">
-  <img src="build-resources/YABAIPIX.png" alt="Pix QR Code" width="200"/>
+  <img src="assets/YABAIPIX.png" alt="Pix QR Code" width="200"/>
 </p>
 
 ## 🤖 Developed with AI

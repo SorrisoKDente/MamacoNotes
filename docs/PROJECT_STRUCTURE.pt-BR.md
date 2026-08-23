@@ -178,6 +178,7 @@ Fluxo de inicialização:
 | Caminho | Responsabilidade |
 |---|---|
 | `public/` | Ícones estáticos do PWA (favicon, apple-touch-icon, pwa-192/512, maskable) |
+| `assets/` | Recursos de marketing e documentação (screenshots, QR codes) |
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) |
 | `docs/superpowers/specs/` | Documentos de design aprovados (sync bidirecional; camadas) |
 | `docs/superpowers/plans/` | Planos de implementação (sync bidirecional; camadas) |

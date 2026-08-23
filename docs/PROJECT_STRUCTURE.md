@@ -180,6 +180,7 @@ Initialization flow:
 | Path | Responsibility |
 |---|---|
 | `public/` | PWA static icons (favicon, apple-touch-icon, pwa-192/512, maskable) |
+| `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) |
 | `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
 | `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
