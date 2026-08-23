@@ -1,6 +1,6 @@
 export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
-export const APP_VERSION = '1.0.72'
+export const APP_VERSION = '1.0.73'
 
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
