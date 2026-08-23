@@ -562,7 +562,7 @@ Fluxo e arquivos envolvidos:
 | CRUD de cadernos/pastas/páginas/modelos | `src/store.ts` |
 | IndexedDB (leitura/escrita) | `src/db.ts` |
 | Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
-| Backup automático em disco | `src/utils/localSave.ts` |
+| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via Capacitor Filesystem)**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
 | Contratos das stores (estado + ações, ver §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 

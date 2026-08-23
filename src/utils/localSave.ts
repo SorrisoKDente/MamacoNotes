@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core'
+import { Filesystem, Directory } from '@capacitor/filesystem'
 import type { AppSettings, Folder, Notebook } from '../types'
 import { buildBackupPayload } from './backup'
 
@@ -27,6 +29,7 @@ export async function persistLocalBackup(
 
   const payload = JSON.stringify(buildBackupPayload(folders, notebooks, settings))
 
+  // Desktop (Electron)
   if (settings.saveDirectory && desktop?.writeFile) {
     try {
       await desktop.writeFile(settings.saveDirectory, BACKUP_FILENAME, payload)
@@ -36,6 +39,24 @@ export async function persistLocalBackup(
     }
   }
 
+  // Mobile (Android / iOS via Capacitor)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await Filesystem.writeFile({
+        path: BACKUP_FILENAME,
+        data: payload,
+        directory: Directory.Documents,
+        encoding: 'utf8' as any,
+        recursive: true
+      })
+      return true
+    } catch (err) {
+      console.error('Failed to write mobile backup:', err)
+      return false
+    }
+  }
+
+  // Web (File System Access API)
   const handle = settings.saveDirectoryHandle as FileSystemDirectoryHandle | null
   if (handle) {
     try {
@@ -70,6 +91,11 @@ export async function pickSaveDirectory(_settings: AppSettings): Promise<{ path:
     const path = await desktop.pickDirectory()
     if (!path) return null
     return { path, handle: null }
+  }
+
+  // On Android, we'll use a standard path for now as directory picking is complex
+  if (Capacitor.isNativePlatform()) {
+    return { path: 'Documents/MamacoNotes', handle: 'native' }
   }
 
   const w = window as unknown as { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }

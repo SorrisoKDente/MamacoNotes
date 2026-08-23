@@ -559,7 +559,7 @@ Flow and files involved:
 | CRUD for notebooks/folders/pages/templates | `src/store.ts` |
 | IndexedDB (read/write) | `src/db.ts` |
 | Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
-| Automatic backup to disk | `src/utils/localSave.ts` |
+| Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via Capacitor Filesystem)**. |
 | Restore all (import backup) | `src/store.ts` (`replaceAllData`) |
 | Store contracts (state + actions, see §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 
