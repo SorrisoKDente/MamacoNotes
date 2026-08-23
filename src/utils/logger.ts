@@ -19,7 +19,13 @@ export const logger = {
       timestamp: Date.now(),
       level,
       message,
-      details: details ? (typeof details === 'string' ? details : JSON.stringify(details, null, 2)) : undefined,
+      details: details
+        ? details instanceof Error
+          ? `${details.message}\n${details.stack}`
+          : typeof details === 'string'
+            ? details
+            : JSON.stringify(details, null, 2)
+        : undefined,
     }
 
     logs.push(entry)

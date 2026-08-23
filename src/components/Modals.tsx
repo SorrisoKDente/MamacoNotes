@@ -1511,8 +1511,30 @@ function SettingsModal() {
           <div className="modal-actions" style={{ marginTop: 0, marginBottom: '12px' }}>
             <button className="btn" onClick={() => {
               const text = logs.map(l => `[${new Date(l.timestamp).toLocaleString()}] [${l.level.toUpperCase()}] ${l.message}\n${l.details || ''}`).join('\n---\n')
-              navigator.clipboard.writeText(text).then(() => {
+
+              const copyToClipboard = (str: string) => {
+                if (navigator.clipboard && window.isSecureContext) {
+                  return navigator.clipboard.writeText(str)
+                } else {
+                  const textArea = document.createElement("textarea")
+                  textArea.value = str
+                  textArea.style.position = "fixed"
+                  textArea.style.left = "-999999px"
+                  textArea.style.top = "-999999px"
+                  document.body.appendChild(textArea)
+                  textArea.focus()
+                  textArea.select()
+                  return new Promise<void>((res, rej) => {
+                    document.execCommand('copy') ? res() : rej()
+                    textArea.remove()
+                  })
+                }
+              }
+
+              copyToClipboard(text).then(() => {
                 alert(t('modal.logsCopied'))
+              }).catch(err => {
+                logger.error('Failed to copy logs', err)
               })
             }}>{t('modal.copyLogs')}</button>
             <button className="btn danger" onClick={() => {
