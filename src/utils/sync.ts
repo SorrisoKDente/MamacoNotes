@@ -11,6 +11,7 @@ import type {
 import { normalizePage, uid } from '../types'
 import { t } from '../i18n'
 import type { Transport } from './webdav'
+import { logger } from './logger'
 
 export const MANIFEST_PATH = 'manifest.json'
 export const NOTEBOOKS_DIR = 'notebooks'
@@ -397,7 +398,9 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     await transport.ensureDirectory(`${basePath}/${NOTEBOOKS_DIR}`)
     await transport.ensureDirectory(`${basePath}/${FOLDERS_DIR}`)
   } catch (e) {
-    result.errors.push(t('error.syncCreateDirsFailed', { message: e instanceof Error ? e.message : String(e) }))
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    logger.error('Sync directory creation failed', e)
+    result.errors.push(t('error.syncCreateDirsFailed', { message: errorMsg }))
     return {
       result,
       nextState: state,
@@ -417,6 +420,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (!msg.includes('404')) {
+      logger.error('Sync manifest read failed', e)
       result.errors.push(t('error.syncReadManifestFailed', { message: msg }))
       return {
         result,

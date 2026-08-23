@@ -78,14 +78,14 @@ export function TopBar() {
           <span className={layersOpen ? 'icon icon-layers-open' : 'icon icon-layers'} />
         </button>
         <button
-          className="icon-btn"
+          className="icon-btn hide-on-mobile"
           title={t('topbar.hideTopBar')}
           onClick={() => setSettings({ hideTopBar: !hideTopBar })}
         >
           <span className="icon icon-hide-topbar" />
         </button>
         <button
-          className="icon-btn"
+          className="icon-btn hide-on-mobile"
           title={t('topbar.hideToolbar')}
           onClick={() => setSettings({ hideToolbar: !hideToolbar })}
         >

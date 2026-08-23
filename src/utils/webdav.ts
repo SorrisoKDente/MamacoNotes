@@ -1,5 +1,6 @@
 import type { CloudSettings } from '../types'
 import { t } from '../i18n'
+import { logger } from './logger'
 
 const NOTEBOOKS_DIR = 'notebooks'
 const FOLDERS_DIR = 'folders'
@@ -248,21 +249,26 @@ export async function uploadFile(
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
   const body = bytes instanceof Blob ? bytes : new Uint8Array(bytes)
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      Authorization: authHeader(settings),
-      'Content-Type': contentType,
-    },
-    body,
-  })
-  if (!res.ok && res.status !== 201 && res.status !== 204) {
-    if (res.status === 404) {
-      throw new Error(
-        t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
-      )
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: authHeader(settings),
+        'Content-Type': contentType,
+      },
+      body,
+    })
+    if (!res.ok && res.status !== 201 && res.status !== 204) {
+      if (res.status === 404) {
+        throw new Error(
+          t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
+        )
+      }
+      throw new Error(t('error.uploadFailed', { filePath, status: res.status }))
     }
-    throw new Error(t('error.uploadFailed', { filePath, status: res.status }))
+  } catch (err) {
+    logger.error(`Upload failed: ${filePath}`, err)
+    throw err
   }
 }
 
@@ -272,11 +278,16 @@ export async function downloadFile(
 ): Promise<string> {
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
-  const res = await fetch(url, {
-    headers: { Authorization: authHeader(settings) },
-  })
-  if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
-  return res.text()
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: authHeader(settings) },
+    })
+    if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+    return res.text()
+  } catch (err) {
+    logger.error(`Download failed: ${filePath}`, err)
+    throw err
+  }
 }
 
 export async function deleteRemoteFile(
@@ -309,6 +320,7 @@ export async function testWebdavConnection(
       body: PROPFIND_BODY,
     })
     if (!res.ok && res.status !== 207) {
+      logger.error('WebDAV connection test failed', { status: res.status, url: settings.webdavUrl })
       return {
         ok: false,
         message: t('error.webdavAccessFailed', { status: res.status }),
@@ -322,6 +334,7 @@ export async function testWebdavConnection(
         : t('error.connectionOkBaseMissing', { path: settings.webdavPath }),
     }
   } catch (e) {
+    logger.error('WebDAV connection test exception', e)
     return { ok: false, message: e instanceof Error ? e.message : String(e) }
   }
 }

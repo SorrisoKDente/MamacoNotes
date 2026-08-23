@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
+import { logger } from '../utils/logger'
 import type {
   AppTheme,
   ConflictChoice,
@@ -1010,7 +1011,7 @@ function SettingsModal() {
   const folders = useAppStore((s) => s.folders)
   const notebooks = useAppStore((s) => s.notebooks)
   const replaceAllData = useAppStore((s) => s.replaceAllData)
-  const [tab, setTab] = useState<'geral' | 'atalhos' | 'nuvem' | 'aparencia'>('geral')
+  const [tab, setTab] = useState<'geral' | 'atalhos' | 'nuvem' | 'aparencia' | 'logs'>('geral')
   const [capturing, setCapturing] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [dirBusy, setDirBusy] = useState(false)
@@ -1018,7 +1019,17 @@ function SettingsModal() {
   const [updateBusy, setUpdateBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
+  const [logs, setLogs] = useState(() => logger.getLogs())
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (tab === 'logs') {
+      const interval = setInterval(() => {
+        setLogs(logger.getLogs())
+      }, 1000)
+      return () => clearInterval(interval)
+    }
+  }, [tab])
   const [conflict, setConflict] = useState<{
     action: ShortcutActionId
     value: string
@@ -1108,6 +1119,7 @@ function SettingsModal() {
         <button className={`tab ${tab === 'aparencia' ? 'active' : ''}`} onClick={() => setTab('aparencia')}>{t('modal.tabAppearance')}</button>
         <button className={`tab ${tab === 'atalhos' ? 'active' : ''}`} onClick={() => setTab('atalhos')}>{t('modal.tabShortcuts')}</button>
         <button className={`tab ${tab === 'nuvem' ? 'active' : ''}`} onClick={() => setTab('nuvem')}>{t('modal.tabCloud')}</button>
+        <button className={`tab ${tab === 'logs' ? 'active' : ''}`} onClick={() => setTab('logs')}>{t('modal.tabLogs')}</button>
       </div>
 
       {tab === 'geral' && (
@@ -1491,6 +1503,41 @@ function SettingsModal() {
           <div className="modal-hint">
             {t('modal.koofrHintA')} <code>https://app.koofr.net/dav</code> {t('modal.koofrHintB')} {t('modal.koofrHintC', { path: settings.cloud.webdavPath })}
           </div>
+        </div>
+      )}
+
+      {tab === 'logs' && (
+        <div className="settings-body logs-list">
+          <div className="modal-actions" style={{ marginTop: 0, marginBottom: '12px' }}>
+            <button className="btn" onClick={() => {
+              const text = logs.map(l => `[${new Date(l.timestamp).toLocaleString()}] [${l.level.toUpperCase()}] ${l.message}\n${l.details || ''}`).join('\n---\n')
+              navigator.clipboard.writeText(text).then(() => {
+                alert(t('modal.logsCopied'))
+              })
+            }}>{t('modal.copyLogs')}</button>
+            <button className="btn danger" onClick={() => {
+              logger.clear()
+              setLogs([])
+            }}>{t('modal.clearLogs')}</button>
+          </div>
+          {logs.length === 0 ? (
+            <div className="modal-hint">{t('modal.noLogs')}</div>
+          ) : (
+            <div className="logs-container">
+              {logs.slice().reverse().map((log, i) => (
+                <div key={i} className={`log-entry ${log.level}`}>
+                  <div className="log-header">
+                    <span className="log-time">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    <span className="log-level">{log.level.toUpperCase()}</span>
+                  </div>
+                  <div className="log-message">{log.message}</div>
+                  {log.details && (
+                    <pre className="log-details">{log.details}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
