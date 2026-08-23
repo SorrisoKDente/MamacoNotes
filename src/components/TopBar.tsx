@@ -77,20 +77,6 @@ export function TopBar() {
         >
           <span className={layersOpen ? 'icon icon-layers-open' : 'icon icon-layers'} />
         </button>
-        <button
-          className="icon-btn hide-on-mobile"
-          title={t('topbar.hideTopBar')}
-          onClick={() => setSettings({ hideTopBar: !hideTopBar })}
-        >
-          <span className="icon icon-hide-topbar" />
-        </button>
-        <button
-          className="icon-btn hide-on-mobile"
-          title={t('topbar.hideToolbar')}
-          onClick={() => setSettings({ hideToolbar: !hideToolbar })}
-        >
-          <span className="icon icon-hide-toolbar" />
-        </button>
         <div className="topbar-brand">Mamaco Notes</div>
       </div>
 
@@ -145,6 +131,20 @@ export function TopBar() {
         </button>
         <button className="btn" onClick={() => open('settings')}>
           <span className="icon icon-gear" /> {t('topbar.settings')}
+        </button>
+        <button
+          className="icon-btn"
+          title={t('topbar.hideTopBar')}
+          onClick={() => setSettings({ hideTopBar: !hideTopBar })}
+        >
+          <span className="icon icon-hide-topbar" />
+        </button>
+        <button
+          className="icon-btn"
+          title={t('topbar.hideToolbar')}
+          onClick={() => setSettings({ hideToolbar: !hideToolbar })}
+        >
+          <span className="icon icon-hide-toolbar" />
         </button>
         <button className="icon-btn topbar-fullscreen" title={t('topbar.fullscreen')} onClick={toggleFullscreen}>
           <span className="icon icon-fullscreen" />
