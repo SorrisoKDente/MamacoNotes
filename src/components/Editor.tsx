@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
@@ -85,7 +85,10 @@ export function Editor() {
 
   const [zoomDisplay, setZoomDisplay] = useState(1)
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
-  const [mousePos, setMousePos] = useState({ x: -100, y: -100 })
+
+  const toolCursorRef = useRef<HTMLDivElement>(null)
+  const requestRenderIdRef = useRef<number>(0)
+  const isDirtyRef = useRef<boolean>(false)
 
   const [inlineText, setInlineText] = useState<{
     pageX: number
@@ -199,7 +202,7 @@ export function Editor() {
     }, 400)
   }
 
-  const requestRender = useCallback(() => {
+  const performRender = useCallback(() => {
     const engine = engineRef.current
     const pg = pageRef.current
     if (!engine || !pg) return
@@ -256,10 +259,28 @@ export function Editor() {
         }
       }
     }
+    const zd = Math.round(zoomRef.current * 100)
+    if (zd !== zoomDisplay) setZoomDisplay(zd)
+  }, [zoomDisplay])
+
+  const requestRender = useCallback(() => {
+    isDirtyRef.current = true
   }, [])
 
   const requestRenderRef = useRef(requestRender)
   requestRenderRef.current = requestRender
+
+  useEffect(() => {
+    const loop = () => {
+      if (isDirtyRef.current) {
+        isDirtyRef.current = false
+        performRender()
+      }
+      requestRenderIdRef.current = requestAnimationFrame(loop)
+    }
+    requestRenderIdRef.current = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(requestRenderIdRef.current)
+  }, [performRender])
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
@@ -583,7 +604,10 @@ export function Editor() {
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    mousePosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    mousePosRef.current = { x: mx, y: my }
+    updateCursorDOM(mx, my)
   }
 
   function getPointerPos(e: PointerEvent) {
@@ -1878,13 +1902,32 @@ export function Editor() {
     canvas.style.cursor = 'default'
   }
 
+  const updateCursorDOM = useCallback(
+    (mx: number, my: number) => {
+      if (!toolCursorRef.current) return
+      const t = toolRef.current
+      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') return
+      const diameter =
+        t === 'eraser'
+          ? Math.max(3, settings.lastEraserSize)
+          : Math.max(3, Math.min(56, (t === 'pen' ? settings.lastPenSize : settings.lastHighlighterSize) * 2.5))
+      toolCursorRef.current.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
+    },
+    [settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
+  )
+
   function onPointerMove(e: React.PointerEvent) {
     const engine = engineRef.current
     const canvas = canvasRef.current
     if (!engine || !canvas || !page) return
+
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    mousePosRef.current = { x: mx, y: my }
+    updateCursorDOM(mx, my)
+
     const pos = getPointerPos(e.nativeEvent)
-    mousePosRef.current = { x: e.clientX - canvas.getBoundingClientRect().left, y: e.clientY - canvas.getBoundingClientRect().top }
-    if (tool === 'eraser' || tool === 'pen' || tool === 'highlighter') setMousePos({ ...mousePosRef.current })
     activePointersRef.current.set(e.pointerId, pos)
 
     const pending = pendingTwoFingerRef.current
@@ -2024,15 +2067,21 @@ export function Editor() {
     }
 
     if (drag.kind === 'draw') {
-      engine.extendStroke(pos.x, pos.y, e.pressure || (e.pointerType === 'mouse' ? 1 : 0.5))
+      const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
+      for (const ev of events) {
+        engine.extendStroke(ev.clientX, ev.clientY, ev.pressure || (ev.pointerType === 'mouse' ? 1 : 0.5))
+      }
       return
     }
 
     if (drag.kind === 'erase') {
-      const cur = engine.toPageCoords(pos.x, pos.y)
+      const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       const session = eraseSessionRef.current
       if (!session) return
-      erasePendingRef.current.to = cur
+      for (const ev of events) {
+        const cur = engine.toPageCoords(ev.clientX, ev.clientY)
+        erasePendingRef.current.to = cur
+      }
       scheduleEraseStep()
       return
     }
@@ -2655,8 +2704,8 @@ export function Editor() {
           />
           {showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
             <ToolCursor
+              ref={toolCursorRef}
               size={cursorSize(tool, settings)}
-              pos={mousePos}
               color={cursorColor(tool, settings)}
               translucent={tool === 'highlighter'}
               exactSize={tool === 'eraser'}
@@ -2717,29 +2766,26 @@ function cursorColor(tool: ToolKind, settings: ReturnType<typeof useAppStore.get
   return '#9a9ab0'
 }
 
-function ToolCursor({
-  size,
-  pos,
-  color,
-  translucent,
-  exactSize = false,
-}: {
-  size: number
-  pos: { x: number; y: number }
-  color: string
-  translucent?: boolean
-  exactSize?: boolean
-}) {
+const ToolCursor = React.forwardRef<
+  HTMLDivElement,
+  {
+    size: number
+    color: string
+    translucent?: boolean
+    exactSize?: boolean
+  }
+>(({ size, color, translucent, exactSize = false }, ref) => {
   const diameter = exactSize
     ? Math.max(3, size)
     : Math.max(3, Math.min(56, size * 2.5))
   return (
     <div
+      ref={ref}
       className="tool-cursor"
       style={{
         width: diameter,
         height: diameter,
-        transform: `translate(${pos.x - diameter / 2}px, ${pos.y - diameter / 2}px)`,
+        transform: `translate(-100px, -100px)`,
         borderColor: color,
         background: translucent ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.15)',
       }}
@@ -2750,7 +2796,7 @@ function ToolCursor({
       />
     </div>
   )
-}
+})
 
 function InlineTextInput({
   canvas,

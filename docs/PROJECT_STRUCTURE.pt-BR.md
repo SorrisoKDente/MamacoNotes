@@ -642,6 +642,7 @@ Fluxo e arquivos envolvidos:
   passar pela persistência).
 - **Persistência**: toda alteração de dados persiste via `db.*` + `scheduleLocalBackup()`.
 - **Comunicação UI ↔ canvas**: via `CustomEvent` (`ink:*`), nunca props profundas.
+- **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** para desacoplar o desenho dos eventos de ponteiro, garantindo uma taxa de quadros estável. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs para evitar re-renders do React. Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
 - **Canvas**: `Editor.tsx` é o dono do motor; `PageCanvas` só renderiza e faz hit tests.
 - **Funções puras de desenho** (para thumbnail/export) vivem em `renderer/drawUtils.ts` e
   reutilizam `utils/drawText.ts`.

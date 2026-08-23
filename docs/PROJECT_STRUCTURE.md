@@ -639,6 +639,7 @@ Flow and files involved:
   going through persistence).
 - **Persistence**: every data change persists via `db.*` + `scheduleLocalBackup()`.
 - **UI ↔ canvas communication**: via `CustomEvent` (`ink:*`), never deep props.
+- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** to decouple drawing from pointer events, ensuring a consistent frame rate. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs to avoid React re-renders. High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
 - **Canvas**: `Editor.tsx` owns the engine; `PageCanvas` only renders and performs hit
   tests.
 - **Pure drawing functions** (for thumbnail/export) live in `renderer/drawUtils.ts` and
