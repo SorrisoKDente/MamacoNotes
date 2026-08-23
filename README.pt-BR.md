@@ -71,7 +71,7 @@ Se você tiver ideias de melhorias ou quiser reportar um erro, por favor, me avi
 
 Se você achar este projeto útil e quiser apoiar financeiramente o seu desenvolvimento, você pode doar através de:
 - ☕ **Ko-fi**: [ko-fi.com/yabaihonyaku](https://ko-fi.com/yabaihonyaku)
-- 💸 **Pix (Brasil)**: `yabaihonyaku@gmail.com`
+- 💸 **Pix (Brasil)**: `mamaconotes@gmail.com`
 
 <p align="center">
   <img src="assets/YABAIPIX.png" alt="Pix QR Code" width="200"/>
