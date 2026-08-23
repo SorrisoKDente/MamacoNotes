@@ -10,6 +10,12 @@
 
 This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-assisted development to create a robust and feature-rich application.
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="assets/mamaco_notes_layout.png" alt="App Layout" width="800"/>
+</p>
+
 Beyond the technology, **Mamaco Notes** represents a personal learning journey. As a developer exploring the world of multi-platform development (Windows, Linux, and Android) for the first time, I am using this project as a hands-on way to master new tools, architectures, and the challenges of creating a seamless experience across different devices.
 
 ## 🚀 Key Features

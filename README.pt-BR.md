@@ -10,6 +10,12 @@ O **Mamaco Notes** é um aplicativo de anotações digitais projetado para escri
 
 Este projeto foi desenvolvido quase 100% usando o **MonkeyCodeAI**, aproveitando o desenvolvimento assistido por IA para criar uma aplicação robusta e rica em recursos.
 
+## 📸 Capturas de Tela
+
+<p align="center">
+  <img src="assets/mamaco_notes_layout-pt-BR.png" alt="Layout do Aplicativo" width="800"/>
+</p>
+
 Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprendizado. Como um desenvolvedor explorando o mundo do desenvolvimento multiplataforma (Windows, Linux e Android) pela primeira vez, estou usando este projeto como uma forma prática de dominar novas ferramentas, arquiteturas e os desafios de criar uma experiência fluida em diferentes dispositivos.
 
 ## 🚀 Principais Funcionalidades

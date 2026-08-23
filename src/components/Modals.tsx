@@ -1015,6 +1015,7 @@ function SettingsModal() {
   const [showPassword, setShowPassword] = useState(false)
   const [dirBusy, setDirBusy] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -1227,12 +1228,12 @@ function SettingsModal() {
               </p>
               <button
                 className="btn"
-                disabled={backupBusy}
+                disabled={updateBusy}
                 onClick={async () => {
-                  setBackupBusy(true)
+                  setUpdateBusy(true)
                   setUpdateMsg(t('modal.checkingUpdates'))
                   const res = await checkForUpdates()
-                  setBackupBusy(false)
+                  setUpdateBusy(false)
                   if (!res) {
                     setUpdateMsg(t('modal.noUpdateFound'))
                     return
@@ -1245,7 +1246,7 @@ function SettingsModal() {
                   }
                 }}
               >
-                {backupBusy ? t('modal.checkingUpdates') : t('modal.checkForUpdates')}
+                {updateBusy ? t('modal.checkingUpdates') : t('modal.checkForUpdates')}
               </button>
               {updateMsg && <div className="modal-result">{updateMsg}</div>}
             </div>
