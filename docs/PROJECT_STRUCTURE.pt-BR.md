@@ -143,7 +143,7 @@ Fluxo de inicialização:
 | `pdf.ts` | Renderização de arquivos PDF em imagens via `pdfjs-dist` (`renderPdfPages`) |
 | `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport` |
 | `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração) |
-| `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza `saveDirectory`/handle) |
+| `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza `saveDirectory`/handle e **remove senhas de nuvem** por segurança) |
 | `localSave.ts` | Backup automático para disco (Electron) ou diretório do navegador (File System Access), no mesmo formato do backup manual (inclui configurações) |
 | `imageErase.ts` | Borracha em imagens: sessão de apagar em canvas offscreen e re-encode ao final |
 | `colors.ts` | Paleta de cores e helpers de conversão HEX/RGB |

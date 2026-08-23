@@ -49,8 +49,8 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Security & Persistence**:
     -   Data stored locally using **IndexedDB**.
     -   Session restoration to automatically reopen the last notebook and page.
-    -   Automatic local backups to disk (Electron) or browser directory.
-    -   Manual full backup (JSON) import/export.
+    -   Automatic local backups to disk (Electron) or browser directory (**passwords excluded for security**).
+    -   Manual full backup (JSON) import/export (**passwords excluded for security**).
 
 ## 🛠️ Tech Stack
 

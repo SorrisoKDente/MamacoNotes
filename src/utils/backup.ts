@@ -21,7 +21,15 @@ function desktop(): DesktopBridge {
 
 export function sanitizeSettingsForBackup(settings: AppSettings | null | undefined): AppSettings | null {
   if (!settings) return null
-  return { ...settings, saveDirectoryHandle: null, saveDirectory: '' }
+  return {
+    ...settings,
+    saveDirectoryHandle: null,
+    saveDirectory: '',
+    cloud: {
+      ...settings.cloud,
+      webdavPassword: '', // Never export the cloud password for security reasons
+    },
+  }
 }
 
 export function buildBackupPayload(

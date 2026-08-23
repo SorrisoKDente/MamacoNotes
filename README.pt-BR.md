@@ -49,8 +49,8 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
 -   **Segurança e Persistência**:
     -   Dados armazenados localmente usando **IndexedDB**.
     -   Restauração de sessão para reabrir automaticamente o último caderno e página.
-    -   Backups automáticos em disco (Electron) ou diretório do navegador.
-    -   Importação/exportação de backup manual completo (JSON).
+    -   Backups automáticos em disco (Electron) ou diretório do navegador (**senhas excluídas por segurança**).
+    -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
 
 ## 🛠️ Stack Tecnológica
 
