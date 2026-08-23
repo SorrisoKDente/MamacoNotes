@@ -8,6 +8,7 @@ import { ImageEraseSession } from '../utils/imageErase'
 import { computePageOffsets, pageUnderPoint, pageVisualBox, pageVisualRect } from '../utils/layout'
 import type { PageOffset } from '../utils/layout'
 import { measureTextElement, textElementCorners, type TextLayout } from '../utils/drawText'
+import { normalizeKey } from '../utils/shortcuts'
 import { useI18n } from '../i18n'
 
 const MIN_ZOOM = 0.1
