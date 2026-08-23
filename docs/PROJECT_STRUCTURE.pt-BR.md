@@ -537,7 +537,7 @@ Fluxo e arquivos envolvidos:
 
 | Assunto | Arquivo(s) |
 |---|---|
-| Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. O estado das teclas é rastreado via `pressedKeysRef`. |
+| Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. O estado das teclas é rastreado via `pressedKeysRef`. Ao soltar a tecla, volta para a ferramenta anterior imediatamente. |
 | Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
 | Borracha de traços | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`) |
 | Borracha de imagens | `src/utils/imageErase.ts` + `Editor.tsx` |
@@ -629,7 +629,7 @@ Fluxo e arquivos envolvidos:
 | Defaults | `src/types.ts` (`DEFAULT_SHORTCUTS`) |
 | Normalização/registro de atalhos | `src/hooks/useShortcuts.ts` |
 | Rótulos e normalização de teclas | `src/utils/shortcuts.ts` |
-| Atalhos de ocultar barras / rotação livre / modos de seleção (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts` |
+| Atalhos de ocultar barras / rotação livre / modos de seleção (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`. Nota: o atalho de `pan` é tratado exclusivamente como um modificador "segurar para ativar" no `Editor.tsx` e não altera o estado global da ferramenta. |
 | UI de configuração de atalhos | `Modals.tsx` (`SettingsModal` → aba "Atalhos"). Permite busca por nome, mapeamento de teclas (incluindo modificadores isolados como `Alt`) e **restauração de atalhos padrão** de forma independente das demais configurações. |
 | Rótulos e normalização de teclas | `src/utils/shortcuts.ts` (`normalizeKey` trata combinações e teclas modificadoras isoladas) |
 
