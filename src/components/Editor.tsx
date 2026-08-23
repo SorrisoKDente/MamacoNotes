@@ -164,6 +164,7 @@ export function Editor() {
     scheduled: false,
   })
   const lastClickRef = useRef<{ x: number; y: number; time: number; type: string; id: string } | null>(null)
+  const pressedKeysRef = useRef<Set<string>>(new Set())
 
   const dirtyRef = useRef(false)
 
@@ -1335,6 +1336,15 @@ export function Editor() {
     }
   }
 
+  const isPanShortcutActive = useCallback((e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
+    const panShortcut = settings.shortcuts.pan
+    if (!panShortcut) return false
+    if (panShortcut === 'alt') return e.altKey
+    if (panShortcut === 'ctrl') return e.ctrlKey || e.metaKey
+    if (panShortcut === 'shift') return e.shiftKey
+    return pressedKeysRef.current.has(panShortcut)
+  }, [settings.shortcuts.pan])
+
   function onPointerDown(e: React.PointerEvent) {
     const canvas = canvasRef.current
     const engine = engineRef.current
@@ -1394,7 +1404,7 @@ export function Editor() {
     dragInterruptedByTouchRef.current = false
     multiTouchDownAtRef.current = 0
 
-    if (e.altKey || e.button === 1 || tool === 'pan') {
+    if (isPanShortcutActive(e) || e.button === 1 || tool === 'pan') {
       lastInteractionPanRef.current = { ...panRef.current }
       dragRef.current = {
         kind: 'pan',
@@ -2518,6 +2528,9 @@ export function Editor() {
       requestRenderRef.current()
     }
     const onKey = (e: KeyboardEvent) => {
+      const normalized = normalizeKey(e)
+      if (normalized) pressedKeysRef.current.add(normalized)
+
       const target = e.target as HTMLElement | null
       if (
         target &&
@@ -2563,6 +2576,10 @@ export function Editor() {
         deleteSelectionRef.current()
       }
     }
+    const onKeyUp = (e: KeyboardEvent) => {
+      const normalized = normalizeKey(e)
+      if (normalized) pressedKeysRef.current.delete(normalized)
+    }
     window.addEventListener('ink:zoom', onZoom)
     window.addEventListener('ink:recenter', onRecenter)
     window.addEventListener('ink:add-page', onAddPage)
@@ -2574,6 +2591,7 @@ export function Editor() {
     window.addEventListener('ink:text-commit-center', onTextCommitCenter)
     window.addEventListener('ink:text-delete', onTextDelete)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
     window.addEventListener('ink:esc', onInkEsc)
     const onResize = () => {
       if (resizeTimerRef.current) window.clearTimeout(resizeTimerRef.current)
@@ -2596,6 +2614,7 @@ export function Editor() {
       window.removeEventListener('ink:text-commit-center', onTextCommitCenter)
       window.removeEventListener('ink:text-delete', onTextDelete)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('ink:esc', onInkEsc)
       window.removeEventListener('resize', onResize)
       window.visualViewport?.removeEventListener('resize', onResize)

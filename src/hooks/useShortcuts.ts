@@ -38,6 +38,9 @@ export function initGlobalShortcuts(): () => void {
       case 'text':
         s.setTool('text')
         break
+      case 'pan':
+        s.setTool('pan')
+        break
       case 'undo':
         s.undo()
         break

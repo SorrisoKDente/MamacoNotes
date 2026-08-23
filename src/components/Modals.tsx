@@ -1265,7 +1265,7 @@ function SettingsModal() {
           <div className="settings-section">
             <div className="settings-section-title">{t('modal.sectionRestore')}</div>
             <div className="settings-reset">
-              <div className="panel-label">{t('modal.restoreDefaults')}</div>
+              <div className="panel-label">{t('modal.restoreShortcutsAndDir')}</div>
               <p className="modal-hint">
                 {t('modal.restoreDefaultsHint')}
               </p>
@@ -1274,7 +1274,6 @@ function SettingsModal() {
                 onClick={() => {
                   if (confirm(t('modal.restoreConfirm'))) {
                     void setSettings({
-                      shortcuts: { ...DEFAULT_SHORTCUTS },
                       saveDirectory: '',
                       saveDirectoryHandle: null,
                     })
@@ -1395,6 +1394,27 @@ function SettingsModal() {
               </>
             )
           })()}
+
+          <div className="settings-section" style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+            <div className="settings-reset">
+              <div className="panel-label">{t('modal.restoreShortcuts')}</div>
+              <p className="modal-hint">
+                {t('modal.restoreShortcutsConfirm')}
+              </p>
+              <button
+                className="btn"
+                onClick={() => {
+                  if (confirm(t('modal.restoreShortcutsConfirm'))) {
+                    void setSettings({
+                      shortcuts: { ...DEFAULT_SHORTCUTS },
+                    })
+                  }
+                }}
+              >
+                {t('modal.restoreShortcuts')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

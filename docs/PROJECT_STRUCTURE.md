@@ -534,9 +534,7 @@ Flow and files involved:
 
 | Subject | File(s) |
 |---|---|
-| Side toolbar tools (pen, highlighter, eraser, text, select, move) | `src/components/Toolbar.tsx` |
-| Options panel for each tool (color, size, mode) | `src/components/Toolbar.tsx` (`PenPanel`, `EraserPanel`, `SelectPanel`, `TextPanel`, `PanPanel`, `RotationPanel`). The panel opens when touching the tool (closed by default at start), closes when touching outside the toolbar, when switching to Rotation, or with `Esc` (`ink:esc`) |
-| Canvas drawing gestures (pointerdown/move/up) | `src/components/Editor.tsx` (`onPointerDown/Move/Up`) |
+| Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Key state is tracked via `pressedKeysRef`. |
 | Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
 | Stroke eraser | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`) |
 | Image eraser | `src/utils/imageErase.ts` + `Editor.tsx` |
@@ -629,7 +627,8 @@ Flow and files involved:
 | Shortcut normalization/registration | `src/hooks/useShortcuts.ts` |
 | Key labels and normalization | `src/utils/shortcuts.ts` |
 | Hide bars / free rotation / selection mode shortcuts (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts` |
-| Shortcut configuration UI (search by name, duplicate shortcut warning with replace/invert/cancel) | `Modals.tsx` (`SettingsModal` → "Shortcuts" tab) |
+| Keyboard Shortcut Configuration UI | `Modals.tsx` (`SettingsModal` → "Shortcuts" tab). Allows searching by name, mapping keys (including standalone modifiers like `Alt`), and **restoring default shortcuts** independently from other settings. |
+| Key labels and normalization | `src/utils/shortcuts.ts` (`normalizeKey` handles combinations and standalone modifier keys) |
 
 ---
 
