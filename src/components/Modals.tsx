@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
 import type {
+  AppTheme,
   ConflictChoice,
   DeleteScope,
   Page,
@@ -1009,12 +1010,13 @@ function SettingsModal() {
   const folders = useAppStore((s) => s.folders)
   const notebooks = useAppStore((s) => s.notebooks)
   const replaceAllData = useAppStore((s) => s.replaceAllData)
-  const [tab, setTab] = useState<'geral' | 'atalhos' | 'nuvem'>('geral')
+  const [tab, setTab] = useState<'geral' | 'atalhos' | 'nuvem' | 'aparencia'>('geral')
   const [capturing, setCapturing] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [dirBusy, setDirBusy] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [conflict, setConflict] = useState<{
     action: ShortcutActionId
@@ -1102,6 +1104,7 @@ function SettingsModal() {
       <h2>{t('modal.settings')}</h2>
       <div className="tabs">
         <button className={`tab ${tab === 'geral' ? 'active' : ''}`} onClick={() => setTab('geral')}>{t('modal.tabGeneral')}</button>
+        <button className={`tab ${tab === 'aparencia' ? 'active' : ''}`} onClick={() => setTab('aparencia')}>{t('modal.tabAppearance')}</button>
         <button className={`tab ${tab === 'atalhos' ? 'active' : ''}`} onClick={() => setTab('atalhos')}>{t('modal.tabShortcuts')}</button>
         <button className={`tab ${tab === 'nuvem' ? 'active' : ''}`} onClick={() => setTab('nuvem')}>{t('modal.tabCloud')}</button>
       </div>
@@ -1136,75 +1139,6 @@ function SettingsModal() {
                 {t('modal.autoSave')}
               </label>
               <span className="modal-hint">{t('modal.autoSaveHint')}</span>
-            </div>
-          </div>
-          <div className="settings-section">
-            <div className="settings-section-title">{t('modal.sectionAppearance')}</div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideTopBar}
-                  onChange={(e) => setSettings({ hideTopBar: e.target.checked })}
-                />
-                {t('modal.hideTopBar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideTopBarHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideToolbar}
-                  onChange={(e) => setSettings({ hideToolbar: e.target.checked })}
-                />
-                {t('modal.hideToolbar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideToolbarHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideSidebar}
-                  onChange={(e) => setSettings({ hideSidebar: e.target.checked })}
-                />
-                {t('modal.hideSidebar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideSidebarHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hidePageList}
-                  onChange={(e) => setSettings({ hidePageList: e.target.checked })}
-                />
-                {t('modal.hidePageList')}
-              </label>
-              <span className="modal-hint">{t('modal.hidePageListHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hidePageCount}
-                  onChange={(e) => setSettings({ hidePageCount: e.target.checked })}
-                />
-                {t('modal.hidePageCount')}
-              </label>
-              <span className="modal-hint">{t('modal.hidePageCountHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideToolCursor}
-                  onChange={(e) => setSettings({ hideToolCursor: e.target.checked })}
-                />
-                {t('modal.hideToolCursor')}
-              </label>
-              <span className="modal-hint">{t('modal.hideToolCursorHint')}</span>
             </div>
           </div>
           <div className="settings-section">
@@ -1289,30 +1223,116 @@ function SettingsModal() {
             <div className="settings-reset">
               <div className="panel-label">{t('modal.currentVersion', { version: APP_VERSION })}</div>
               <p className="modal-hint">
-                {backupMsg || t('modal.upToDate')}
+                {updateMsg || t('modal.upToDate')}
               </p>
               <button
                 className="btn"
                 disabled={backupBusy}
                 onClick={async () => {
                   setBackupBusy(true)
-                  setBackupMsg(t('modal.checkingUpdates'))
+                  setUpdateMsg(t('modal.checkingUpdates'))
                   const res = await checkForUpdates()
                   setBackupBusy(false)
                   if (!res) {
-                    setBackupMsg(t('modal.noUpdateFound'))
+                    setUpdateMsg(t('modal.noUpdateFound'))
                     return
                   }
                   if (res.available) {
-                    setBackupMsg(t('modal.updateFound', { version: res.latestVersion }))
+                    setUpdateMsg(t('modal.updateFound', { version: res.latestVersion }))
                     useUiStore.getState().open('update', { info: res })
                   } else {
-                    setBackupMsg(t('modal.upToDate'))
+                    setUpdateMsg(t('modal.noUpdateFound'))
                   }
                 }}
               >
                 {backupBusy ? t('modal.checkingUpdates') : t('modal.checkForUpdates')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'aparencia' && (
+        <div className="settings-body">
+          <div className="settings-section">
+            <div className="settings-section-title">{t('modal.sectionAppearance')}</div>
+
+            <label className="form-label">{t('modal.theme')}</label>
+            <select
+              className="form-input"
+              value={settings.theme}
+              onChange={(e) => setSettings({ theme: e.target.value as AppTheme })}
+            >
+              <option value="system">{t('modal.themeSystem')}</option>
+              <option value="light">{t('modal.themeLight')}</option>
+              <option value="dark">{t('modal.themeDark')}</option>
+            </select>
+
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hideTopBar}
+                  onChange={(e) => setSettings({ hideTopBar: e.target.checked })}
+                />
+                {t('modal.hideTopBar')}
+              </label>
+              <span className="modal-hint">{t('modal.hideTopBarHint')}</span>
+            </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hideToolbar}
+                  onChange={(e) => setSettings({ hideToolbar: e.target.checked })}
+                />
+                {t('modal.hideToolbar')}
+              </label>
+              <span className="modal-hint">{t('modal.hideToolbarHint')}</span>
+            </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hideSidebar}
+                  onChange={(e) => setSettings({ hideSidebar: e.target.checked })}
+                />
+                {t('modal.hideSidebar')}
+              </label>
+              <span className="modal-hint">{t('modal.hideSidebarHint')}</span>
+            </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hidePageList}
+                  onChange={(e) => setSettings({ hidePageList: e.target.checked })}
+                />
+                {t('modal.hidePageList')}
+              </label>
+              <span className="modal-hint">{t('modal.hidePageListHint')}</span>
+            </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hidePageCount}
+                  onChange={(e) => setSettings({ hidePageCount: e.target.checked })}
+                />
+                {t('modal.hidePageCount')}
+              </label>
+              <span className="modal-hint">{t('modal.hidePageCountHint')}</span>
+            </div>
+            <div className="settings-check">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.hideToolCursor}
+                  onChange={(e) => setSettings({ hideToolCursor: e.target.checked })}
+                />
+                {t('modal.hideToolCursor')}
+              </label>
+              <span className="modal-hint">{t('modal.hideToolCursorHint')}</span>
             </div>
           </div>
         </div>

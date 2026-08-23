@@ -25,10 +25,27 @@ export default function App() {
   const setLayersOpen = useAppStore((s) => s.setLayersOpen)
   const setSettings = useAppStore((s) => s.setSettings)
   const isMobile = useIsMobile()
+  const theme = useAppStore((s) => s.settings.theme)
   const hideTopBar = useAppStore((s) => s.settings.hideTopBar)
   const hideToolbar = useAppStore((s) => s.settings.hideToolbar)
   const hideSidebar = useAppStore((s) => s.settings.hideSidebar)
   const hidePageList = useAppStore((s) => s.settings.hidePageList)
+
+  useEffect(() => {
+    const applyTheme = () => {
+      const isDark =
+        theme === 'dark' ||
+        (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      document.documentElement.classList.toggle('theme-light', !isDark)
+    }
+    applyTheme()
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
+      const handler = () => applyTheme()
+      mq.addEventListener('change', handler)
+      return () => mq.removeEventListener('change', handler)
+    }
+  }, [theme])
 
   const anyBarHidden = hideTopBar || hideToolbar || hideSidebar || hidePageList
   const bothLeftHidden = hideSidebar && hidePageList

@@ -123,8 +123,11 @@ export interface Folder {
   order?: number
 }
 
+export type AppTheme = 'light' | 'dark' | 'system'
+
 export interface AppSettings {
   language: string
+  theme: AppTheme
   defaultTemplate: TemplateId
   lastPenColor: string
   lastPenSize: number
@@ -299,6 +302,7 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   language: 'pt-BR',
+  theme: 'system',
   defaultTemplate: 'ruled',
   lastPenColor: '#1c1c1c',
   lastPenSize: 3,
