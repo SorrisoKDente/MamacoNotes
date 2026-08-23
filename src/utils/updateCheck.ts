@@ -20,9 +20,10 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
   if (window.inkfolioDesktop) {
     const res = await window.inkfolioDesktop.checkForUpdates()
     if (!res || !res.updateInfo) return null
+    const latestVersion = res.updateInfo.version
     return {
-      available: true,
-      latestVersion: res.updateInfo.version,
+      available: isNewerVersion(latestVersion, APP_VERSION),
+      latestVersion,
       releaseNotes: res.updateInfo.releaseNotes || '',
       url: 'https://github.com/SorrisoKDente/MamacoNotes/releases/latest',
     }

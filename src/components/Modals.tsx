@@ -1238,15 +1238,16 @@ function SettingsModal() {
                     return
                   }
                   if (res.available) {
-                    setUpdateMsg(t('modal.updateFound', { version: res.latestVersion }))
+                    setUpdateMsg(null)
                     useUiStore.getState().open('update', { info: res })
                   } else {
-                    setUpdateMsg(t('modal.noUpdateFound'))
+                    setUpdateMsg(t('modal.upToDate'))
                   }
                 }}
               >
                 {backupBusy ? t('modal.checkingUpdates') : t('modal.checkForUpdates')}
               </button>
+              {updateMsg && <div className="modal-result">{updateMsg}</div>}
             </div>
           </div>
         </div>
@@ -1811,11 +1812,10 @@ function UpdateModal() {
       {info.releaseNotes && (
         <div className="update-notes">
           <h3>{t('modal.updateNotes')}</h3>
-          <div className="update-notes-content">
-            {info.releaseNotes.split('\n').map((line, i) => (
-              <p key={i}>{line}</p>
-            ))}
-          </div>
+          <div
+            className="update-notes-content"
+            dangerouslySetInnerHTML={{ __html: info.releaseNotes }}
+          />
         </div>
       )}
 
