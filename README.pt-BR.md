@@ -2,7 +2,9 @@
 
 [English](README.md) | **Português**
 
-![Prévia do Mamaco Notes](assets/mamaco_notes_layout-pt-BR.png)
+<p align="center">
+  <img src="https://socialify.git.ci/SorrisoKDente/MamacoNotes/image?language=1&logo=https%3A%2F%2Fgithub.com%2FSorrisoKDente%2FMamacoNotes%2Fblob%2Fmaster%2Fbuild-resources%2Ficon.png%3Fraw%3Dtrue&name=1&owner=1&pattern=Charlie+Brown&stargazers=1&theme=Dark" alt="MamacoNotes" width="640" height="320" />
+</p>
 
 O **Mamaco Notes** é um aplicativo de anotações digitais projetado para escrita à mão e desenho, servindo como uma alternativa multiplataforma ao Samsung Notes. Ele foi construído para funcionar perfeitamente no **Windows**, **Linux**, **Android** e na **Web**.
 
