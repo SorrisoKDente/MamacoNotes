@@ -1,4 +1,5 @@
 import { APP_VERSION } from '../types'
+import { customFetch } from './http'
 
 export interface GitHubRelease {
   tag_name: string
@@ -30,7 +31,7 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
   }
 
   try {
-    const response = await fetch(
+    const response = await customFetch(
       'https://api.github.com/repos/SorrisoKDente/MamacoNotes/releases/latest',
     )
     if (!response.ok) return null

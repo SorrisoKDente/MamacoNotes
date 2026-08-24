@@ -1,6 +1,8 @@
+import { Capacitor } from '@capacitor/core'
 import type { CloudSettings } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
+import { customFetch } from './http'
 
 const NOTEBOOKS_DIR = 'notebooks'
 const FOLDERS_DIR = 'folders'
@@ -69,7 +71,7 @@ async function koofrFetch<T>(
   settings: CloudSettings,
   init?: RequestInit,
 ): Promise<{ status: number; data?: T }> {
-  const res = await fetch(apiBase + path, {
+  const res = await customFetch(apiBase + path, {
     ...init,
     headers: {
       Authorization: authHeader(settings),
@@ -146,7 +148,7 @@ async function directoryExists(settings: CloudSettings, dirPath: string): Promis
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
   try {
-    const res = await fetch(url, {
+    const res = await customFetch(url, {
       method: 'PROPFIND',
       headers: {
         Authorization: authHeader(settings),
@@ -156,7 +158,7 @@ async function directoryExists(settings: CloudSettings, dirPath: string): Promis
       body: PROPFIND_BODY,
     })
     if (res.ok || res.status === 207) return true
-    const g = await fetch(url, { headers: { Authorization: authHeader(settings) } })
+    const g = await customFetch(url, { headers: { Authorization: authHeader(settings) } })
     return g.ok || g.status === 207
   } catch {
     return false
@@ -169,14 +171,14 @@ export async function ensureDirectory(
 ): Promise<void> {
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
-  const res = await fetch(url, {
+  const res = await customFetch(url, {
     method: 'MKCOL',
     headers: { Authorization: authHeader(settings) },
   })
   if (res.status === 201) return
   if (res.status === 405 || res.ok) {
     if (await directoryExists(settings, dirPath)) return
-    const trailing = await fetch(`${url}/`, {
+    const trailing = await customFetch(`${url}/`, {
       method: 'MKCOL',
       headers: { Authorization: authHeader(settings) },
     })
@@ -220,7 +222,7 @@ export async function listDirectory(
 ): Promise<string[]> {
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
-  const res = await fetch(url, {
+  const res = await customFetch(url, {
     method: 'PROPFIND',
     headers: {
       Authorization: authHeader(settings),
@@ -250,7 +252,7 @@ export async function uploadFile(
   const url = joinUrl(base, filePath)
   const body = bytes instanceof Blob ? bytes : new Uint8Array(bytes)
   try {
-    const res = await fetch(url, {
+    const res = await customFetch(url, {
       method: 'PUT',
       headers: {
         Authorization: authHeader(settings),
@@ -279,7 +281,7 @@ export async function downloadFile(
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
   try {
-    const res = await fetch(url, {
+    const res = await customFetch(url, {
       headers: { Authorization: authHeader(settings) },
     })
     if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
@@ -296,7 +298,7 @@ export async function deleteRemoteFile(
 ): Promise<void> {
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
-  const res = await fetch(url, {
+  const res = await customFetch(url, {
     method: 'DELETE',
     headers: { Authorization: authHeader(settings) },
   })
@@ -310,7 +312,7 @@ export async function testWebdavConnection(
 ): Promise<{ ok: boolean; message: string }> {
   try {
     const base = await effectiveBaseUrl(settings)
-    const res = await fetch(joinUrl(base, ''), {
+    const res = await customFetch(joinUrl(base, ''), {
       method: 'PROPFIND',
       headers: {
         Authorization: authHeader(settings),
