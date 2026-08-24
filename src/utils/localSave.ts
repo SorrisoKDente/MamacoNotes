@@ -8,7 +8,35 @@ import { PickDirectory, writeFileChunked, readBackupFileFromDirectory } from './
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
+// The backup is a safety net layered on top of IndexedDB (the primary store).
+// Writing the full payload (all notebooks + settings) on every single edit is
+// expensive (JSON.stringify + disk write). Debounce + coalesce so bursts of
+// edits (e.g. drawing strokes) produce at most one backup write per window,
+// always with the latest snapshot — never a growing queue of stale writes.
+const BACKUP_DEBOUNCE_MS = 1500
+
 let writeQueue: Promise<void> = Promise.resolve()
+
+interface BackupSnapshot {
+  notebooks: Notebook[]
+  folders: Folder[]
+  settings: AppSettings
+}
+
+let backupPending: BackupSnapshot | null = null
+let backupTimer: ReturnType<typeof setTimeout> | undefined
+
+function flushBackup() {
+  const pending = backupPending
+  if (!pending) return
+  backupPending = null
+  writeQueue = writeQueue
+    .catch(() => {})
+    .then(() => persistLocalBackup(pending.notebooks, pending.folders, pending.settings))
+    .then(() => {
+      if (backupPending) flushBackup()
+    })
+}
 
 async function writeToDirectoryHandle(
   handle: FileSystemDirectoryHandle,
@@ -97,11 +125,12 @@ export function scheduleLocalBackup(
   folders: Folder[],
   settings: AppSettings,
 ): void {
-  writeQueue = writeQueue
-    .catch(() => {})
-    .then(() => {
-      void persistLocalBackup(notebooks, folders, settings)
-    })
+  backupPending = { notebooks, folders, settings }
+  if (backupTimer !== undefined) return
+  backupTimer = setTimeout(() => {
+    backupTimer = undefined
+    flushBackup()
+  }, BACKUP_DEBOUNCE_MS)
 }
 
 export async function pickSaveDirectory(_settings: AppSettings): Promise<{ path: string; handle: unknown } | null> {

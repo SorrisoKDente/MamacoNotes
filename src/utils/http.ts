@@ -63,6 +63,41 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 /**
+ * Decodes the `data` field that CapacitorHttp returns for a response.
+ *
+ * On Android, CapacitorHttp IGNORES `responseType: 'arraybuffer'` whenever the
+ * response Content-Type is `application/json` — it parses the body into a JS
+ * value first (see HttpRequestHandler.readData, "backward compatibility"
+ * branch). Therefore, for JSON files (manifest/folders/notebooks):
+ *   - a complete body arrives as an object/array  → reconstruct with JSON.stringify;
+ *   - a truncated Range chunk (invalid JSON) arrives as the raw string.
+ * For non-JSON content the body arrives as a base64 string (responseType
+ * arraybuffer/blob). The two string formats are told apart by the base64
+ * alphabet so the correct bytes come out in every case.
+ */
+function decodeCapacitorData(data: unknown): Uint8Array | null {
+  if (typeof data === 'string') {
+    if (/^[A-Za-z0-9+/]*={0,2}$/.test(data) && data.length % 4 === 0) {
+      try {
+        return base64ToBytes(data)
+      } catch {
+        // Not base64 in practice — fall through to raw text.
+      }
+    }
+    return new TextEncoder().encode(data)
+  }
+  if (data !== null && typeof data === 'object') {
+    return new TextEncoder().encode(JSON.stringify(data))
+  }
+  if (typeof data === 'number' || typeof data === 'boolean') {
+    return new TextEncoder().encode(JSON.stringify(data))
+  }
+  return null
+}
+
+export { decodeCapacitorData }
+
+/**
  * Downloads a text resource on native platforms using HTTP Range requests
  * (responseType 'arraybuffer' returns base64, so the server-side content never
  * crosses the bridge in a single large call — avoiding the Android OOM for big
@@ -89,9 +124,8 @@ export async function downloadText(
 
       // Server ignored Range and returned the whole body in one shot.
       if (res.status === 200) {
-        const text = new TextDecoder('utf-8').decode(
-          typeof res.data === 'string' ? base64ToBytes(res.data) : new Uint8Array(0),
-        )
+        const bytes = decodeCapacitorData(res.data)
+        const text = bytes ? new TextDecoder('utf-8').decode(bytes) : ''
         return { ok: true, status: 200, text }
       }
 
@@ -99,9 +133,8 @@ export async function downloadText(
         return { ok: res.status >= 200 && res.status < 300, status: res.status, text: '' }
       }
 
-      const raw = typeof res.data === 'string' ? res.data : ''
-      const bytes = base64ToBytes(raw)
-      if (bytes.length === 0) break
+      const bytes = decodeCapacitorData(res.data)
+      if (!bytes || bytes.length === 0) break
       chunks.push(bytes)
 
       const contentRange = res.headers?.['Content-Range'] ?? res.headers?.['content-range']

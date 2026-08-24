@@ -438,6 +438,23 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     migrated = true
   }
 
+  // Baseline snapshot BEFORE this run's mutations: the local sync state must only
+  // advance once the manifest is actually committed on the server. If the manifest
+  // write fails, we restore this snapshot so the next sync re-runs the same plan
+  // (idempotent) instead of silently pulling/stale-comparing against an old manifest.
+  const baselineSnapshot = {
+    foldersHash: state.foldersHash,
+    foldersUpdatedAt: state.foldersUpdatedAt,
+    notebooks: { ...state.notebooks },
+    tombstones: { ...state.tombstones },
+    localOnlyDeleted: { ...(state.localOnlyDeleted ?? {}) },
+  }
+  const manifestSnapshot = {
+    ...manifest,
+    folders: { ...manifest.folders },
+    notebooks: manifest.notebooks.map((n) => ({ ...n })),
+  }
+
   const plan = buildPlan(notebooks, folders, state, manifest)
   let manifestChanged = migrated
 
@@ -494,7 +511,9 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       state.notebooks[id] = nb.updatedAt
       result.pulled.push(nb.name)
     } catch (e) {
-      result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: e instanceof Error ? e.message : String(e) }))
+      const msg = e instanceof Error ? e.message : String(e)
+      logger.error(`Sync notebook download failed: ${id}`, e)
+      result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: msg }))
     }
   }
 
@@ -589,6 +608,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
           state.foldersUpdatedAt = manifest.folders.updatedAt
         }
       } else {
+        const msg = e instanceof Error ? e.message : String(e)
+        logger.error(`Sync folders download failed (${basePath}/${FOLDERS_PATH})`, e)
         result.errors.push(t('error.syncDownloadFoldersFailed', { message: msg }))
       }
     }
@@ -609,6 +630,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     if (!entry || entry.deleted) delete state.localOnlyDeleted[id]
   }
 
+  let manifestWriteFailed = false
   if (manifestChanged) {
     manifest.updatedAt = Date.now()
     try {
@@ -618,11 +640,24 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         'application/json',
       )
     } catch (e) {
+      manifestWriteFailed = true
       result.errors.push(t('error.syncSaveManifestFailed', { message: e instanceof Error ? e.message : String(e) }))
     }
   }
 
-  state.lastSyncAt = Date.now()
+  if (manifestWriteFailed) {
+    // The server did not confirm the new manifest: keep the previous baseline (and
+    // manifest) so the next sync re-evaluates the same operations (idempotent) and
+    // can never silently overwrite local changes based on a stale manifest.
+    state.foldersHash = baselineSnapshot.foldersHash
+    state.foldersUpdatedAt = baselineSnapshot.foldersUpdatedAt
+    state.notebooks = baselineSnapshot.notebooks
+    state.tombstones = baselineSnapshot.tombstones
+    state.localOnlyDeleted = baselineSnapshot.localOnlyDeleted
+    manifest = manifestSnapshot
+  } else {
+    state.lastSyncAt = Date.now()
+  }
 
   return {
     result: {

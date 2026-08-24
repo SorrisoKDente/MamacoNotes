@@ -137,15 +137,15 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks base64 no JS — evita o OOM da bridge para JSON de cadernos grandes). |
-| `localSave.ts` | **Backup automático para disco**: gerencia Desktop (Electron), Web (File System Access) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks para evitar OOM no Android; também suporta URIs SAF `content://` via plugin local `pick-directory` para diretórios persistentes selecionados pelo usuário)**. Suporta escrita em URIs `content://` para diretórios persistentes selecionados pelo usuário. |
+| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON — a correção do "Unexpected end of JSON input" no sync Android) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). |
+| `localSave.ts` | **Backup automático para disco**: gerencia Desktop (Electron), Web (File System Access) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks para evitar OOM no Android; também suporta URIs SAF `content://` via plugin local `pick-directory` para diretórios persistentes selecionados pelo usuário)**. `scheduleLocalBackup()` é **debounced (1500ms) e coalescido**: rajadas de edições (ex.: traços de desenho) produzem no máximo uma gravação completa de backup por janela, sempre com o snapshot mais recente, serializada por uma `writeQueue` — nunca enfileira um backlog crescente de gravações completas de `JSON.stringify(buildBackupPayload(...))` por edição. |
 | `chunkedIo.ts` | **Ponte para o plugin Capacitor local `pick-directory`**: registra `PickDirectory` e expõe primitivas em chunks que nunca enviam um arquivo grande inteiro pela bridge JS↔nativo: `writeFileChunked` (gravação truncar-depois-anexar via `writeChunk`), `readBackupFileFromDirectory`/`readBackupFileFromUri` (leitura em chunks via `readChunk`/`readUriChunk`), `fileExistsInDirectory` (verificação de existência usada para não sobrescrever um backup existente), `pickBackupFile` (seletor de documentos do sistema → leitura em chunks) e `uploadFileStreaming` (PUT em stream via `uploadStart`/`uploadChunk`/`uploadEnd` do plugin sobre `HttpURLConnection`). |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |
 | `pdf.ts` | Renderização de arquivos PDF em imagens via `pdfjs-dist` (`renderPdfPages`) |
 | `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport`. No Android o transporte usa os **caminhos nativos em chunks**: `downloadFile` via `downloadText` do `http.ts` (Range + arraybuffer) e `uploadFile` via `uploadFileStreaming` do `chunkedIo.ts` (PUT em stream pelo plugin `pick-directory` via `HttpURLConnection`) — ambos evitam o OOM da bridge. |
-| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração) |
+| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração). Em falha de download (caderno/pasta), registra o erro via `logger.error` (visível na aba Configurações → Logs) **antes** de exibi-lo no resultado/UI — no celular, falhas sem esse log eram invisíveis silenciosamente. |
 | `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza `saveDirectory`/handle e **remove senhas de nuvem** por segurança). No celular a exportação grava na **pasta SAF escolhida pelo usuário** (Configurações → Diretório, URI `content://`, em chunks via `writeFileChunked`) ou na pasta Documentos do app via `capacitor-blob-writer` (fluxo em chunks, evita o OOM da bridge do Capacitor causado por `Filesystem.writeFile` com conteúdo grande), sempre com **nome com carimbo de data** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`) para nunca sobrescrever um backup existente; a importação usa o seletor de documentos do sistema (`pickBackupFile`, leitura em chunks). No desktop usa as pontes `save-file`/`open-file` do Electron e na web dispara download/input de arquivo. |
 | `imageErase.ts` | Borracha em imagens: sessão de apagar em canvas offscreen e re-encode ao final |
 | `colors.ts` | Paleta de cores e helpers de conversão HEX/RGB |
@@ -285,7 +285,8 @@ useAppStore (store.ts) — muta o estado + incrementa dataVersion
         │
         ▼
 db.ts (IndexedDB)  ──►  scheduleLocalBackup()  ──►  localSave.ts (disco)
-        │
+        │                        (debounced 1500ms + coalescido — no máximo
+        │                         uma gravação de backup por rajada de edições)
         ▼
 useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + sync.ts (nuvem)
 ```
@@ -321,7 +322,8 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | **Importação/modelos** | `addImageToPage(dataUrl, name, center?)`, `addPdfToPage(dataUrl, name)`, `importPdfNotebook(...)`, `addTemplate(name, pages)`, `deleteTemplate(id)`, `addPagesFromTemplate(template)`, `applyTemplateToPage(index, template)`, `replaceAllData(folders, notebooks, settings?)` |
 
 **Garantias**: toda ação de dados grava no IndexedDB (`db.ts`), incrementa `dataVersion`
-(dispara re-render e o auto-sync) e agenda o backup local (`scheduleLocalBackup`). As
+(dispara re-render e o auto-sync) e agenda o backup local (`scheduleLocalBackup` —
+debounced 1500ms + coalescido, ver `localSave.ts`). As
 operações de página/caderno agem sobre o notebook/índice selecionado. Undo/redo usam
 pilhas internas de snapshots de página (máx. 60). Pastas e cadernos são sempre ordenados
 por `order` (`sortFoldersByOrder`/`sortNotebooksByOrder`); `reorderFolder`/`reorderNotebook`
@@ -523,6 +525,18 @@ Fluxo e arquivos envolvidos:
   claras e acionáveis (`error.koofrAuthFailed`/`error.webdavAuthFailed` — orienta o
   usuário a conferir o usuário/e-mail e o App Password), para que uma credencial inválida
   nunca fique escondida atrás de um erro genérico.
+- **Download Android (corpos JSON)**: em plataformas nativas os downloads passam por
+  `downloadText` em `src/utils/http.ts` (requests Range em chunks, `responseType:
+  'arraybuffer'`). O CapacitorHttp **ignora `arraybuffer` quando o Content-Type é
+  `application/json`** e devolve o corpo já parseado como objeto/array JS (ver
+  `decodeCapacitorData`) — o código antigo tratava corpo não-string como vazio,
+  produzindo `JSON.parse('')` → "Unexpected end of JSON input"
+  (`error.syncDownloadFoldersFailed`). `decodeCapacitorData` reconstrói os bytes para
+  base64, texto cru ou JSON parseado, e `downloadText` sai do loop de chunks quando um
+  chunk decodificado está vazio.
+- **Log de falhas de download**: falhas de download de caderno/pasta em `sync.ts`
+  chamam `logger.error(...)` (visível em Configurações → Logs) antes de serem exibidas no
+  resultado/UI do sync, para que falhas de sync no celular gerem um log de verdade.
 - **Algoritmo de merge**: `src/utils/sync.ts` — `runSync()` e `applyConflictChoices()`.
   Layout remoto: `manifest.json` + `notebooks/<id>.json` + `folders/folders.json`.
   Compara `local.updatedAt`, `remote.updatedAt` e `cloudSync.notebooks[id]` para decidir
@@ -580,7 +594,7 @@ Fluxo e arquivos envolvidos:
 | IndexedDB (leitura/escrita) | `src/db.ts` |
 | Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). No celular, a exportação grava na **pasta SAF escolhida pelo usuário** (Configurações → Diretório, URI `content://`) via `writeFileChunked`, com fallback para a **pasta Documentos** via `capacitor-blob-writer` (ambas em chunks — evita o `OutOfMemoryError` no Android ao enviar um backup grande pela bridge do Capacitor), sempre com **nome com carimbo de data** para nunca sobrescrever um backup existente; a importação usa o seletor de documentos do sistema (`pickBackupFile`, leitura em chunks). No desktop usa os diálogos salvar/abrir do Electron e na web dispara download/input de arquivo. |
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
-| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks que evita o `OutOfMemoryError` no Android do `Filesystem.writeFile` para payloads grandes — ou URI SAF `content://` via plugin customizado `PickDirectory`)**. |
+| Backup automático (Auto-save) | `src/utils/localSave.ts` (`scheduleLocalBackup` debounced 1500ms + coalescido, `persistLocalBackup`) + `src/utils/chunkedIo.ts`. Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks que evita o `OutOfMemoryError` no Android do `Filesystem.writeFile` para payloads grandes — ou URI SAF `content://` via plugin customizado `PickDirectory`)**. |
 | Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
 | Contratos das stores (estado + ações, ver §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
@@ -590,8 +604,8 @@ Fluxo e arquivos envolvidos:
 | Assunto | Arquivo(s) |
 |---|---|
 | Algoritmo de merge e conflitos | `src/utils/sync.ts` |
-| Transporte WebDAV + Koofr | `src/utils/webdav.ts` |
-| Rede Nativa (Android CORS bypass) | `src/utils/http.ts` (usado por `webdav.ts` e `updateCheck.ts`) |
+| Transporte WebDAV + Koofr | `src/utils/webdav.ts`. No Android, `uploadFile` faz stream via plugin local `pick-directory` (`uploadFileStreaming`) e `downloadFile` usa requests Range em chunks (`downloadText` em `http.ts`, decodificado com `decodeCapacitorData` — trata os corpos parseados como JSON que o CapacitorHttp devolve para conteúdo `application/json`) — evita o OOM da bridge para cadernos grandes. |
+| Rede Nativa (Android CORS bypass) | `src/utils/http.ts` (`customFetch`, `downloadText`, `decodeCapacitorData`) — usado por `webdav.ts` e `updateCheck.ts` |
 | Estado local de sync (cloudSync) | `db.ts` + `src/types.ts` (`CloudSyncState`) |
 | Orquestração (`syncNow`, `resolveConflicts`, auto-sync) | `src/store.ts` |
 | Modal de sincronização / configuração de nuvem | `src/components/Modals.tsx` |
@@ -664,6 +678,9 @@ Fluxo e arquivos envolvidos:
   `useAppStore((s) => s.xxx)` e escrevem via ações da store (nunca mutando diretamente sem
   passar pela persistência).
 - **Persistência**: toda alteração de dados persiste via `db.*` + `scheduleLocalBackup()`.
+  O backup em disco é uma camada de segurança sobre o IndexedDB (store primário) — é
+  **debounced (1500ms) e coalescido** (nunca uma fila crescente de gravações completas do
+  payload por edição; o snapshot mais recente vence dentro de uma janela).
 - **Comunicação UI ↔ canvas**: via `CustomEvent` (`ink:*`), nunca props profundas.
 - **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** para desacoplar o desenho dos eventos de ponteiro, garantindo uma taxa de quadros estável. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs para evitar re-renders do React. Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
 - **Canvas**: `Editor.tsx` é o dono do motor; `PageCanvas` só renderiza e faz hit tests.

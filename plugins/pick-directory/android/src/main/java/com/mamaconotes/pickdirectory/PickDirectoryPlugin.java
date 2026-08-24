@@ -25,7 +25,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-@SuppressWarnings("unused")
 @CapacitorPlugin(name = "PickDirectory")
 public class PickDirectoryPlugin extends Plugin {
 
@@ -82,22 +81,26 @@ public class PickDirectoryPlugin extends Plugin {
                 return;
             }
 
-            DocumentFile existingFile = rootDir.findFile(filename);
-            DocumentFile fileToUse = (existingFile != null) ? existingFile : rootDir.createFile("application/json", filename);
-
-            if (fileToUse == null) {
-                call.reject("Failed to create or find file");
+            DocumentFile file = rootDir.findFile(filename);
+            if (file == null) {
+                file = rootDir.createFile("application/json", filename);
+            }
+            if (file == null) {
+                call.reject("Failed to create file");
                 return;
             }
 
             // "wt" truncates and writes the first chunk; "wa" appends the rest.
             String mode = (append != null && append) ? "wa" : "wt";
-            try (OutputStream os = getContext().getContentResolver().openOutputStream(fileToUse.getUri(), mode)) {
-                if (os == null) {
-                    call.reject("Failed to open output stream");
-                    return;
-                }
+            OutputStream os = getContext().getContentResolver().openOutputStream(file.getUri(), mode);
+            if (os == null) {
+                call.reject("Failed to open output stream");
+                return;
+            }
+            try {
                 os.write(content.getBytes(StandardCharsets.UTF_8));
+            } finally {
+                os.close();
             }
             call.resolve();
         } catch (Exception e) {
@@ -109,16 +112,13 @@ public class PickDirectoryPlugin extends Plugin {
     public void readChunk(PluginCall call) {
         String uriString = call.getString("uri");
         String filename = call.getString("filename");
-        Integer offsetParam = call.getInt("offset", 0);
-        Integer lengthParam = call.getInt("length", 512 * 1024);
+        Integer offset = call.getInt("offset", 0);
+        Integer length = call.getInt("length", 512 * 1024);
 
         if (uriString == null || filename == null) {
             call.reject("Missing parameters");
             return;
         }
-
-        int offset = (offsetParam != null) ? offsetParam : 0;
-        int length = (lengthParam != null) ? lengthParam : 512 * 1024;
 
         try {
             Uri rootUri = Uri.parse(uriString);
@@ -173,16 +173,13 @@ public class PickDirectoryPlugin extends Plugin {
     @PluginMethod
     public void readUriChunk(PluginCall call) {
         String uriString = call.getString("uri");
-        Integer offsetParam = call.getInt("offset", 0);
-        Integer lengthParam = call.getInt("length", 512 * 1024);
+        Integer offset = call.getInt("offset", 0);
+        Integer length = call.getInt("length", 512 * 1024);
 
         if (uriString == null) {
             call.reject("Missing parameters");
             return;
         }
-
-        int offset = (offsetParam != null) ? offsetParam : 0;
-        int length = (lengthParam != null) ? lengthParam : 512 * 1024;
 
         try {
             byte[] data = readFromUri(Uri.parse(uriString), offset, length);
@@ -207,7 +204,7 @@ public class PickDirectoryPlugin extends Plugin {
         try {
             Uri uri = Uri.parse(uriString);
             DocumentFile file = DocumentFile.fromSingleUri(getContext(), uri);
-            if (!file.exists()) {
+            if (file == null) {
                 call.reject("File not found");
                 return;
             }
@@ -256,14 +253,12 @@ public class PickDirectoryPlugin extends Plugin {
         String sessionId = call.getString("sessionId");
         String url = call.getString("url");
         JSObject headers = call.getObject("headers");
-        Integer totalLengthParam = call.getInt("totalLength", 0);
+        Integer totalLength = call.getInt("totalLength", 0);
 
         if (sessionId == null || url == null) {
             call.reject("Missing parameters");
             return;
         }
-
-        int totalLength = (totalLengthParam != null) ? totalLengthParam : 0;
 
         try {
             HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
@@ -271,7 +266,7 @@ public class PickDirectoryPlugin extends Plugin {
             conn.setDoOutput(true);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(120000);
-            if (totalLength > 0) {
+            if (totalLength != null && totalLength > 0) {
                 conn.setFixedLengthStreamingMode(totalLength);
             } else {
                 conn.setChunkedStreamingMode(64 * 1024);
@@ -333,7 +328,8 @@ public class PickDirectoryPlugin extends Plugin {
             return;
         }
 
-        try (OutputStream os = conn.getOutputStream()) {
+        try {
+            OutputStream os = conn.getOutputStream();
             os.close();
             int code = conn.getResponseCode();
             if (code >= 200 && code < 300) {
@@ -350,11 +346,11 @@ public class PickDirectoryPlugin extends Plugin {
         }
     }
 
-    private byte[] readFromUri(Uri uri, int offset, int length) throws IOException {
-        try (InputStream is = getContext().getContentResolver().openInputStream(uri)) {
-            if (is == null) {
-                return new byte[0];
-            }
+    private byte[] readFromUri(Uri uri, int offset, int length) throws IOException {        InputStream is = getContext().getContentResolver().openInputStream(uri);
+        if (is == null) {
+            return new byte[0];
+        }
+        try {
             skipFully(is, offset);
             byte[] buffer = new byte[length];
             int total = 0;
@@ -363,6 +359,8 @@ public class PickDirectoryPlugin extends Plugin {
                 total += read;
             }
             return total == 0 ? new byte[0] : Arrays.copyOf(buffer, total);
+        } finally {
+            is.close();
         }
     }
 

@@ -482,6 +482,8 @@ export const enMessages: Record<string, string> = {
   'error.downloadFailed': 'Failed to download {{filePath}}: {{status}}',
   'error.deleteFailed': 'Failed to remove {{filePath}}: {{status}}',
   'error.webdavAccessFailed': 'Failed to access the WebDAV server: {{status}}. Check the URL, username and password (app password).',
+  'error.koofrAuthFailed': 'Koofr authentication failed ({{status}}). Check that the "username" is your account email and that the "password" is a valid App Password created at app.koofr.net → Settings → App Passwords.',
+  'error.webdavAuthFailed': 'Authentication failed ({{status}}). Check the username and password (app password) of the WebDAV server.',
   'error.connectionOkBaseExists': 'Connection OK: server accessible and base folder exists.',
   'error.connectionOkBaseMissing': 'Connection OK: server accessible, but the folder "{{path}}" does not exist yet. Click "Create folders" before syncing.',
 

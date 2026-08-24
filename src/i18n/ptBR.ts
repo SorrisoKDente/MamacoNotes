@@ -482,6 +482,8 @@ export const ptBRMessages: Record<string, string> = {
   'error.downloadFailed': 'Falha ao baixar {{filePath}}: {{status}}',
   'error.deleteFailed': 'Falha ao remover {{filePath}}: {{status}}',
   'error.webdavAccessFailed': 'Falha ao acessar o servidor WebDAV: {{status}}. Verifique a URL, o usuário e a senha (app password).',
+  'error.koofrAuthFailed': 'Falha de autenticação com o Koofr ({{status}}). Confira se o "usuário" é o e-mail da conta e se a "senha" é um App Password válido criado em app.koofr.net → Configurações → App Passwords.',
+  'error.webdavAuthFailed': 'Falha de autenticação ({{status}}). Verifique o usuário e a senha (app password) do servidor WebDAV.',
   'error.connectionOkBaseExists': 'Conexão OK: servidor acessível e pasta base existente.',
   'error.connectionOkBaseMissing': 'Conexão OK: servidor acessível, mas a pasta "{{path}}" ainda não existe. Clique em "Criar pastas" antes de sincronizar.',
 

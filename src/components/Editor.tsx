@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
-import type { ImageElement, Page, Rect, Stroke, StrokePoint, TextElement, ToolKind } from '../types'
+import type { ImageElement, Notebook, Page, Rect, Stroke, StrokePoint, TextElement, ToolKind } from '../types'
 import { getActiveLayer, makeTextElement, newId } from '../types'
 import { ImageEraseSession } from '../utils/imageErase'
 import { computePageOffsets, pageUnderPoint, pageVisualBox, pageVisualRect } from '../utils/layout'
@@ -194,11 +194,13 @@ export function Editor() {
     startAngle?: number
   } | null>(null)
 
-  function schedulePersist() {
+  function schedulePersist(nbArg?: Notebook) {
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
+    // Capture the notebook at scheduling time so a notebook switch within the
+    // debounce window cannot make the write target the wrong notebook.
+    const nb = nbArg ?? notebookRef.current
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
-      const nb = notebookRef.current
       if (nb) void persistNotebook(nb)
     }, 400)
   }
@@ -2344,9 +2346,12 @@ export function Editor() {
 
     if (dirtyRef.current) {
       dirtyRef.current = false
-      if (notebookRef.current) {
-        await persistNotebook(notebookRef.current)
-      }
+      // Debounced persist (400ms): a drawing burst commits strokes at ~RAF
+      // speed, and persisting the whole notebook + backup on every single
+      // stroke freezes the UI right after each pointer release. The stroke is
+      // already in the in-memory store (rendered immediately); the debounced
+      // write captures the latest state of the notebook.
+      schedulePersist(notebookRef.current)
     }
     if (activePointersRef.current.size === 0 && twoFingerDownAtRef.current !== null) {
       const downAt = twoFingerDownAtRef.current

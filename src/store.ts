@@ -1464,7 +1464,16 @@ export const useAppStore = create<AppState>((set, get) => {
             errors: [e instanceof Error ? e.message : String(e)],
           }
         }
-        await get().setCloud({ enabled: true, lastSyncAt: out.nextState.lastSyncAt ?? Date.now() })
+        if (out.result.errors.length === 0) {
+          await get().setCloud({
+            enabled: true,
+            lastSyncAt: out.nextState.lastSyncAt ?? Date.now(),
+          })
+        } else {
+          // The sync did not complete successfully: keep the cloud enabled but do
+          // not pretend it succeeded (preserves the real "last sync" timestamp).
+          await get().setCloud({ enabled: true })
+        }
         return out.result
       } finally {
         syncRunning = false
@@ -1677,7 +1686,12 @@ useAppStore.subscribe((state, prev) => {
   if (state.dataVersion === prev.dataVersion) return
   const cloud = state.settings.cloud
   if (!cloud.enabled || !cloud.autoSync || !cloud.webdavUrl) return
-  if (syncRunning) return
+  if (syncRunning) {
+    // A change arrived while a sync is in flight: queue a follow-up so it is
+    // not silently lost (the in-flight run captured the previous snapshot).
+    syncQueued = true
+    return
+  }
   if (syncDebounceTimer !== undefined) clearTimeout(syncDebounceTimer)
   syncDebounceTimer = setTimeout(() => {
     syncDebounceTimer = undefined

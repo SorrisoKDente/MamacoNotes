@@ -66,6 +66,14 @@ function koofrApiBase(settings: CloudSettings): string | null {
 
 const koofrInfoCache = new WeakMap<CloudSettings, KoofrInfo>()
 
+function koofrAuthError(status: number): Error {
+  return new Error(t('error.koofrAuthFailed', { status }))
+}
+
+function webdavAuthError(status: number): Error {
+  return new Error(t('error.webdavAuthFailed', { status }))
+}
+
 async function koofrFetch<T>(
   apiBase: string,
   path: string,
@@ -81,6 +89,9 @@ async function koofrFetch<T>(
       ...(init?.headers ?? {}),
     },
   })
+  if (res.status === 401 || res.status === 403) {
+    throw koofrAuthError(res.status)
+  }
   const data =
     res.status === 204 ? undefined : ((await res.json().catch(() => undefined)) as T | undefined)
   return { status: res.status, data }
@@ -210,6 +221,7 @@ export async function ensureDirectory(
     method: 'MKCOL',
     headers: { Authorization: authHeader(settings) },
   })
+  if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
   if (res.status === 201) return
   if (res.status === 405 || res.ok) {
     if (await directoryExists(settings, dirPath)) return
@@ -258,6 +270,7 @@ export async function listDirectory(
     },
     body: PROPFIND_BODY,
   })
+  if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
   if (!res.ok) return []
   const text = await res.text()
   const names: string[] = []
@@ -290,6 +303,7 @@ export async function uploadFile(
         bytes instanceof Blob ? await bytes.text() : new TextDecoder().decode(bytes)
       const status = await uploadFileStreaming(url, headers, content)
       if (status >= 200 && status < 300) return
+      if (status === 401 || status === 403) throw webdavAuthError(status)
       if (status === 404) {
         throw new Error(
           t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
@@ -304,6 +318,7 @@ export async function uploadFile(
       body: bytes instanceof Blob ? bytes : new Uint8Array(bytes),
     })
     if (!res.ok && res.status !== 201 && res.status !== 204) {
+      if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
       if (res.status === 404) {
         throw new Error(
           t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
@@ -329,12 +344,14 @@ export async function downloadFile(
       // Chunked Range download: the remote content is fetched in pieces
       // (arraybuffer/base64) and reassembled in JS, avoiding the bridge OOM.
       const res = await downloadText(url, headers)
+      if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
       if (!res.ok) {
         throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
       }
       return res.text
     }
     const res = await customFetch(url, { headers })
+    if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
     if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
     return res.text()
   } catch (err) {
@@ -353,6 +370,7 @@ export async function deleteRemoteFile(
     method: 'DELETE',
     headers: { Authorization: authHeader(settings) },
   })
+  if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
   if (!res.ok && res.status !== 404) {
     throw new Error(t('error.deleteFailed', { filePath, status: res.status }))
   }
@@ -387,6 +405,9 @@ export async function testWebdavConnection(
     })
     if (!res.ok && res.status !== 207) {
       logger.error('WebDAV connection test failed', { status: res.status, url: settings.webdavUrl })
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, message: webdavAuthError(res.status).message }
+      }
       return {
         ok: false,
         message: t('error.webdavAccessFailed', { status: res.status }),
