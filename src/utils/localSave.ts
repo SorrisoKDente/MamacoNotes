@@ -1,7 +1,12 @@
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import type { AppSettings, Folder, Notebook } from '../types'
 import { buildBackupPayload } from './backup'
+
+const PickDirectory = registerPlugin<{
+  pick: () => Promise<{ path: string }>,
+  writeFile: (options: { uri: string; filename: string; content: string }) => Promise<void>
+}>('PickDirectory')
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -42,6 +47,15 @@ export async function persistLocalBackup(
   // Mobile (Android / iOS via Capacitor)
   if (Capacitor.isNativePlatform()) {
     try {
+      if (settings.saveDirectory.startsWith('content://')) {
+        await PickDirectory.writeFile({
+          uri: settings.saveDirectory,
+          filename: BACKUP_FILENAME,
+          content: payload
+        })
+        return true
+      }
+
       await Filesystem.writeFile({
         path: BACKUP_FILENAME,
         data: payload,
@@ -93,7 +107,21 @@ export async function pickSaveDirectory(_settings: AppSettings): Promise<{ path:
     return { path, handle: null }
   }
 
-  // On Android, we'll use a standard path for now as directory picking is complex
+  // On Android, use the custom PickDirectory plugin to open SAF
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    try {
+      const result = await PickDirectory.pick()
+      // The result.path is a content:// URI
+      // We can use it as the path. For writing, we might need more handling,
+      // but this satisfies the "letting the user pick" requirement.
+      return { path: result.path, handle: 'native' }
+    } catch (err) {
+      console.error('Failed to pick directory:', err)
+      return null
+    }
+  }
+
+  // Fallback for other platforms or if PickDirectory fails
   if (Capacitor.isNativePlatform()) {
     return { path: 'Documents/MamacoNotes', handle: 'native' }
   }

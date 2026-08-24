@@ -315,7 +315,7 @@ export const enMessages: Record<string, string> = {
   'modal.selecting': 'Selecting...',
   'modal.select': 'Select...',
   'modal.saveDirHint': 'Folders and notebooks will be saved as a backup in "{{dir}}".',
-  'modal.saveDirHintEmpty': 'Choose a folder to keep a copy of your folders and notebooks. Works on desktop (Windows/Linux) and in the browser.',
+  'modal.saveDirHintEmpty': 'Choose a folder to keep a copy of your folders and notebooks. On Android, this will use the system file picker to ensure permanent access to the folder.',
   'modal.sectionBackup': 'Backup',
   'modal.sectionRestore': 'Reset',
   'modal.restoreDefaults': 'Restore defaults',

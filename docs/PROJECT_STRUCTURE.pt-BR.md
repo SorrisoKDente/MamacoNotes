@@ -56,7 +56,7 @@ opcional em disco via Electron ou File System Access API). O estado global usa
 | Renderização de desenho | Canvas 2D (motor próprio) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (com `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (com `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp` e plugin customizado `PickDirectory`) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Empacotamento | electron-builder | `package.json` → `build` |
 
@@ -138,6 +138,7 @@ Fluxo de inicialização:
 | Arquivo | Responsabilidade |
 |---|---|
 | `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. |
+| `localSave.ts` | **Backup automático para disco**: gerencia Desktop (Electron), Web (File System Access) e **Android (SAF via plugin customizado)**. Suporta escrita em URIs `content://` para diretórios persistentes selecionados pelo usuário. |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |

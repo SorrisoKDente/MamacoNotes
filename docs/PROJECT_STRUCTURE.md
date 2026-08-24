@@ -58,7 +58,7 @@ entire UI is in Portuguese (pt-BR) by default, but supports English (en).
 | Drawing rendering | Canvas 2D (custom engine) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`, and custom `PickDirectory` plugin) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Packaging | electron-builder | `package.json` → `build` |
 
@@ -140,6 +140,7 @@ Initialization flow:
 | File | Responsibility |
 |---|---|
 | `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. |
+| `localSave.ts` | **Automatic backup to disk**: handles Desktop (Electron), Web (File System Access), and **Android (SAF via custom plugin)**. Supports writing to `content://` URIs for persistent user-selected directories. |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
 | `export.ts` | Page rendering to canvas and PNG/PDF export (generates simple PDF without external library) |

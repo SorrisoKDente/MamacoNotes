@@ -315,7 +315,7 @@ export const ptBRMessages: Record<string, string> = {
   'modal.selecting': 'Selecionando...',
   'modal.select': 'Selecionar...',
   'modal.saveDirHint': 'As pastas e anotações serão salvas como backup em "{{dir}}".',
-  'modal.saveDirHintEmpty': 'Escolha uma pasta para manter uma cópia das suas pastas e anotações. Funciona no desktop (Windows/Linux) e no navegador.',
+  'modal.saveDirHintEmpty': 'Escolha uma pasta para manter uma cópia das suas pastas e anotações. No Android, isso usará o seletor de arquivos do sistema para garantir acesso permanente à pasta.',
   'modal.sectionBackup': 'Backup',
   'modal.sectionRestore': 'Redefinição',
   'modal.restoreDefaults': 'Restaurar padrões',
