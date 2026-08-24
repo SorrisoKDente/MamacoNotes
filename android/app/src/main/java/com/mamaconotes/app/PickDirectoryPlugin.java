@@ -22,6 +22,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void saveFilePicker(PluginCall call) {
         String filename = call.getString("filename");
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -81,6 +82,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void writeToUri(PluginCall call) {
         String uriString = call.getString("uri");
         String content = call.getString("content");
