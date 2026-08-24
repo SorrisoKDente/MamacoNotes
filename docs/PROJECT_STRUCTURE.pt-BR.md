@@ -186,6 +186,7 @@ Fluxo de inicialização:
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) |
 | `docs/superpowers/specs/` | Documentos de design aprovados (sync bidirecional; camadas) |
 | `docs/superpowers/plans/` | Planos de implementação (sync bidirecional; camadas) |
+| `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
 | `server2.mjs` | Arquivo vazio (resquício) |
 
 ---
@@ -262,7 +263,9 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*` e depois
   - Nuvem: `syncNow()`, `resolveConflicts()`.
   - Persistência: `persistNotebook`, `updateNotebookStorage`, `saveSettings`.
   - **Auto-sync**: `useAppStore.subscribe` observa `dataVersion` e dispara `syncNow()` com
-    debounce de 20s (guardas `syncRunning`/`syncQueued`).
+    debounce de 20s. Guardas: `syncRunning` evita reentrância, e `syncQueued` enfileira
+    uma sincronização de acompanhamento quando uma mudança chega durante uma
+    sincronização em andamento (edições feitas na janela de sync não são perdidas).
   - **Restauração de sessão**: um segundo `useAppStore.subscribe` salva no `localStorage`
     (chave `mamaco-notes.last-session`) o par `{ notebookId, pageId }` sempre que o caderno
     ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
@@ -313,7 +316,7 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | **Páginas** | `addPage(template)`, `addPageAfter(index, template)`, `duplicatePage(index)`, `deletePage(index)`, `movePage(from, to)`, `rotatePage(index)`, `rotatePageBy(index, delta)`, `updatePage(index, patch: Partial<Page>)` |
 | **Camadas** | `addLayer()`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)` |
 | **Configuração** | `setSettings(patch)`, `setShortcut(action, value)`, `setCloud(patch)` |
-| **Nuvem** | `syncNow(): Promise<SyncResult \| null>`, `resolveConflicts(choices: Record<string, ConflictChoice>)` |
+| **Nuvem** | `syncNow(): Promise<SyncResult \| null>` (avança `settings.cloud.lastSyncAt` **somente** quando a execução termina sem erros), `resolveConflicts(choices: Record<string, ConflictChoice>)` |
 | **Persistência/undo** | `persistNotebook(notebook)`, `pushUndo()`, `undo()`, `redo()` |
 | **Importação/modelos** | `addImageToPage(dataUrl, name, center?)`, `addPdfToPage(dataUrl, name)`, `importPdfNotebook(...)`, `addTemplate(name, pages)`, `deleteTemplate(id)`, `addPagesFromTemplate(template)`, `applyTemplateToPage(index, template)`, `replaceAllData(folders, notebooks, settings?)` |
 
@@ -515,17 +518,33 @@ Fluxo e arquivos envolvidos:
 - **Transporte HTTP**: `src/utils/webdav.ts` — `makeTransport(cloud)` retorna interface
   `Transport { ensureDirectory, listDirectory, uploadFile, downloadFile, deleteRemoteFile }`
   (PROPFIND/MKCOL/PUT/DELETE). Trata servidor **Koofr** de forma especial (cria pastas via
-  API quando WebDAV não suporta MKCOL).
+  API quando WebDAV não suporta MKCOL). **Erros de autenticação (401/403)** são
+  detectados em toda chamada (API Koofr e caminhos WebDAV) e exibidos com mensagens
+  claras e acionáveis (`error.koofrAuthFailed`/`error.webdavAuthFailed` — orienta o
+  usuário a conferir o usuário/e-mail e o App Password), para que uma credencial inválida
+  nunca fique escondida atrás de um erro genérico.
 - **Algoritmo de merge**: `src/utils/sync.ts` — `runSync()` e `applyConflictChoices()`.
   Layout remoto: `manifest.json` + `notebooks/<id>.json` + `folders/folders.json`.
   Compara `local.updatedAt`, `remote.updatedAt` e `cloudSync.notebooks[id]` para decidir
   push/pull/delete/conflito. O hash de pastas (`hashFolders`) inclui `id`, `name`,
   `parentId` e `order`, então a **reordenação de pastas é sincronizada** como qualquer
   outra mudança de pastas.
+  **Garantia de commit do manifest (sem sobrescrita silenciosa)**: a linha de base local
+  (`cloudSync.notebooks`/`foldersHash`) só avança **depois** que o servidor confirma o
+  novo `manifest.json`. Se a gravação do manifest falhar, o `runSync` restaura um
+  snapshot da linha de base e do manifest anteriores, de modo que a próxima sincronização
+  reavalie o mesmo plano (idempotente) — um manifest desatualizado nunca causa um pull
+  silencioso que sobrescreva alterações locais feitas desde a execução com falha.
 - **Estado local de sync**: `db.ts` → `cloudSync` (`CloudSyncState`).
-- **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`. O `applySyncChanges()` aplica dados puxados/novos/removidos e **não faz nada quando nada mudou de fato** — só incrementa `dataVersion` (que re-dispara o auto-sync) quando há mudanças reais, evitando um loop infinito de auto-sync no celular.
+- **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`. O `syncNow()` **só avança `settings.cloud.lastSyncAt` quando a execução termina sem erros** (uma sincronização com falha mantém o horário real do "último sync" em vez de fingir que deu certo). A assinatura de auto-sync (debounce de 20s) **enfileira uma sincronização de acompanhamento quando uma mudança chega durante uma sincronização em andamento** (`syncQueued`), para que edições feitas durante a janela de sync não sejam perdidas silenciosamente. O `applySyncChanges()` aplica dados puxados/novos/removidos e **não faz nada quando nada mudou de fato** — só incrementa `dataVersion` (que re-dispara o auto-sync) quando há mudanças reais, evitando um loop infinito de auto-sync no celular.
 - **Design/plano detalhados**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
   e `docs/superpowers/plans/2026-08-17-sync-bidirecional-plan.md`.
+- **Verificação de regressão**: `scripts/verify-sync.ts` (rodar com `npx tsx
+  scripts/verify-sync.ts`) exercita `buildPlan` e `runSync` contra um transport fake em
+  memória, validando decisões de push/pull/conflito/delete, o rollback da gravação do
+  manifest (a linha de base não avança e `lastSyncAt` não é definido), a re-execução
+  idempotente após o rollback e que uma falha de autenticação exibe mensagem clara
+  deixando o estado de sync intacto.
 
 ---
 

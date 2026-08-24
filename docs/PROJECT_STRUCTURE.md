@@ -188,6 +188,7 @@ Initialization flow:
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) |
 | `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
 | `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
+| `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (rollback on manifest write failure, idempotent re-run, auth error surfacing). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
 | `server2.mjs` | Empty file (remnant) |
 
 ---
@@ -264,7 +265,9 @@ All data writes in the app go through `store.ts`, which calls `db.*` and then
   - Cloud: `syncNow()`, `resolveConflicts()`.
   - Persistence: `persistNotebook`, `updateNotebookStorage`, `saveSettings`.
   - **Auto-sync**: `useAppStore.subscribe` watches `dataVersion` and triggers `syncNow()`
-    with a 20s debounce (`syncRunning`/`syncQueued` guards).
+    with a 20s debounce. Guards: `syncRunning` prevents reentrancy, and `syncQueued`
+    queues a follow-up sync when a change arrives while a sync is running (edits made
+    during the sync window are not lost).
   - **Session restoration**: a second `useAppStore.subscribe` saves to `localStorage`
     (key `mamaco-notes.last-session`) the `{ notebookId, pageId }` pair whenever the
     current notebook or page changes; `init()` uses this record to reopen the last
@@ -316,7 +319,7 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | **Pages** | `addPage(template)`, `addPageAfter(index, template)`, `duplicatePage(index)`, `deletePage(index)`, `movePage(from, to)`, `rotatePage(index)`, `rotatePageBy(index, delta)`, `updatePage(index, patch: Partial<Page>)` |
 | **Layers** | `addLayer()`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)` |
 | **Configuration** | `setSettings(patch)`, `setShortcut(action, value)`, `setCloud(patch)` |
-| **Cloud** | `syncNow(): Promise<SyncResult | null>`, `resolveConflicts(choices: Record<string, ConflictChoice>)` |
+| **Cloud** | `syncNow(): Promise<SyncResult | null>` (advances `settings.cloud.lastSyncAt` **only** when the run finishes with zero errors), `resolveConflicts(choices: Record<string, ConflictChoice>)` |
 | **Persistence/Undo** | `persistNotebook(notebook)`, `pushUndo()`, `undo()`, `redo()` |
 | **Import/Templates** | `addImageToPage(dataUrl, name, center?)`, `addPdfToPage(dataUrl, name)`, `importPdfNotebook(...)`, `addTemplate(name, pages)`, `deleteTemplate(id)`, `addPagesFromTemplate(template)`, `applyTemplateToPage(index, template)`, `replaceAllData(folders, notebooks, settings?)` |
 
@@ -516,21 +519,41 @@ Flow and files involved:
 - **HTTP Transport**: `src/utils/webdav.ts` — `makeTransport(cloud)` returns a `Transport`
   interface `{ ensureDirectory, listDirectory, uploadFile, downloadFile, deleteRemoteFile }`
   (PROPFIND/MKCOL/PUT/DELETE). Handles **Koofr** servers specially (creates folders via
-  API when WebDAV does not support MKCOL).
+  API when WebDAV does not support MKCOL). **Authentication errors (401/403)** are
+  detected in every call (Koofr API and WebDAV paths) and surfaced as clear, actionable
+  messages (`error.koofrAuthFailed`/`error.webdavAuthFailed` — the user is told to check
+  the username/email and the App Password), so a bad credential is never hidden behind a
+  generic error.
 - **Merge Algorithm**: `src/utils/sync.ts` — `runSync()` and `applyConflictChoices()`.
   Remote layout: `manifest.json` + `notebooks/<id>.json` + `folders/folders.json`.
   Compares `local.updatedAt`, `remote.updatedAt`, and `cloudSync.notebooks[id]` to decide
   on push/pull/delete/conflict. The folder hash (`hashFolders`) includes `id`, `name`,
   `parentId`, and `order`, so **folder reordering is synced** like any other folder
   change.
+  **Manifest-commit guarantee (no silent overwrite)**: the local baseline
+  (`cloudSync.notebooks`/`foldersHash`) only advances **after** the server confirms the
+  new `manifest.json`. If the manifest write fails, `runSync` restores a snapshot of the
+  previous baseline and manifest, so the next sync re-evaluates the same plan
+  (idempotent) — a stale manifest can never cause a silent pull that overwrites local
+  changes made since the failed run.
 - **Local Sync State**: `db.ts` → `cloudSync` (`CloudSyncState`).
 - **Orchestration**: `store.ts` → `syncNow()` (reentrancy guard + debounce),
-  `resolveConflicts()`. `applySyncChanges()` applies pulled/new/removed data and
-  **no-ops when nothing actually changed** — it only bumps `dataVersion` (which
-  re-triggers auto-sync) when real changes are applied, avoiding an endless
-  auto-sync loop on mobile.
+  `resolveConflicts()`. `syncNow()` **only advances `settings.cloud.lastSyncAt` when the
+  run finishes with zero errors** (a failed sync keeps the real "last synced" timestamp
+  instead of pretending it succeeded). The auto-sync subscription (20s debounce) **queues
+  a follow-up sync when a change arrives while a sync is running** (`syncQueued`), so
+  edits made during a sync window are not silently lost.
+  `applySyncChanges()` applies pulled/new/removed data and **no-ops when nothing actually
+  changed** — it only bumps `dataVersion` (which re-triggers auto-sync) when real changes
+  are applied, avoiding an endless auto-sync loop on mobile.
 - **Detailed Design/Plan**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
   and `docs/superpowers/plans/2026-08-17-sync-bidirecional-plan.md`.
+- **Regression verification**: `scripts/verify-sync.ts` (run with `npx tsx
+  scripts/verify-sync.ts`) exercises `buildPlan` and `runSync` against a fake in-memory
+  transport, asserting push/pull/conflict/delete decisions, the manifest-write rollback
+  (baseline does not advance and `lastSyncAt` is not set), idempotent re-run after a
+  rollback, and that an auth failure surfaces a clear message while leaving the sync
+  state untouched.
 
 ---
 
