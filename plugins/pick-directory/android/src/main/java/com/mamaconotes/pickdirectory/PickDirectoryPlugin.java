@@ -207,7 +207,7 @@ public class PickDirectoryPlugin extends Plugin {
         try {
             Uri uri = Uri.parse(uriString);
             DocumentFile file = DocumentFile.fromSingleUri(getContext(), uri);
-            if (file == null) {
+            if (!file.exists()) {
                 call.reject("File not found");
                 return;
             }
