@@ -70,6 +70,7 @@ async function koofrFetch<T>(
   settings: CloudSettings,
   init?: RequestInit,
 ): Promise<{ status: number; data?: T }> {
+  // Use customFetch to bypass CORS on Android
   const res = await customFetch(apiBase + path, {
     ...init,
     headers: {
@@ -81,6 +82,20 @@ async function koofrFetch<T>(
   const data =
     res.status === 204 ? undefined : ((await res.json().catch(() => undefined)) as T | undefined)
   return { status: res.status, data }
+}
+
+async function koofrListDirectory(
+  settings: CloudSettings,
+  dirPath: string,
+): Promise<string[]> {
+  const { apiBase, mountId } = await koofrInfo(settings)
+  const { status, data } = await koofrFetch<any[]>(
+    apiBase,
+    `/api/v2/mounts/${encodeURIComponent(mountId)}/files/list?path=${encodeURIComponent(dirPath)}`,
+    settings,
+  )
+  if (status !== 200) return []
+  return (data || []).map((item) => item.name).filter(Boolean)
 }
 
 async function koofrInfo(settings: CloudSettings): Promise<KoofrInfo> {
@@ -144,6 +159,11 @@ async function effectiveBaseUrl(settings: CloudSettings): Promise<string> {
 }
 
 async function directoryExists(settings: CloudSettings, dirPath: string): Promise<boolean> {
+  const apiBase = koofrApiBase(settings)
+  if (apiBase) {
+    return koofrFileExists(settings, dirPath)
+  }
+
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
   try {
@@ -168,6 +188,20 @@ export async function ensureDirectory(
   settings: CloudSettings,
   dirPath: string,
 ): Promise<void> {
+  const apiBase = koofrApiBase(settings)
+  if (apiBase) {
+    await koofrCreateFolderTree(settings, dirPath)
+    if (await koofrFileExists(settings, dirPath)) return
+    const info = await koofrInfo(settings).catch(() => null)
+    throw new Error(
+      t('error.koofrFolderNotVisible', {
+        dirPath,
+        davUrl: `${koofrApiBase(settings)}/dav`,
+        mountName: info?.mountName ?? '',
+      }),
+    )
+  }
+
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
   const res = await customFetch(url, {
@@ -182,19 +216,6 @@ export async function ensureDirectory(
       headers: { Authorization: authHeader(settings) },
     })
     if (trailing.status === 201 || (await directoryExists(settings, dirPath))) return
-    const apiBase = koofrApiBase(settings)
-    if (apiBase) {
-      await koofrCreateFolderTree(settings, dirPath)
-      if (await directoryExists(settings, dirPath)) return
-      const info = await koofrInfo(settings).catch(() => null)
-      throw new Error(
-        t('error.koofrFolderNotVisible', {
-          dirPath,
-          davUrl: `${koofrApiBase(settings)}/dav`,
-          mountName: info?.mountName ?? '',
-        }),
-      )
-    }
     throw new Error(
       t('error.remoteFolderCreateFailed', { dirPath, basePath: settings.webdavPath }),
     )
@@ -219,6 +240,11 @@ export async function listDirectory(
   settings: CloudSettings,
   dirPath: string,
 ): Promise<string[]> {
+  const apiBase = koofrApiBase(settings)
+  if (apiBase) {
+    return koofrListDirectory(settings, dirPath)
+  }
+
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, dirPath)
   const res = await customFetch(url, {
@@ -310,6 +336,19 @@ export async function testWebdavConnection(
   settings: CloudSettings,
 ): Promise<{ ok: boolean; message: string }> {
   try {
+    const apiBase = koofrApiBase(settings)
+    if (apiBase) {
+      // For Koofr, test via API to avoid PROPFIND on Android
+      await koofrInfo(settings)
+      const basePathExists = await koofrFileExists(settings, settings.webdavPath)
+      return {
+        ok: true,
+        message: basePathExists
+          ? t('error.connectionOkBaseExists')
+          : t('error.connectionOkBaseMissing', { path: settings.webdavPath }),
+      }
+    }
+
     const base = await effectiveBaseUrl(settings)
     const res = await customFetch(joinUrl(base, ''), {
       method: 'PROPFIND',
