@@ -58,7 +58,7 @@ entire UI is in Portuguese (pt-BR) by default, but supports English (en).
 | Drawing rendering | Canvas 2D (custom engine) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor | `capacitor.config.ts` |
+| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Packaging | electron-builder | `package.json` → `build` |
 
@@ -560,7 +560,8 @@ Flow and files involved:
 | IndexedDB (read/write) | `src/db.ts` |
 | Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
 | Logging System | `src/utils/logger.ts`. Stores system events and errors (like WebDAV failures) in memory. Logs are accessible via the **Logs tab** in Settings, allowing users to view, copy, and clear logs for debugging. |
-| Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via Capacitor Filesystem)**. |
+| Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via Capacitor Filesystem and `capacitor-blob-writer` for large files)**. |
+| Clipboard & Selection | `src/store.ts` (`copySelected`, `pasteClipboard`). Implements a custom selection clipboard with **fallback for systems without native Clipboard API support**. |
 | Restore all (import backup) | `src/store.ts` (`replaceAllData`) |
 | Store contracts (state + actions, see §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 

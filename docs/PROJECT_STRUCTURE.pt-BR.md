@@ -56,7 +56,7 @@ opcional em disco via Electron ou File System Access API). O estado global usa
 | Renderização de desenho | Canvas 2D (motor próprio) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor | `capacitor.config.ts` |
+| Android | Capacitor (com `capacitor-blob-writer`, `capacitor-native-settings`) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Empacotamento | electron-builder | `package.json` → `build` |
 
@@ -563,7 +563,8 @@ Fluxo e arquivos envolvidos:
 | IndexedDB (leitura/escrita) | `src/db.ts` |
 | Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
-| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via Capacitor Filesystem)**. |
+| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via Capacitor Filesystem e `capacitor-blob-writer` para arquivos grandes)**. |
+| Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
 | Contratos das stores (estado + ações, ver §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 
