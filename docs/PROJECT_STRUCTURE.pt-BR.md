@@ -138,14 +138,14 @@ Fluxo de inicialização:
 | Arquivo | Responsabilidade |
 |---|---|
 | `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. |
-| `localSave.ts` | **Backup automático para disco**: gerencia Desktop (Electron), Web (File System Access) e **Android (SAF via plugin customizado)**. Suporta escrita em URIs `content://` para diretórios persistentes selecionados pelo usuário. |
+| `localSave.ts` | **Backup automático para disco**: gerencia Desktop (Electron), Web (File System Access) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks para evitar OOM no Android; também suporta URIs SAF `content://` via plugin customizado `PickDirectory` para diretórios persistentes selecionados pelo usuário)**. Suporta escrita em URIs `content://` para diretórios persistentes selecionados pelo usuário. |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |
 | `pdf.ts` | Renderização de arquivos PDF em imagens via `pdfjs-dist` (`renderPdfPages`) |
 | `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport` |
 | `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração) |
-| `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza `saveDirectory`/handle e **remove senhas de nuvem** por segurança) |
+| `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza `saveDirectory`/handle e **remove senhas de nuvem** por segurança). No celular a exportação grava na pasta Documentos do app via `capacitor-blob-writer` (fluxo em chunks, evita o OOM da bridge do Capacitor causado por `Filesystem.writeFile`/plugin customizado com conteúdo grande); no desktop usa a ponte `save-file` do Electron e na web dispara um download. |
 | `localSave.ts` | Backup automático para disco (Electron) ou diretório do navegador (File System Access), no mesmo formato do backup manual (inclui configurações) |
 | `imageErase.ts` | Borracha em imagens: sessão de apagar em canvas offscreen e re-encode ao final |
 | `colors.ts` | Paleta de cores e helpers de conversão HEX/RGB |
@@ -522,7 +522,7 @@ Fluxo e arquivos envolvidos:
   `parentId` e `order`, então a **reordenação de pastas é sincronizada** como qualquer
   outra mudança de pastas.
 - **Estado local de sync**: `db.ts` → `cloudSync` (`CloudSyncState`).
-- **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`.
+- **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`. O `applySyncChanges()` aplica dados puxados/novos/removidos e **não faz nada quando nada mudou de fato** — só incrementa `dataVersion` (que re-dispara o auto-sync) quando há mudanças reais, evitando um loop infinito de auto-sync no celular.
 - **Design/plano detalhados**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
   e `docs/superpowers/plans/2026-08-17-sync-bidirecional-plan.md`.
 
@@ -558,9 +558,9 @@ Fluxo e arquivos envolvidos:
 | Tipos e defaults (settings, atalhos) | `src/types.ts` |
 | CRUD de cadernos/pastas/páginas/modelos | `src/store.ts` |
 | IndexedDB (leitura/escrita) | `src/db.ts` |
-| Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings). No Android, utiliza SAF nativo (`ACTION_CREATE_DOCUMENT`) via plugin `PickDirectory` para funcionalidade "Salvar Como" em qualquer local selecionado pelo usuário. |
+| Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings). No celular, exporta para a **pasta Documentos** via `capacitor-blob-writer` (fluxo em chunks — evita o `OutOfMemoryError` no Android ao enviar um backup grande pela bridge do Capacitor); no desktop usa o diálogo de salvar do Electron e na web dispara um download. |
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
-| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via Capacitor Filesystem e `capacitor-blob-writer` para arquivos grandes)**. |
+| Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via `capacitor-blob-writer` — fluxo em chunks que evita o `OutOfMemoryError` no Android do `Filesystem.writeFile` para payloads grandes — ou URI SAF `content://` via plugin customizado `PickDirectory`)**. |
 | Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
 | Contratos das stores (estado + ações, ver §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |

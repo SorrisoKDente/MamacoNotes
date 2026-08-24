@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
-import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Directory } from '@capacitor/filesystem'
+import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
 import { buildBackupPayload } from './backup'
 
@@ -58,12 +59,14 @@ export async function persistLocalBackup(
         return true
       }
 
-      await Filesystem.writeFile({
+      // Default path: write to the app Documents folder via capacitor-blob-writer,
+      // which streams the Blob in chunks. Filesystem.writeFile OOM-crashes on
+      // Android with large payloads.
+      await write_blob({
         path: BACKUP_FILENAME,
-        data: payload,
         directory: Directory.Documents,
-        encoding: 'utf8' as any,
-        recursive: true
+        blob: new Blob([payload], { type: 'application/json' }),
+        recursive: true,
       })
       return true
     } catch (err) {

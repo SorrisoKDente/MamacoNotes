@@ -372,6 +372,17 @@ export const useAppStore = create<AppState>((set, get) => {
 
   async function applySyncChanges(changes: SyncChanges) {
     const prev = get()
+    const foldersChanged =
+      changes.pulledFolders !== null &&
+      hashFolders(changes.pulledFolders) !== hashFolders(prev.folders)
+    if (
+      changes.pulledNotebooks.length === 0 &&
+      changes.newNotebooks.length === 0 &&
+      changes.removedLocalNotebookIds.length === 0 &&
+      !foldersChanged
+    ) {
+      return
+    }
     const removed = new Set(changes.removedLocalNotebookIds)
     let notebooks = prev.notebooks.filter((n) => !removed.has(n.id))
 

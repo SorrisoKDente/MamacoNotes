@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core'
-import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Directory } from '@capacitor/filesystem'
+import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
-import { PickDirectory } from './localSave'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -54,7 +54,7 @@ export async function exportBackup(
   notebooks: Notebook[],
   settings?: AppSettings | null,
 ): Promise<boolean> {
-  const payload = JSON.stringify(buildBackupPayload(folders, notebooks, settings), null, 2)
+  const payload = JSON.stringify(buildBackupPayload(folders, notebooks, settings))
 
   if (desktop().saveFile) {
     try {
@@ -64,26 +64,18 @@ export async function exportBackup(
     }
   }
 
-  // Android / iOS native export
+  // Mobile (Android / iOS): write to the app Documents folder. Uses
+  // capacitor-blob-writer, which streams the Blob in chunks instead of sending
+  // the whole JSON through the Capacitor bridge — Filesystem.writeFile or a
+  // custom plugin with a large content string crashes with OutOfMemoryError on
+  // Android for big backups (images/PDFs stored as data URLs).
   if (Capacitor.isNativePlatform()) {
     try {
-      if (Capacitor.getPlatform() === 'android') {
-        // Use the native file picker to "Save As"
-        const result = await PickDirectory.saveFilePicker({ filename: BACKUP_FILENAME })
-        if (result.uri) {
-          await PickDirectory.writeToUri({ uri: result.uri, content: payload })
-          return true
-        }
-        return false
-      }
-
-      // iOS fallback (keep saving to Documents)
-      await Filesystem.writeFile({
+      await write_blob({
         path: BACKUP_FILENAME,
-        data: payload,
         directory: Directory.Documents,
-        encoding: 'utf8' as any,
-        recursive: true
+        blob: new Blob([payload], { type: 'application/json' }),
+        recursive: true,
       })
       return true
     } catch (err) {
