@@ -220,7 +220,6 @@ function ImageSizeChoiceModal() {
 
 export function ModalsHost() {
   const openModal = useUiStore((s) => s.openModal)
-  const modalData = useUiStore((s) => s.modalData)
   const close = useUiStore((s) => s.close)
 
   useEffect(() => {
@@ -266,7 +265,6 @@ export function ModalsHost() {
         {openModal === 'confirmDelete' && <ConfirmDeleteModal />}
         {openModal === 'update' && <UpdateModal />}
       </ModalShell>
-      <span className="modal-data-keep" data-json={JSON.stringify(modalData)} />
     </div>
   )
 }
@@ -1157,13 +1155,10 @@ function SettingsModal() {
           <div className="settings-section">
             <div className="settings-section-title">{t('modal.sectionDirectory')}</div>
             <label className="form-label">{t('modal.notesDirectory')}</label>
-            <div className="panel-row">
-              <input
-                className="form-input"
-                value={settings.saveDirectory}
-                placeholder={t('modal.noDirectorySelected')}
-                readOnly
-              />
+            <div className="directory-picker-row">
+              <div className="directory-path-display">
+                {settings.saveDirectory ? formatDisplayPath(settings.saveDirectory) : t('modal.noDirectorySelected')}
+              </div>
               <button
                 className="btn"
                 disabled={dirBusy}
@@ -1187,7 +1182,7 @@ function SettingsModal() {
             </div>
             <div className="modal-hint">
               {settings.saveDirectory
-                ? t('modal.saveDirHint', { dir: settings.saveDirectory })
+                ? t('modal.saveDirHint', { dir: formatDisplayPath(settings.saveDirectory) })
                 : t('modal.saveDirHintEmpty')}
             </div>
           </div>
@@ -1680,22 +1675,33 @@ function SyncConflictModal() {
   const { t } = useI18n()
   const close = useUiStore((s) => s.close)
   const resolveConflicts = useAppStore((s) => s.resolveConflicts)
-  const conflicts = useUiStore((s) => s.modalData.conflicts) as SyncConflictItem[]
-  const [choices, setChoices] = useState<Record<string, ConflictChoice>>(() => {
-    const opts = getConflictOptions(t)
-    const init: Record<string, ConflictChoice> = {}
-    for (const c of conflicts) {
-      const list = opts[c.conflictType]
-      if (list && list.length > 0) init[c.id] = list[0].value
-    }
-    return init
-  })
+  const conflictsData = useUiStore((s) => s.modalData.conflicts)
 
-  if (!conflicts || conflicts.length === 0) return null
+  const [choices, setChoices] = useState<Record<string, ConflictChoice>>({})
+
+  // Initialize choices when conflictsData changes
+  useEffect(() => {
+    if (Array.isArray(conflictsData) && conflictsData.length > 0) {
+      const opts = getConflictOptions(t)
+      const init: Record<string, ConflictChoice> = {}
+      for (const c of conflictsData as SyncConflictItem[]) {
+        const list = opts[c.conflictType]
+        if (Array.isArray(list) && list.length > 0) {
+          init[c.id] = list[0].value
+        }
+      }
+      setChoices(init)
+    }
+  }, [conflictsData, t])
+
+  if (!Array.isArray(conflictsData) || conflictsData.length === 0) return null
+  const conflicts = conflictsData as SyncConflictItem[]
 
   function applyToAll() {
+    if (conflicts.length === 0) return
     const first = conflicts[0]
     const choice = choices[first.id]
+    if (!choice) return
     const next: Record<string, ConflictChoice> = {}
     for (const c of conflicts) next[c.id] = choice
     setChoices(next)
@@ -1816,6 +1822,25 @@ function MoveModal() {
 
 function safeName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '_')
+}
+
+function formatDisplayPath(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('content://')) {
+    try {
+      const decoded = decodeURIComponent(path)
+      // Extract the human-readable part from SAF URI if possible
+      const parts = decoded.split('/')
+      const last = parts[parts.length - 1]
+      if (last.includes(':')) {
+        return last.split(':').pop() || last
+      }
+      return last
+    } catch {
+      return path
+    }
+  }
+  return path
 }
 
 function formatShortcut(s: string): string {

@@ -558,7 +558,7 @@ Fluxo e arquivos envolvidos:
 | Tipos e defaults (settings, atalhos) | `src/types.ts` |
 | CRUD de cadernos/pastas/páginas/modelos | `src/store.ts` |
 | IndexedDB (leitura/escrita) | `src/db.ts` |
-| Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
+| Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `Modals.tsx` (Settings). No Android, utiliza SAF nativo (`ACTION_CREATE_DOCUMENT`) via plugin `PickDirectory` para funcionalidade "Salvar Como" em qualquer local selecionado pelo usuário. |
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
 | Backup automático (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Salva automaticamente as notas **e as configurações do app** no diretório selecionado no Desktop (Electron), Web (File System Access API) e **Celular (pasta Documentos via Capacitor Filesystem e `capacitor-blob-writer` para arquivos grandes)**. |
 | Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |

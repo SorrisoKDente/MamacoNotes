@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import type { AppSettings, Folder, Notebook } from '../types'
+import { PickDirectory } from './localSave'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -66,7 +67,17 @@ export async function exportBackup(
   // Android / iOS native export
   if (Capacitor.isNativePlatform()) {
     try {
-      // First save to a temp file in the Documents directory
+      if (Capacitor.getPlatform() === 'android') {
+        // Use the native file picker to "Save As"
+        const result = await PickDirectory.saveFilePicker({ filename: BACKUP_FILENAME })
+        if (result.uri) {
+          await PickDirectory.writeToUri({ uri: result.uri, content: payload })
+          return true
+        }
+        return false
+      }
+
+      // iOS fallback (keep saving to Documents)
       await Filesystem.writeFile({
         path: BACKUP_FILENAME,
         data: payload,
@@ -74,25 +85,6 @@ export async function exportBackup(
         encoding: 'utf8' as any,
         recursive: true
       })
-
-      // Try to use Share API if available to let the user "Save As" or send it
-      if ((navigator as any).share) {
-        const blob = new Blob([payload], { type: 'application/json' })
-        const file = new File([blob], BACKUP_FILENAME, { type: 'application/json' })
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'Mamaco Notes Backup',
-            text: 'Backup file from Mamaco Notes'
-          })
-          return true
-        } catch (shareErr) {
-          // If share is cancelled or fails, we already wrote to Documents
-          console.log('Share failed or cancelled, file is in Documents', shareErr)
-          return true
-        }
-      }
-
       return true
     } catch (err) {
       console.error('Failed to export native backup:', err)

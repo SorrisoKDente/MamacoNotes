@@ -329,7 +329,7 @@ export const ptBRMessages: Record<string, string> = {
   'modal.processing': 'Processando...',
   'modal.exportBackup': 'Exportar backup',
   'modal.importBackup': 'Importar backup',
-  'modal.backupExported': 'Backup exportado com sucesso.',
+  'modal.backupExported': 'Backup exportado com sucesso para a pasta Documentos.',
   'modal.backupExportFailed': 'Falha ao exportar o backup.',
   'modal.backupImported': 'Backup importado com sucesso.',
   'modal.logsTitle': 'Logs do sistema',

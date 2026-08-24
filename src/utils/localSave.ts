@@ -3,9 +3,11 @@ import { Filesystem, Directory } from '@capacitor/filesystem'
 import type { AppSettings, Folder, Notebook } from '../types'
 import { buildBackupPayload } from './backup'
 
-const PickDirectory = registerPlugin<{
+export const PickDirectory = registerPlugin<{
   pick: () => Promise<{ path: string }>,
-  writeFile: (options: { uri: string; filename: string; content: string }) => Promise<void>
+  writeFile: (options: { uri: string; filename: string; content: string }) => Promise<void>,
+  saveFilePicker: (options: { filename: string }) => Promise<{ uri: string }>,
+  writeToUri: (options: { uri: string; content: string }) => Promise<void>
 }>('PickDirectory')
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'

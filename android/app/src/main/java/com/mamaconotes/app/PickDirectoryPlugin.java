@@ -21,6 +21,16 @@ public class PickDirectoryPlugin extends Plugin {
         startActivityForResult(call, intent, "pickResult");
     }
 
+    @PluginMethod
+    public void saveFilePicker(PluginCall call) {
+        String filename = call.getString("filename");
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, filename);
+        startActivityForResult(call, intent, "saveFilePickerResult");
+    }
+
     @ActivityCallback
     @SuppressWarnings("unused")
     private void pickResult(PluginCall call, ActivityResult result) {
@@ -45,6 +55,53 @@ public class PickDirectoryPlugin extends Plugin {
             }
         } else {
             call.reject("Directory selection cancelled");
+        }
+    }
+
+    @ActivityCallback
+    @SuppressWarnings("unused")
+    private void saveFilePickerResult(PluginCall call, ActivityResult result) {
+        if (result.getResultCode() == android.app.Activity.RESULT_OK) {
+            Intent data = result.getData();
+            if (data != null) {
+                Uri uri = data.getData();
+                if (uri != null) {
+                    JSObject ret = new JSObject();
+                    ret.put("uri", uri.toString());
+                    call.resolve(ret);
+                } else {
+                    call.reject("No file location selected");
+                }
+            } else {
+                call.reject("No file data received");
+            }
+        } else {
+            call.reject("File saving cancelled");
+        }
+    }
+
+    @PluginMethod
+    public void writeToUri(PluginCall call) {
+        String uriString = call.getString("uri");
+        String content = call.getString("content");
+
+        if (uriString == null || content == null) {
+            call.reject("Missing parameters");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            OutputStream os = getContext().getContentResolver().openOutputStream(uri);
+            if (os != null) {
+                os.write(content.getBytes());
+                os.close();
+                call.resolve();
+            } else {
+                call.reject("Failed to open output stream");
+            }
+        } catch (Exception e) {
+            call.reject(e.getMessage());
         }
     }
 

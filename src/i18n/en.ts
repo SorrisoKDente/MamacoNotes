@@ -329,7 +329,7 @@ export const enMessages: Record<string, string> = {
   'modal.processing': 'Processing...',
   'modal.exportBackup': 'Export backup',
   'modal.importBackup': 'Import backup',
-  'modal.backupExported': 'Backup exported successfully.',
+  'modal.backupExported': 'Backup successfully exported to the Documents folder.',
   'modal.backupExportFailed': 'Failed to export backup.',
   'modal.backupImported': 'Backup imported successfully.',
   'modal.logsTitle': 'System logs',

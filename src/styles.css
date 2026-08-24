@@ -1842,6 +1842,46 @@ body {
   border-color: var(--accent);
 }
 
+.directory-picker-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.directory-path-display {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+  min-height: 38px;
+  line-height: 1.4;
+}
+
+.directory-picker-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.directory-path-display {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+  min-height: 38px;
+  line-height: 1.4;
+}
+
 .password-field {
   position: relative;
 }

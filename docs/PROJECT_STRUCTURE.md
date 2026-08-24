@@ -560,7 +560,7 @@ Flow and files involved:
 | Types and defaults (settings, shortcuts) | `src/types.ts` |
 | CRUD for notebooks/folders/pages/templates | `src/store.ts` |
 | IndexedDB (read/write) | `src/db.ts` |
-| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `Modals.tsx` (Settings) |
+| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `Modals.tsx` (Settings). On Android, uses native SAF (`ACTION_CREATE_DOCUMENT`) via `PickDirectory` plugin for "Save As" functionality to any user-selected location. |
 | Logging System | `src/utils/logger.ts`. Stores system events and errors (like WebDAV failures) in memory. Logs are accessible via the **Logs tab** in Settings, allowing users to view, copy, and clear logs for debugging. |
 | Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via Capacitor Filesystem and `capacitor-blob-writer` for large files)**. |
 | Clipboard & Selection | `src/store.ts` (`copySelected`, `pasteClipboard`). Implements a custom selection clipboard with **fallback for systems without native Clipboard API support**. |
