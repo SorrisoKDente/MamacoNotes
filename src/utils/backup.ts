@@ -2,9 +2,38 @@ import { Capacitor } from '@capacitor/core'
 import { Directory } from '@capacitor/filesystem'
 import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
-import { writeFileChunked, pickBackupFile } from './chunkedIo'
+import { writeFileChunked, pickBackupFile, fileExistsInDirectory } from './chunkedIo'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/**
+ * Date-stamped backup name so a manual export never overwrites an existing
+ * backup in the target folder.
+ */
+function buildBackupFilename(date = new Date()): string {
+  const stamp = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
+  return `mamaco-notes-backup-${stamp}.json`
+}
+
+/**
+ * Picks a unique backup name inside `uri`. If a file with the same timestamp
+ * already exists (same-second export), appends a counter.
+ */
+async function uniqueMobileBackupFilename(uri: string | null): Promise<string> {
+  const base = buildBackupFilename()
+  if (!uri) return base
+  let name = base
+  let counter = 1
+  while (await fileExistsInDirectory(uri, name)) {
+    name = `${base.replace(/\.json$/, '')}-${counter}.json`
+    counter += 1
+  }
+  return name
+}
 
 export interface BackupPayload {
   app: string
@@ -74,11 +103,13 @@ export async function exportBackup(
   if (Capacitor.isNativePlatform()) {
     try {
       const dir = settings?.saveDirectory
-      if (dir && dir.startsWith('content://')) {
-        await writeFileChunked(dir, BACKUP_FILENAME, payload)
+      const contentUri = typeof dir === 'string' && dir.startsWith('content://') ? dir : null
+      const filename = await uniqueMobileBackupFilename(contentUri)
+      if (contentUri) {
+        await writeFileChunked(contentUri, filename, payload)
       } else {
         await write_blob({
-          path: BACKUP_FILENAME,
+          path: filename,
           directory: Directory.Documents,
           blob: new Blob([payload], { type: 'application/json' }),
           recursive: true,

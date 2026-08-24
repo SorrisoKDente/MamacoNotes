@@ -1111,7 +1111,20 @@ function SettingsModal() {
         notebooks,
         useAppStore.getState().settings,
       )
-      setBackupMsg(ok ? t('modal.backupExported') : t('modal.backupExportFailed'))
+      if (ok) {
+        const dir = useAppStore.getState().settings.saveDirectory
+        if (
+          Capacitor.isNativePlatform() &&
+          typeof dir === 'string' &&
+          dir.startsWith('content://')
+        ) {
+          setBackupMsg(t('modal.backupExportedTo', { dir: formatDisplayPath(dir) }))
+        } else {
+          setBackupMsg(t('modal.backupExported'))
+        }
+      } else {
+        setBackupMsg(t('modal.backupExportFailed'))
+      }
     } finally {
       setBackupBusy(false)
     }

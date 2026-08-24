@@ -131,6 +131,16 @@ export async function readBackupFileFromUri(uri: string): Promise<string> {
   )
 }
 
+/** Returns whether `filename` already exists inside the SAF directory `uri`. */
+export async function fileExistsInDirectory(uri: string, filename: string): Promise<boolean> {
+  try {
+    await PickDirectory.getFileInfo({ uri, filename })
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** Opens the system document picker and returns the file content (chunked read). */
 export async function pickBackupFile(): Promise<string | null> {
   try {
