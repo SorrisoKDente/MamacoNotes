@@ -22,6 +22,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @ActivityCallback
+    @SuppressWarnings("unused")
     private void pickResult(PluginCall call, ActivityResult result) {
         if (result.getResultCode() == android.app.Activity.RESULT_OK) {
             Intent data = result.getData();
