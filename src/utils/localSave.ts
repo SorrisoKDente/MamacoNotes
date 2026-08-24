@@ -1,15 +1,10 @@
-import { Capacitor, registerPlugin } from '@capacitor/core'
+import { Capacitor } from '@capacitor/core'
 import { Directory } from '@capacitor/filesystem'
 import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
-import { buildBackupPayload } from './backup'
-
-export const PickDirectory = registerPlugin<{
-  pick: () => Promise<{ path: string }>,
-  writeFile: (options: { uri: string; filename: string; content: string }) => Promise<void>,
-  saveFilePicker: (options: { filename: string }) => Promise<{ uri: string }>,
-  writeToUri: (options: { uri: string; content: string }) => Promise<void>
-}>('PickDirectory')
+import { buildBackupPayload, parseBackup } from './backup'
+import type { BackupPayload } from './backup'
+import { PickDirectory, writeFileChunked, readBackupFileFromDirectory } from './chunkedIo'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -51,11 +46,9 @@ export async function persistLocalBackup(
   if (Capacitor.isNativePlatform()) {
     try {
       if (settings.saveDirectory.startsWith('content://')) {
-        await PickDirectory.writeFile({
-          uri: settings.saveDirectory,
-          filename: BACKUP_FILENAME,
-          content: payload
-        })
+        // User-selected SAF directory: stream in chunks through the plugin so
+        // the large payload never crosses the bridge in a single call.
+        await writeFileChunked(settings.saveDirectory, BACKUP_FILENAME, payload)
         return true
       }
 
@@ -87,6 +80,16 @@ export async function persistLocalBackup(
   }
 
   return false
+}
+
+export async function readBackupFromDirectory(uri: string): Promise<BackupPayload | null> {
+  try {
+    const text = await readBackupFileFromDirectory(uri, BACKUP_FILENAME)
+    return parseBackup(text)
+  } catch (err) {
+    console.error('Failed to read mobile backup from directory:', err)
+    return null
+  }
 }
 
 export function scheduleLocalBackup(

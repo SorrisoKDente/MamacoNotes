@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
 import { logger } from '../utils/logger'
@@ -1088,9 +1089,32 @@ function SettingsModal() {
   async function doExport() {
     setBackupBusy(true)
     setBackupMsg(null)
-    const ok = await exportBackup(folders, notebooks, settings)
-    setBackupBusy(false)
-    setBackupMsg(ok ? t('modal.backupExported') : t('modal.backupExportFailed'))
+    try {
+      // On mobile, make sure the user has chosen a persistent SAF folder before
+      // exporting, so the backup goes to a place they can actually access.
+      if (
+        Capacitor.isNativePlatform() &&
+        !(settings.saveDirectory ?? '').startsWith('content://')
+      ) {
+        const result = await pickSaveDirectory(settings)
+        if (!result) {
+          setBackupMsg(t('modal.backupExportFailed'))
+          return
+        }
+        await setSettings({
+          saveDirectory: result.path,
+          saveDirectoryHandle: result.handle ?? null,
+        })
+      }
+      const ok = await exportBackup(
+        folders,
+        notebooks,
+        useAppStore.getState().settings,
+      )
+      setBackupMsg(ok ? t('modal.backupExported') : t('modal.backupExportFailed'))
+    } finally {
+      setBackupBusy(false)
+    }
   }
 
   async function doImport() {

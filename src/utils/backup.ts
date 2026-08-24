@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { Directory } from '@capacitor/filesystem'
 import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
+import { writeFileChunked, pickBackupFile } from './chunkedIo'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -64,19 +65,25 @@ export async function exportBackup(
     }
   }
 
-  // Mobile (Android / iOS): write to the app Documents folder. Uses
-  // capacitor-blob-writer, which streams the Blob in chunks instead of sending
-  // the whole JSON through the Capacitor bridge — Filesystem.writeFile or a
-  // custom plugin with a large content string crashes with OutOfMemoryError on
-  // Android for big backups (images/PDFs stored as data URLs).
+  // Mobile (Android / iOS): write to the SAF directory chosen by the user, or
+  // fall back to the app Documents folder. Both paths stream the content in
+  // chunks instead of sending the whole JSON through the Capacitor bridge —
+  // Filesystem.writeFile or a custom plugin with a large content string crashes
+  // with OutOfMemoryError on Android for big backups (images/PDFs stored as
+  // data URLs).
   if (Capacitor.isNativePlatform()) {
     try {
-      await write_blob({
-        path: BACKUP_FILENAME,
-        directory: Directory.Documents,
-        blob: new Blob([payload], { type: 'application/json' }),
-        recursive: true,
-      })
+      const dir = settings?.saveDirectory
+      if (dir && dir.startsWith('content://')) {
+        await writeFileChunked(dir, BACKUP_FILENAME, payload)
+      } else {
+        await write_blob({
+          path: BACKUP_FILENAME,
+          directory: Directory.Documents,
+          blob: new Blob([payload], { type: 'application/json' }),
+          recursive: true,
+        })
+      }
       return true
     } catch (err) {
       console.error('Failed to export native backup:', err)
@@ -121,6 +128,15 @@ export async function importBackup(): Promise<BackupPayload | null> {
     } catch {
       return null
     }
+  }
+
+  // Mobile (Android / iOS): open the system document picker and read the file
+  // in chunks through the native plugin to avoid loading a big backup fully in
+  // the WebView memory.
+  if (Capacitor.isNativePlatform()) {
+    const content = await pickBackupFile()
+    if (!content) return null
+    return parseBackup(content)
   }
 
   return new Promise((resolve) => {

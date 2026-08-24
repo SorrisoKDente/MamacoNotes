@@ -13,3 +13,6 @@ project(':capacitor-blob-writer').projectDir = new File('../node_modules/capacit
 
 include ':capacitor-native-settings'
 project(':capacitor-native-settings').projectDir = new File('../node_modules/capacitor-native-settings/android')
+
+include ':pick-directory'
+project(':pick-directory').projectDir = new File('../plugins/pick-directory/android')

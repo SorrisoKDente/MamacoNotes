@@ -1,7 +1,9 @@
 import type { CloudSettings } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
-import { customFetch } from './http'
+import { customFetch, downloadText } from './http'
+import { Capacitor } from '@capacitor/core'
+import { uploadFileStreaming } from './chunkedIo'
 
 const NOTEBOOKS_DIR = 'notebooks'
 const FOLDERS_DIR = 'folders'
@@ -275,15 +277,31 @@ export async function uploadFile(
 ): Promise<void> {
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
-  const body = bytes instanceof Blob ? bytes : new Uint8Array(bytes)
+  const headers = {
+    Authorization: authHeader(settings),
+    'Content-Type': contentType,
+  }
   try {
+    if (Capacitor.isNativePlatform()) {
+      // Stream the body chunk-by-chunk through the native plugin instead of
+      // sending the whole payload across the Capacitor bridge (which crashes
+      // with OutOfMemoryError for large notebooks).
+      const content =
+        bytes instanceof Blob ? await bytes.text() : new TextDecoder().decode(bytes)
+      const status = await uploadFileStreaming(url, headers, content)
+      if (status >= 200 && status < 300) return
+      if (status === 404) {
+        throw new Error(
+          t('error.uploadFailed404', { filePath, basePath: settings.webdavPath }),
+        )
+      }
+      throw new Error(t('error.uploadFailed', { filePath, status }))
+    }
+
     const res = await customFetch(url, {
       method: 'PUT',
-      headers: {
-        Authorization: authHeader(settings),
-        'Content-Type': contentType,
-      },
-      body,
+      headers,
+      body: bytes instanceof Blob ? bytes : new Uint8Array(bytes),
     })
     if (!res.ok && res.status !== 201 && res.status !== 204) {
       if (res.status === 404) {
@@ -306,9 +324,17 @@ export async function downloadFile(
   const base = await effectiveBaseUrl(settings)
   const url = joinUrl(base, filePath)
   try {
-    const res = await customFetch(url, {
-      headers: { Authorization: authHeader(settings) },
-    })
+    const headers = { Authorization: authHeader(settings) }
+    if (Capacitor.isNativePlatform()) {
+      // Chunked Range download: the remote content is fetched in pieces
+      // (arraybuffer/base64) and reassembled in JS, avoiding the bridge OOM.
+      const res = await downloadText(url, headers)
+      if (!res.ok) {
+        throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+      }
+      return res.text
+    }
+    const res = await customFetch(url, { headers })
     if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
     return res.text()
   } catch (err) {

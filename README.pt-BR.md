@@ -49,8 +49,9 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
 -   **Segurança e Persistência**:
     -   Dados armazenados localmente usando **IndexedDB**.
     -   Restauração de sessão para reabrir automaticamente o último caderno e página.
-    -   Backups automáticos em disco (Electron) ou diretório do navegador (**senhas excluídas por segurança**).
-    -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
+    -   Backups automáticos em disco (Electron), diretório do navegador ou **pasta no Android** (Documentos do app ou uma pasta SAF selecionada pelo usuário via o plugin local `pick-directory`) (**senhas excluídas por segurança**).
+    -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**), gravando em uma pasta SAF escolhida pelo usuário no Android.
+    -   **À prova de OOM no Android**: backups grandes e sincronização de cadernos ocorrem em chunks (streams SAF `content://`, downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
 
 ## 🛠️ Stack Tecnológica
 

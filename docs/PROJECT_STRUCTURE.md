@@ -58,7 +58,7 @@ entire UI is in Portuguese (pt-BR) by default, but supports English (en).
 | Drawing rendering | Canvas 2D (custom engine) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`, and custom `PickDirectory` plugin) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`, and local `pick-directory` plugin for SAF directory picking + chunked file I/O) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Packaging | electron-builder | `package.json` → `build` |
 
@@ -139,16 +139,16 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. |
-| `localSave.ts` | **Automatic backup to disk**: handles Desktop (Electron), Web (File System Access), and **Mobile (Documents folder via `capacitor-blob-writer` — streams the Blob in chunks to avoid OOM on Android; also supports SAF `content://` URIs via the custom `PickDirectory` plugin for persistent user-selected directories)**. |
+| `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. Exports `customFetch` (body converts `Uint8Array`/`ArrayBuffer`/`Blob` to text) and `downloadText` (**chunked Range download** used on Android: requests `Range: bytes=…` with `responseType: 'arraybuffer'`, reassembles base64 chunks in JS — avoids the bridge OOM for large notebook JSON). |
+| `localSave.ts` | **Automatic backup to disk**: handles Desktop (Electron), Web (File System Access), and **Mobile (Documents folder via `capacitor-blob-writer` — streams the Blob in chunks to avoid OOM on Android; also supports SAF `content://` URIs via the local `pick-directory` plugin for persistent user-selected directories)**. |
+| `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `writeFileChunked` (truncate-then-append writes via `writeChunk`), `readBackupFileFromDirectory`/`readBackupFileFromUri` (chunked reads via `readChunk`/`readUriChunk`), `pickBackupFile` (system document picker → chunked read), and `uploadFileStreaming` (PUT streamed via the plugin's `uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`). |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
 | `export.ts` | Page rendering to canvas and PNG/PDF export (generates simple PDF without external library) |
 | `pdf.ts` | Rendering PDF files to images via `pdfjs-dist` (`renderPdfPages`) |
-| `webdav.ts` | WebDAV transport (PROPFIND/MKCOL/PUT/DELETE fetch), special Koofr support, `makeTransport` |
+| `webdav.ts` | WebDAV transport (PROPFIND/MKCOL/PUT/DELETE fetch), special Koofr support, `makeTransport`. On Android the transport uses the **chunked native paths**: `downloadFile` via `http.ts` `downloadText` (Range + arraybuffer) and `uploadFile` via `chunkedIo.ts` `uploadFileStreaming` (PUT streamed through the `pick-directory` plugin's `HttpURLConnection`) — both avoid the bridge OOM. |
 | `sync.ts` | **Bidirectional synchronization algorithm** (merge, conflicts, tombstone, migration) |
-| `backup.ts` | Export/import full JSON backup (folders, notebooks, and settings; sanitizes `saveDirectory`/handle and **removes cloud passwords** for security). On mobile the export writes to the app Documents folder via `capacitor-blob-writer` (chunked stream, avoids the Capacitor bridge OOM caused by `Filesystem.writeFile`/custom plugin with large content); on desktop uses the Electron `save-file` bridge and on web triggers a download. |
-| `localSave.ts` | Automatic backup to disk (Electron) or browser directory (File System Access), in the same format as manual backup (includes settings) |
+| `backup.ts` | Export/import full JSON backup (folders, notebooks, and settings; sanitizes `saveDirectory`/handle and **removes cloud passwords** for security). On mobile the export writes to the **SAF folder chosen by the user** (Settings → Directory, `content://` URI, chunked via `writeFileChunked`) or falls back to the app Documents folder via `capacitor-blob-writer` (chunked stream, avoids the Capacitor bridge OOM caused by `Filesystem.writeFile` with large content); import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron `save-file`/`open-file` bridge and on web triggers a download/file input. |
 | `imageErase.ts` | Eraser on images: offscreen canvas erasing session and re-encode at the end |
 | `colors.ts` | Color palette and HEX/RGB conversion helpers |
 | `fonts.ts` | System fonts list (Local Font Access) with fallback |
@@ -182,6 +182,7 @@ Initialization flow:
 
 | Path | Responsibility |
 |---|---|
+| `plugins/pick-directory/` | **Local Capacitor plugin** (dependency `pick-directory` via `file:plugins/pick-directory`): SAF directory picker (`pick`), chunked file read/write on `content://` URIs (`writeChunk`/`readChunk`, `openFilePicker`/`readUriChunk`, `getFileInfo`/`getUriFileInfo`), and streaming PUT upload (`uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`) — all to avoid the Android `OutOfMemoryError` of sending large content through the bridge. TS types in `index.d.ts`; the Android source lives in `android/`. |
 | `public/` | PWA static icons (favicon, apple-touch-icon, pwa-192/512, maskable) |
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) |
@@ -563,9 +564,9 @@ Flow and files involved:
 | Types and defaults (settings, shortcuts) | `src/types.ts` |
 | CRUD for notebooks/folders/pages/templates | `src/store.ts` |
 | IndexedDB (read/write) | `src/db.ts` |
-| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `Modals.tsx` (Settings). On mobile, exports to the **Documents folder** via `capacitor-blob-writer` (chunked stream — avoids the Android `OutOfMemoryError` when sending a large backup through the Capacitor bridge); on desktop uses the Electron save dialog and on web triggers a download. |
+| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). On mobile, export writes to the **SAF folder chosen by the user** (`content://` URI) via `writeFileChunked`, falling back to the **Documents folder** via `capacitor-blob-writer` (both chunked — avoids the Android `OutOfMemoryError` when sending a large backup through the Capacitor bridge); import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron save/open dialog and on web triggers a download/file input. |
 | Logging System | `src/utils/logger.ts`. Stores system events and errors (like WebDAV failures) in memory. Logs are accessible via the **Logs tab** in Settings, allowing users to view, copy, and clear logs for debugging. |
-| Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`). Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via `capacitor-blob-writer` — chunked stream that avoids the Android `OutOfMemoryError` of `Filesystem.writeFile` for large payloads — or SAF `content://` URI via the custom `PickDirectory` plugin)**. |
+| Automatic backup (Auto-save) | `src/utils/localSave.ts` (`persistLocalBackup`) + `src/utils/chunkedIo.ts`. Automatically saves notes **and app settings** to the selected directory on Desktop (Electron), Web (File System Access API), and **Mobile (Documents folder via `capacitor-blob-writer` — chunked stream that avoids the Android `OutOfMemoryError` of `Filesystem.writeFile` for large payloads — or SAF `content://` URI via the local `pick-directory` plugin with `writeFileChunked`)**. |
 | Clipboard & Selection | `src/store.ts` (`copySelected`, `pasteClipboard`). Implements a custom selection clipboard with **fallback for systems without native Clipboard API support**. |
 | Restore all (import backup) | `src/store.ts` (`replaceAllData`) |
 | Store contracts (state + actions, see §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
@@ -575,7 +576,7 @@ Flow and files involved:
 | Subject | File(s) |
 |---|---|
 | Merge and conflict algorithm | `src/utils/sync.ts` |
-| WebDAV + Koofr transport | `src/utils/webdav.ts` |
+| WebDAV + Koofr transport | `src/utils/webdav.ts`. On Android, `uploadFile` streams via the local `pick-directory` plugin (`uploadFileStreaming`) and `downloadFile` uses chunked Range requests (`downloadText` in `http.ts`) — avoids the bridge OOM for large notebooks. |
 | Native Network (Android CORS bypass) | `src/utils/http.ts` (used by `webdav.ts` and `updateCheck.ts`) |
 | Local sync state (cloudSync) | `src/db.ts` + `src/types.ts` (`CloudSyncState`) |
 | Orchestration (`syncNow`, `resolveConflicts`, auto-sync) | `src/store.ts` |

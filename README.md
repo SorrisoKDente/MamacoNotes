@@ -49,8 +49,9 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Security & Persistence**:
     -   Data stored locally using **IndexedDB**.
     -   Session restoration to automatically reopen the last notebook and page.
-    -   Automatic local backups to disk (Electron) or browser directory (**passwords excluded for security**).
-    -   Manual full backup (JSON) import/export (**passwords excluded for security**).
+    -   Automatic local backups to disk (Electron), browser directory, or **Android folder** (app Documents or a user-selected SAF folder via the local `pick-directory` plugin) (**passwords excluded for security**).
+    -   Manual full backup (JSON) import/export (**passwords excluded for security**), writing to a user-selected SAF folder on Android.
+    -   **OOM-safe on Android**: large backups and notebook sync happen in chunks (SAF `content://` streams, HTTP Range downloads, and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
 
 ## 🛠️ Tech Stack
 

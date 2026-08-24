@@ -1,0 +1,23 @@
+{
+  "name": "pick-directory",
+  "version": "1.0.0",
+  "description": "SAF directory picker and chunked file read/write for Mamaco Notes (avoids Capacitor bridge OOM)",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "android"
+  ],
+  "scripts": {
+    "build": "echo no-op"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}
