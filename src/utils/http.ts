@@ -1,9 +1,7 @@
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
 
 export async function customFetch(url: string, init?: RequestInit): Promise<Response> {
   if (Capacitor.isNativePlatform()) {
-    const { CapacitorHttp } = await import('@capacitor/core')
-
     let data: any = init?.body
     if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
       if (data instanceof Uint8Array) {
