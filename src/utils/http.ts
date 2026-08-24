@@ -35,7 +35,6 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
       method: init?.method ?? 'GET',
       headers,
       data,
-      dataType: 'text',
     })
 
     return {

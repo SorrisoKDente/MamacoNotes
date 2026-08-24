@@ -1,4 +1,3 @@
-import { Capacitor } from '@capacitor/core'
 import type { CloudSettings } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'

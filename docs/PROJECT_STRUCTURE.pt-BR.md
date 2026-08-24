@@ -56,7 +56,7 @@ opcional em disco via Electron ou File System Access API). O estado global usa
 | Renderização de desenho | Canvas 2D (motor próprio) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (com `capacitor-blob-writer`, `capacitor-native-settings`) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (com `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Empacotamento | electron-builder | `package.json` → `build` |
 
@@ -120,7 +120,7 @@ Fluxo de inicialização:
 | `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável), botões Imagem/PDF/Página/Exportar/Sincronizar/Configurações/tela cheia |
 | `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`) |
 | `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir) |
-| `Editor.tsx` | **Maior componente (~2900 linhas)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags |
+| `Editor.tsx` | **Maior componente (~2900 lines)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags |
 | `Toolbar.tsx` | Barra de ferramentas lateral: caneta/marcador/borracha/texto/selecionar/mover/rotação, undo/redo, painéis de configuração por ferramenta |
 | `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline, alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas; rodapé fixo com a cor de fundo da página |
 | `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação |
@@ -137,6 +137,7 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
+| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |
@@ -248,7 +249,7 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*` e depois
 ### 5.3 Stores (Zustand)
 
 - **`useAppStore`** (`src/store.ts`) — estado global principal:
-  - Dados: `folders`, `notebooks`, `templates`, `settings`, `dataVersion` (incrementado a
+  - Dados: `folders`, `notebooks`, `templates`, `settings`, `dataVersion: number` (incrementado a
     cada persistência; usado para re-render e auto-sync).
   - Seleção/UI: `selectedFolderId`, `selectedNotebookId`, `selectedIds`, `currentPageIndex`,
     `tool`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`.
@@ -260,11 +261,6 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*` e depois
   - Persistência: `persistNotebook`, `updateNotebookStorage`, `saveSettings`.
   - **Auto-sync**: `useAppStore.subscribe` observa `dataVersion` e dispara `syncNow()` com
     debounce de 20s (guardas `syncRunning`/`syncQueued`).
-  - **Restauração de sessão**: um segundo `useAppStore.subscribe` salva no `localStorage`
-    (chave `mamaco-notes.last-session`) o par `{ notebookId, pageId }` sempre que o caderno
-    ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
-    aberta (com fallback para nada selecionado quando o registro não existe ou o caderno foi
-    excluído).
   - **Restauração de sessão**: um segundo `useAppStore.subscribe` salva no `localStorage`
     (chave `mamaco-notes.last-session`) o par `{ notebookId, pageId }` sempre que o caderno
     ou a página corrente mudam; `init()` usa esse registro para reabrir a última nota/página
@@ -574,7 +570,8 @@ Fluxo e arquivos envolvidos:
 |---|---|
 | Algoritmo de merge e conflitos | `src/utils/sync.ts` |
 | Transporte WebDAV + Koofr | `src/utils/webdav.ts` |
-| Estado local de sync (cloudSync) | `src/db.ts` + `src/types.ts` (`CloudSyncState`) |
+| Rede Nativa (Android CORS bypass) | `src/utils/http.ts` (usado por `webdav.ts` e `updateCheck.ts`) |
+| Estado local de sync (cloudSync) | `db.ts` + `src/types.ts` (`CloudSyncState`) |
 | Orquestração (`syncNow`, `resolveConflicts`, auto-sync) | `src/store.ts` |
 | Modal de sincronização / configuração de nuvem | `src/components/Modals.tsx` |
 | Modal de conflitos | `src/components/Modals.tsx` (`SyncConflictModal`) |

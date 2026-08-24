@@ -58,7 +58,7 @@ entire UI is in Portuguese (pt-BR) by default, but supports English (en).
 | Drawing rendering | Canvas 2D (custom engine) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Packaging | electron-builder | `package.json` → `build` |
 
@@ -139,6 +139,7 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
+| `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
 | `export.ts` | Page rendering to canvas and PNG/PDF export (generates simple PDF without external library) |
@@ -250,7 +251,7 @@ All data writes in the app go through `store.ts`, which calls `db.*` and then
 ### 5.3 Stores (Zustand)
 
 - **`useAppStore`** (`src/store.ts`) — main global state:
-  - Data: `folders`, `notebooks`, `templates`, `settings`, `dataVersion` (incremented with
+  - Data: `folders`, `notebooks`, `templates`, `settings`, `dataVersion: number` (incremented with
     each persistence; used for re-render and auto-sync).
   - Selection/UI: `selectedFolderId`, `selectedNotebookId`, `selectedIds`,
     `currentPageIndex`, `tool`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`,
@@ -571,6 +572,7 @@ Flow and files involved:
 |---|---|
 | Merge and conflict algorithm | `src/utils/sync.ts` |
 | WebDAV + Koofr transport | `src/utils/webdav.ts` |
+| Native Network (Android CORS bypass) | `src/utils/http.ts` (used by `webdav.ts` and `updateCheck.ts`) |
 | Local sync state (cloudSync) | `src/db.ts` + `src/types.ts` (`CloudSyncState`) |
 | Orchestration (`syncNow`, `resolveConflicts`, auto-sync) | `src/store.ts` |
 | Sync / cloud configuration modal | `src/components/Modals.tsx` |
