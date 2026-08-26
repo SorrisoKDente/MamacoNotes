@@ -241,6 +241,10 @@ if (!gotTheLock) {
   })
 }
 
+app.on('before-quit', () => {
+  app.exit(0)
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
