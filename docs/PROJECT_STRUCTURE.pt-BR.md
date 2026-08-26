@@ -715,7 +715,7 @@ Fluxo e arquivos envolvidos:
 | Assunto | Arquivo(s) |
 |---|---|
 | Defaults | `src/types.ts` (`DEFAULT_SHORTCUTS`) |
-| Normalização/registro de atalhos | `src/hooks/useShortcuts.ts` |
+| Normalização/registro de atalhos | `src/hooks/useShortcuts.ts` (`initGlobalShortcuts` desabilita automaticamente os atalhos quando um modal está aberto ou o usuário está digitando em campos de texto para evitar interferência). |
 | Rótulos e normalização de teclas | `src/utils/shortcuts.ts` |
 | Atalhos de ocultar barras / rotação livre / modos de seleção (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`. Nota: o atalho de `pan` é tratado exclusivamente como um modificador "segurar para ativar" no `Editor.tsx` e não altera o estado global da ferramenta. |
 | UI de configuração de atalhos | `Modals.tsx` (`SettingsModal` → aba "Atalhos"). Permite busca por nome, mapeamento de teclas (incluindo modificadores isolados como `Alt`) e **restauração de atalhos padrão** de forma independente das demais configurações. |

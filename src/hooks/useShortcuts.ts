@@ -4,8 +4,13 @@ import { findShortcutAction, normalizeKey } from '../utils/shortcuts'
 import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { toggleFullscreen } from '../utils/fullscreen'
 
+import { useUiStore } from '../uiStore'
+
 export function initGlobalShortcuts(): () => void {
   const handler = (e: KeyboardEvent) => {
+    // If a modal is open, we disable global shortcuts to prevent interference with typing.
+    if (useUiStore.getState().openModal) return
+
     const settings = useAppStore.getState().settings
     const normalized = normalizeKey(e)
     if (!normalized) return
@@ -19,7 +24,9 @@ export function initGlobalShortcuts(): () => void {
       (target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.tagName === 'SELECT' ||
-        target.isContentEditable)
+        target.isContentEditable ||
+        target.closest('.form-input') ||
+        target.closest('.title-input'))
 
     if (isTyping) return
 

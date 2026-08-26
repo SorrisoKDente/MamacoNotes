@@ -2462,7 +2462,8 @@ export function Editor() {
       const { delta } = (e as CustomEvent).detail as { delta: number }
       const engine = engineRef.current
       const pg = pageRef.current
-      if (!engine || !pg) return
+      const nb = notebookRef.current
+      if (!engine || !pg || !nb) return
       const sel = selectionRef.current
       const box = engine.selectionBounds(sel)
       if (!box) return
@@ -2473,7 +2474,7 @@ export function Editor() {
         engine.textLayout(t),
       )
       pg.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
+      nb.updatedAt = Date.now()
       dirtyRef.current = true
       requestRenderRef.current()
       schedulePersist()
@@ -2481,12 +2482,13 @@ export function Editor() {
     const onTextUpdate = (e: Event) => {
       const { id, patch } = (e as CustomEvent).detail
       const pg = pageRef.current
+      const nb = notebookRef.current
       const el = pg ? getActiveLayer(pg).texts.find((t) => t.id === id) : undefined
-      if (!el || !pg) return
+      if (!el || !pg || !nb) return
       Object.assign(el, patch)
       el.createdAt = el.createdAt
       pg.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
+      nb.updatedAt = Date.now()
       dirtyRef.current = true
       requestRenderRef.current()
       schedulePersist()
@@ -2494,11 +2496,12 @@ export function Editor() {
     const onTextRotate = (e: Event) => {
       const { id, degrees } = (e as CustomEvent).detail
       const pg = pageRef.current
+      const nb = notebookRef.current
       const el = pg ? getActiveLayer(pg).texts.find((t) => t.id === id) : undefined
-      if (!el || !pg) return
+      if (!el || !pg || !nb) return
       el.rotation = (((degrees % 360) + 360) % 360)
       pg.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
+      nb.updatedAt = Date.now()
       dirtyRef.current = true
       requestRenderRef.current()
       schedulePersist()
@@ -2526,13 +2529,14 @@ export function Editor() {
       const ts = useTextStore.getState()
       if (!ts.selectedTextId) return
       const pg = pageRef.current
+      const nb = notebookRef.current
       const layer = pg ? getActiveLayer(pg) : null
       const idx = layer?.texts.findIndex((t) => t.id === ts.selectedTextId) ?? -1
-      if (!layer || idx < 0) return
+      if (!layer || idx < 0 || !pg || !nb) return
       pushUndo()
       layer.texts.splice(idx, 1)
-      pg!.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
+      pg.updatedAt = Date.now()
+      nb.updatedAt = Date.now()
       ts.selectText(null)
       ts.setEditingExisting(false)
       ts.setDraft('')
@@ -2544,14 +2548,15 @@ export function Editor() {
     const onImageRotate = (e: Event) => {
       const degrees = (e as CustomEvent).detail as number
       const pg = pageRef.current
+      const nb = notebookRef.current
       const id = selectedImageIdRef.current
-      if (!pg || !id) return
+      if (!pg || !id || !nb) return
       const img = getActiveLayer(pg).images.find((i) => i.id === id)
       if (!img) return
       pushUndo()
       img.rotation = (((degrees % 360) + 360) % 360)
       pg.updatedAt = Date.now()
-      notebookRef.current!.updatedAt = Date.now()
+      nb.updatedAt = Date.now()
       dirtyRef.current = true
       requestRenderRef.current()
       schedulePersist()
@@ -2587,15 +2592,20 @@ export function Editor() {
       if (normalized) pressedKeysRef.current.add(normalized)
 
       const target = e.target as HTMLElement | null
-      if (
+      const isTyping =
         target &&
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
+          target.isContentEditable ||
+          target.closest('.form-input') ||
+          target.closest('.title-input'))
+
+      if (isTyping) return
+
+      // If no page is selected, we don't handle shortcuts in the Editor.
+      if (!pageRef.current) return
+
       const s = useAppStore.getState()
       if (e.key === 'Escape' && s.tool === 'select') {
         e.preventDefault()

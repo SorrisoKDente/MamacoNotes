@@ -727,7 +727,7 @@ Flow and files involved:
 | Subject | File(s) |
 |---|---|
 | Defaults | `src/types.ts` (`DEFAULT_SHORTCUTS`) |
-| Shortcut normalization/registration | `src/hooks/useShortcuts.ts` |
+| Shortcut normalization/registration | `src/hooks/useShortcuts.ts` (`initGlobalShortcuts` automatically disables shortcuts when a modal is open or when the user is typing in an input field to prevent interference). |
 | Key labels and normalization | `src/utils/shortcuts.ts` |
 | Hide bars / free rotation / selection mode shortcuts (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`. Note: the `pan` shortcut is handled exclusively as a "hold-to-activate" modifier in `Editor.tsx` and does not switch the global tool state. |
 | Keyboard Shortcut Configuration UI | `Modals.tsx` (`SettingsModal` → "Shortcuts" tab). Allows searching by name, mapping keys (including standalone modifiers like `Alt`), and **restoring default shortcuts** independently from other settings. |
