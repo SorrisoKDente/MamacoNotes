@@ -90,7 +90,7 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependências, config do electron-builder (incluindo instalador NSIS interativo com opção de apagar dados do app na desinstalação) |
 | `SECURITY.md` | Política de segurança e instruções para reporte de vulnerabilidades |
 | `vite.config.ts` | Plugins React/PWA, `base: './'`, dev server (porta 5173, `allowedHosts` para preview) |
 | `tsconfig.json` | Config TypeScript (strict) |

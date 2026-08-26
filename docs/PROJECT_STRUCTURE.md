@@ -92,7 +92,7 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including interactive NSIS installer) |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including interactive NSIS installer with an option to delete app data on uninstall) |
 | `SECURITY.md` | Security policy and vulnerability reporting instructions |
 | `vite.config.ts` | React/PWA plugins, `base: './'`, dev server (port 5173, `allowedHosts` for preview) |
 | `tsconfig.json` | TypeScript config (strict) |

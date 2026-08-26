@@ -79,7 +79,8 @@
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "Mamaco Notes",
-      "include": "build-resources/installer.nsh"
+      "include": "build-resources/installer.nsh",
+      "deleteAppDataOnUninstall": true
     },
     "linux": {
       "target": [
