@@ -136,7 +136,7 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON — a correção do "Unexpected end of JSON input" no sync Android) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). |
+| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData(data, isJson?)` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). O `downloadText` detecta o `Content-Type` da resposta e passa `isJson` para `decodeCapacitorData`, que então trata strings como texto cru (nunca base64) para respostas JSON — isso corrige os erros "Bad control character in string literal in JSON" / "Unexpected end of JSON input" no Android causados por um chunk de Range caindo inteiramente dentro de um `dataUrl` de imagem base64 no JSON do caderno e sendo decodificado como base64 em lixo binário. |
 | `chunkedIo.ts` | **Ponte para o plugin Capacitor local `pick-directory`**: registra `PickDirectory` e expõe primitivas em chunks que nunca enviam um arquivo grande inteiro pela bridge JS↔nativo: `readBackupFileFromUri` (leitura em chunks via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (seletor de documentos do sistema → leitura em chunks) e `uploadFileStreaming` (PUT em stream via `uploadStart`/`uploadChunk`/`uploadEnd` do plugin sobre `HttpURLConnection`). |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
@@ -185,6 +185,7 @@ Fluxo de inicialização:
 | `docs/superpowers/specs/` | Documentos de design aprovados (sync bidirecional; camadas) |
 | `docs/superpowers/plans/` | Planos de implementação (sync bidirecional; camadas) |
 | `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
+| `scripts/verify-download.ts` | Verificação standalone da correção de download no Android: força o caminho nativo do `downloadText` (`Capacitor.isNativePlatform()` sobrescrito) contra um fetch mockado que simula o lado servidor Android, validando que `decodeCapacitorData` reconstrói o texto correto para corpos JSON parseados (200), chunks Range JSON truncados (206), chunks base64 (arquivo grande não-JSON), 404, a desambiguação JSON-vs-base64 (`isJson` mantém strings JSON como texto cru para que um chunk dentro de um `dataUrl` base64 nunca seja decodificado como base64) e que o download em chunks de um caderno JSON grande com imagem base64 embutida remonta byte a byte. Rodar com `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Arquivo vazio (resquício) |
 
 ---
@@ -529,6 +530,14 @@ Fluxo e arquivos envolvidos:
   (`error.syncDownloadFoldersFailed`). `decodeCapacitorData` reconstrói os bytes para
   base64, texto cru ou JSON parseado, e `downloadText` sai do loop de chunks quando um
   chunk decodificado está vazio.
+  **Desambiguação JSON-vs-base64**: o `downloadText` lê o `Content-Type` da resposta e
+  passa `isJson` para `decodeCapacitorData`; para respostas JSON uma string é sempre
+  texto cru (nunca base64). Isso evita que um chunk de Range que cai inteiramente dentro
+  de um `dataUrl` de imagem base64 de um caderno (todos os caracteres do alfabeto base64,
+  comprimento divisível por 4) seja decodificado como base64 em lixo binário, o que antes
+  corrompia o JSON remontado com caracteres de controle ("Bad control character in string
+  literal in JSON") ou o encurtava ("Unexpected end of JSON input") ao sincronizar
+  cadernos grandes com muitas imagens pelo celular.
 - **Log de falhas de download**: falhas de download de caderno/pasta em `sync.ts`
   chamam `logger.error(...)` (visível em Configurações → Logs) antes de serem exibidas no
   resultado/UI do sync, para que falhas de sync no celular gerem um log de verdade.

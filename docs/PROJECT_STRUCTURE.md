@@ -138,7 +138,7 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. Exports `customFetch` (body converts `Uint8Array`/`ArrayBuffer`/`Blob` to text), `decodeCapacitorData` (decodes CapacitorHttp's `data` field: base64 string, raw string, or a JS object/array that CapacitorHttp parsed despite `responseType: 'arraybuffer'` when Content-Type is JSON — the fix for "Unexpected end of JSON input" on Android sync) and `downloadText` (**chunked Range download** used on Android: requests `Range: bytes=…` with `responseType: 'arraybuffer'`, reassembles chunks in JS via `decodeCapacitorData` — avoids the bridge OOM for large notebook JSON). |
+| `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. Exports `customFetch` (body converts `Uint8Array`/`ArrayBuffer`/`Blob` to text), `decodeCapacitorData(data, isJson?)` (decodes CapacitorHttp's `data` field: base64 string, raw string, or a JS object/array that CapacitorHttp parsed despite `responseType: 'arraybuffer'` when Content-Type is JSON) and `downloadText` (**chunked Range download** used on Android: requests `Range: bytes=…` with `responseType: 'arraybuffer'`, reassembles chunks in JS via `decodeCapacitorData` — avoids the bridge OOM for large notebook JSON). `downloadText` detects the response `Content-Type` and passes `isJson` to `decodeCapacitorData`, which then treats strings as raw text (never base64) for JSON responses — this fixes the "Bad control character in string literal in JSON" / "Unexpected end of JSON input" errors on Android caused by a Range chunk landing entirely inside a base64 image `dataUrl` in the notebook JSON and being base64-decoded into garbage. |
 | `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `readBackupFileFromUri` (chunked read via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (system document picker → chunked read), and `uploadFileStreaming` (PUT streamed via the plugin's `uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`). |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
@@ -187,7 +187,7 @@ Initialization flow:
 | `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
 | `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (rollback on manifest write failure, idempotent re-run, auth error surfacing). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
-| `scripts/verify-download.ts` | Standalone verification of the Android download fix: forces the native `downloadText` path (`Capacitor.isNativePlatform()` overridden) against a mocked fetch that mimics the Android server side, asserting `decodeCapacitorData` reconstructs the correct text for parsed-JSON bodies (200), truncated JSON Range chunks (206), base64 chunks (large non-JSON file), and 404 handling. Run with `npx tsx scripts/verify-download.ts` |
+| `scripts/verify-download.ts` | Standalone verification of the Android download fix: forces the native `downloadText` path (`Capacitor.isNativePlatform()` overridden) against a mocked fetch that mimics the Android server side, asserting `decodeCapacitorData` reconstructs the correct text for parsed-JSON bodies (200), truncated JSON Range chunks (206), base64 chunks (large non-JSON file), 404 handling, the JSON-vs-base64 disambiguation (`isJson` keeps JSON strings as raw text so a chunk inside a base64 `dataUrl` is never base64-decoded), and the native chunked download of a large JSON notebook with an embedded base64 image reassembles byte-exact. Run with `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Empty file (remnant) |
 
 ---
@@ -530,6 +530,14 @@ Flow and files involved:
   `JSON.parse('')` → "Unexpected end of JSON input" (`error.syncDownloadFoldersFailed`).
   `decodeCapacitorData` reconstructs the bytes for base64, raw text, or parsed JSON, and
   `downloadText` breaks out of the chunk loop when a decoded chunk is empty.
+  **JSON-vs-base64 disambiguation**: `downloadText` reads the response `Content-Type` and
+  passes `isJson` to `decodeCapacitorData`; for JSON responses a string is always raw
+  text (never base64). This prevents a Range chunk that lands entirely inside a base64
+  image `dataUrl` of a notebook (all base64-alphabet characters, length divisible by 4)
+  from being base64-decoded into binary garbage, which previously corrupted the
+  reassembled JSON with raw control characters ("Bad control character in string literal
+  in JSON") or shortened it ("Unexpected end of JSON input") when syncing large,
+  image-heavy notebooks from the phone.
 - **Download failure logging**: notebook/folder download failures in `sync.ts` call
   `logger.error(...)` (visible in Settings → Logs) before being surfaced in the sync
   result/UI, so sync failures on mobile actually generate a log entry.

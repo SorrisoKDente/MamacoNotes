@@ -62,6 +62,16 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes
 }
 
+function isBase64Text(s: string): boolean {
+  return /^[A-Za-z0-9+/]*={0,2}$/.test(s) && s.length % 4 === 0
+}
+
+function isJsonContentType(headers: Record<string, unknown> | undefined): boolean {
+  if (!headers) return false
+  const ct = headers['Content-Type'] ?? headers['content-type']
+  return typeof ct === 'string' && ct.toLowerCase().includes('application/json')
+}
+
 /**
  * Decodes the `data` field that CapacitorHttp returns for a response.
  *
@@ -74,10 +84,22 @@ function base64ToBytes(b64: string): Uint8Array {
  * For non-JSON content the body arrives as a base64 string (responseType
  * arraybuffer/blob). The two string formats are told apart by the base64
  * alphabet so the correct bytes come out in every case.
+ *
+ * `isJson` must be true when the response Content-Type is `application/json`
+ * (the same condition Capacitor itself uses to pick the parse branch): in that
+ * case a string is ALWAYS raw text, never base64. Without this, a Range chunk
+ * that lands entirely inside a base64 image `dataUrl` in the notebook JSON
+ * (all base64-alphabet characters, length divisible by 4) was mistaken for an
+ * arraybuffer payload and base64-decoded into binary garbage — corrupting the
+ * reassembled JSON with raw control characters ("Bad control character in
+ * string literal in JSON") or shortening it ("Unexpected end of JSON input").
  */
-function decodeCapacitorData(data: unknown): Uint8Array | null {
+function decodeCapacitorData(data: unknown, isJson = false): Uint8Array | null {
   if (typeof data === 'string') {
-    if (/^[A-Za-z0-9+/]*={0,2}$/.test(data) && data.length % 4 === 0) {
+    if (isJson) {
+      return new TextEncoder().encode(data)
+    }
+    if (isBase64Text(data)) {
       try {
         return base64ToBytes(data)
       } catch {
@@ -122,9 +144,11 @@ export async function downloadText(
         responseType: 'arraybuffer',
       })
 
+      const isJson = isJsonContentType(res.headers as Record<string, unknown>)
+
       // Server ignored Range and returned the whole body in one shot.
       if (res.status === 200) {
-        const bytes = decodeCapacitorData(res.data)
+        const bytes = decodeCapacitorData(res.data, isJson)
         const text = bytes ? new TextDecoder('utf-8').decode(bytes) : ''
         return { ok: true, status: 200, text }
       }
@@ -133,7 +157,7 @@ export async function downloadText(
         return { ok: res.status >= 200 && res.status < 300, status: res.status, text: '' }
       }
 
-      const bytes = decodeCapacitorData(res.data)
+      const bytes = decodeCapacitorData(res.data, isJson)
       if (!bytes || bytes.length === 0) break
       chunks.push(bytes)
 
