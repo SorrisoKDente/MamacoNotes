@@ -10,6 +10,7 @@ import type {
 } from '../types'
 import { normalizePage, uid } from '../types'
 import { t } from '../i18n'
+import { RemoteFileNotFoundError } from './webdav'
 import type { Transport } from './webdav'
 import { logger } from './logger'
 
@@ -161,7 +162,13 @@ export function buildPlan(
       continue
     }
     if (remote.deleted) {
-      if (last === undefined || nb.updatedAt === last) {
+      if (!state.tombstones?.[nb.id] && last === undefined) {
+        // No active tombstone and no sync baseline: this notebook reappeared
+        // locally AFTER its deletion was confirmed on the server (e.g. restored
+        // from the trash). Re-upload it so the remote copy comes back, instead
+        // of deleting it locally again.
+        plan.push.push(nb)
+      } else if (last === undefined || nb.updatedAt === last) {
         plan.deleteLocalIds.push(nb.id)
       } else {
         plan.conflicts.push({
@@ -226,11 +233,19 @@ export function buildPlan(
     if (rm.deleted) continue
     if (localById.has(rm.id)) continue
     if (state.localOnlyDeleted?.[rm.id]) continue
+    if (state.tombstones?.[rm.id]) continue
     plan.pullIds.push(rm.id)
   }
 
   const localHash = hashFolders(folders)
-  const localChanged = localHash !== state.foldersHash
+  // A device that has never synced has no folder baseline (`foldersHash` is
+  // empty). Treat that as "local folders are the empty set, unchanged since the
+  // baseline" instead of an actual local change, so a fresh device PULLS the
+  // remote folders instead of raising a spurious conflict — otherwise resolving
+  // that conflict with "keep local" uploads an empty folder list and wipes the
+  // real folders on the server.
+  const baselineHash = state.foldersHash === '' ? hashFolders([]) : state.foldersHash
+  const localChanged = localHash !== baselineHash
   const remoteChanged = manifest.folders.updatedAt !== state.foldersUpdatedAt
   if (localChanged && remoteChanged) {
     plan.conflicts.push({
@@ -418,8 +433,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     const text = await transport.downloadFile(`${basePath}/${MANIFEST_PATH}`)
     manifest = parseManifest(text)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (!msg.includes('404')) {
+    if (!(e instanceof RemoteFileNotFoundError)) {
+      const msg = e instanceof Error ? e.message : String(e)
       logger.error('Sync manifest read failed', e)
       result.errors.push(t('error.syncReadManifestFailed', { message: msg }))
       return {
@@ -511,6 +526,45 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       state.notebooks[id] = nb.updatedAt
       result.pulled.push(nb.name)
     } catch (e) {
+      if (e instanceof RemoteFileNotFoundError) {
+        // The manifest lists a notebook whose file is missing on the server
+        // (e.g. an interrupted upload or a stale manifest). Self-heal instead of
+        // erroring forever: restore the local copy if it exists, otherwise prune
+        // the phantom manifest entry.
+        const local = localById.get(id)
+        if (local) {
+          try {
+            const path = notebookPath(basePath, id)
+            await transport.uploadFile(
+              path,
+              new TextEncoder().encode(
+                JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: local }),
+              ),
+              'application/json',
+            )
+            manifest = upsertManifestNotebook(manifest, {
+              id,
+              name: local.name,
+              updatedAt: local.updatedAt,
+              deleted: false,
+            })
+            state.notebooks[id] = local.updatedAt
+            manifestChanged = true
+            result.pushed.push(local.name)
+          } catch (e2) {
+            result.errors.push(
+              t('error.syncUploadNotebookFailed', {
+                name: local.name,
+                message: e2 instanceof Error ? e2.message : String(e2),
+              }),
+            )
+          }
+        } else {
+          manifest = removeManifestNotebook(manifest, id)
+          manifestChanged = true
+        }
+        continue
+      }
       const msg = e instanceof Error ? e.message : String(e)
       logger.error(`Sync notebook download failed: ${id}`, e)
       result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: msg }))
@@ -582,8 +636,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         state.foldersUpdatedAt = manifest.folders.updatedAt
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('404')) {
+      if (e instanceof RemoteFileNotFoundError) {
         if (folders.length > 0) {
           try {
             await transport.uploadFile(

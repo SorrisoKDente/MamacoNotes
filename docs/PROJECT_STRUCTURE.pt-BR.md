@@ -105,9 +105,9 @@ Fluxo de inicialização:
 |---|---|
 | `src/main.tsx` | Bootstrap React + registro PWA |
 | `src/App.tsx` | Componente raiz; composição da tela (TopBar, Sidebar, PageList, Editor, Toolbar, Modals); init + auto-sync; tecla Escape → `ink:esc`; botão de voltar do Android (Capacitor `@capacitor/app`) → `ink:esc` |
-| `src/types.ts` | **Todos os tipos de dados** do domínio + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + helpers de camadas (`normalizePage`, `getActiveLayer`) |
-| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos e converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`) |
-| `src/store.ts` | **Store principal (Zustand)**: todo CRUD de cadernos/pastas/páginas/modelos, ações de camadas (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge), undo/redo, clipboard, sync, persistência |
+| `src/types.ts` | **Todos os tipos de dados** do domínio + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + helpers de camadas (`normalizePage`, `getActiveLayer`) + `TrashItem` (entrada da lixeira local) |
+| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos e converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`) |
+| `src/store.ts` | **Store principal (Zustand)**: todo CRUD de cadernos/pastas/páginas/modelos, ações de camadas (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge), undo/redo, clipboard, **lixeira local** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, persistência |
 | `src/uiStore.ts` | Store de modais (`openModal`, `modalData`, `open`, `close`) |
 | `src/textStore.ts` | Estado de edição de texto (draft, seleção, rotação) |
 | `src/styles.css` | Todo o CSS do app |
@@ -117,12 +117,12 @@ Fluxo de inicialização:
 | Arquivo | Responsabilidade |
 |---|---|
 | `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável), botões Imagem/PDF/Página/Exportar/Sincronizar/Configurações/tela cheia |
-| `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`) |
+| `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`); **botão "Lixeira" no cabeçalho** (abre o modal `trash`) |
 | `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir) |
 | `Editor.tsx` | **Maior componente (~2900 lines)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags |
 | `Toolbar.tsx` | Barra de ferramentas lateral: caneta/marcador/borracha/texto/selecionar/mover/rotação, undo/redo, painéis de configuração por ferramenta |
 | `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline, alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas; rodapé fixo com a cor de fundo da página |
-| `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação |
+| `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação, **lixeira** (Restaurar / Restaurar da nuvem / Excluir definitivamente, estado vazio, nota de retenção de 30 dias). A seção de backup das Configurações expõe exportação e importação de um único JSON (`exportBackup`/`importBackup` → `replaceAllData`) |
 
 #### `src/renderer/` — motor de desenho (Canvas)
 
@@ -136,14 +136,14 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData(data, isJson?)` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). O `downloadText` detecta o `Content-Type` da resposta e passa `isJson` para `decodeCapacitorData`, que então trata strings como texto cru (nunca base64) para respostas JSON — isso corrige os erros "Bad control character in string literal in JSON" / "Unexpected end of JSON input" no Android causados por um chunk de Range caindo inteiramente dentro de um `dataUrl` de imagem base64 no JSON do caderno e sendo decodificado como base64 em lixo binário. |
+| `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData(data, isJson?)` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON), `isConnectionError(err)` e `withRetry(fn)` (**resiliência de rede**: 3 tentativas com backoff de 500ms→1s, apenas para falhas no nível de conexão — nunca para HTTP 4xx/5xx ou autenticação) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). O `downloadText` detecta o `Content-Type` da resposta e passa `isJson` para `decodeCapacitorData`, que então trata strings como texto cru (nunca base64) para respostas JSON — isso corrige os erros "Bad control character in string literal in JSON" / "Unexpected end of JSON input" no Android causados por um chunk de Range caindo inteiramente dentro de um `dataUrl` de imagem base64 no JSON do caderno e sendo decodificado como base64 em lixo binário. |
 | `chunkedIo.ts` | **Ponte para o plugin Capacitor local `pick-directory`**: registra `PickDirectory` e expõe primitivas em chunks que nunca enviam um arquivo grande inteiro pela bridge JS↔nativo: `readBackupFileFromUri` (leitura em chunks via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (seletor de documentos do sistema → leitura em chunks) e `uploadFileStreaming` (PUT em stream via `uploadStart`/`uploadChunk`/`uploadEnd` do plugin sobre `HttpURLConnection`). |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |
 | `pdf.ts` | Renderização de arquivos PDF em imagens via `pdfjs-dist` (`renderPdfPages`) |
-| `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport`. No Android o transporte usa os **caminhos nativos em chunks**: `downloadFile` via `downloadText` do `http.ts` (Range + arraybuffer) e `uploadFile` via `uploadFileStreaming` do `chunkedIo.ts` (PUT em stream pelo plugin `pick-directory` via `HttpURLConnection`) — ambos evitam o OOM da bridge. |
-| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração). Em falha de download (caderno/pasta), registra o erro via `logger.error` (visível na aba Configurações → Logs) **antes** de exibi-lo no resultado/UI — no celular, falhas sem esse log eram invisíveis silenciosamente. |
+| `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport`. No Android o transporte usa os **caminhos nativos em chunks**: `downloadFile` via `downloadText` do `http.ts` (Range + arraybuffer) e `uploadFile` via `uploadFileStreaming` do `chunkedIo.ts` (PUT em stream pelo plugin `pick-directory` via `HttpURLConnection`) — ambos evitam o OOM da bridge. **Falhas no nível de conexão** (de `isConnectionError` do `http.ts`) são relançadas como mensagem amigável `error.networkUnreachable` para orientar o usuário a verificar a conexão com a internet. |
+| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração). Em falha de download (caderno/pasta), registra o erro via `logger.error` (visível na aba Configurações → Logs) **antes** de exibi-lo no resultado/UI — no celular, falhas sem esse log eram invisíveis silenciosamente. O `buildPlan` ignora ids sob `localOnlyDeleted`/`tombstones` no loop de pull, e um caderno que reapareceu localmente depois da exclusão remota (restaurado da lixeira, sem tombstone/baseline ativo) é **reenviado** em vez de ser excluído de novo. |
 | `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza as configurações e **remove senhas de nuvem** por segurança). No celular a exportação grava na **pasta Documentos do app** via `capacitor-blob-writer` (fluxo em chunks, evita o OOM da bridge do Capacitor causado por `Filesystem.writeFile` com conteúdo grande), sempre com **nome com carimbo de data** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`) para nunca sobrescrever um backup existente; a importação usa o seletor de documentos do sistema (`pickBackupFile`, leitura em chunks). No desktop usa as pontes `save-file`/`open-file` do Electron e na web dispara download/input de arquivo. |
 | `imageErase.ts` | Borracha em imagens: sessão de apagar em canvas offscreen e re-encode ao final |
 | `colors.ts` | Paleta de cores e helpers de conversão HEX/RGB |
@@ -184,8 +184,8 @@ Fluxo de inicialização:
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) |
 | `docs/superpowers/specs/` | Documentos de design aprovados (sync bidirecional; camadas) |
 | `docs/superpowers/plans/` | Planos de implementação (sync bidirecional; camadas) |
-| `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
-| `scripts/verify-download.ts` | Verificação standalone da correção de download no Android: força o caminho nativo do `downloadText` (`Capacitor.isNativePlatform()` sobrescrito) contra um fetch mockado que simula o lado servidor Android, validando que `decodeCapacitorData` reconstrói o texto correto para corpos JSON parseados (200), chunks Range JSON truncados (206), chunks base64 (arquivo grande não-JSON), 404, a desambiguação JSON-vs-base64 (`isJson` mantém strings JSON como texto cru para que um chunk dentro de um `dataUrl` base64 nunca seja decodificado como base64) e que o download em chunks de um caderno JSON grande com imagem base64 embutida remonta byte a byte. Rodar com `npx tsx scripts/verify-download.ts` |
+| `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação, autocorreção de 404, **regressão do Bug A do tombstone**: um caderno com tombstone nunca é re-baixado; **restauração da lixeira**: um caderno que reapareceu localmente após a exclusão remota é reenviado e a entrada do manifest volta para `deleted:false`). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
+| `scripts/verify-download.ts` | Verificação standalone da correção de download no Android: força o caminho nativo do `downloadText` (`Capacitor.isNativePlatform()` sobrescrito) contra um fetch mockado que simula o lado servidor Android, validando que `decodeCapacitorData` reconstrói o texto correto para corpos JSON parseados (200), chunks Range JSON truncados (206), chunks base64 (arquivo grande não-JSON), 404, a desambiguação JSON-vs-base64 (`isJson` mantém strings JSON como texto cru para que um chunk dentro de um `dataUrl` base64 nunca seja decodificado como base64), que o download em chunks de um caderno JSON grande com imagem base64 embutida remonta byte a byte e o **comportamento de retry** (`isConnectionError` e `withRetry` com backoff 500ms→1s: erros de conexão são repetidos, HTTP 4xx/5xx e autenticação não). Rodar com `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Arquivo vazio (resquício) |
 
 ---
@@ -206,6 +206,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF usado como fundo da página (fica **no nível da página**, abaixo de todas as camadas; não é uma `Layer`).
 - `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, ignorar uma versão específica de atualização via `ignoreVersion`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — dados do sync.
+- `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **entrada da lixeira local** (NÃO sincronizada). Uma entrada por item excluído: excluir uma pasta produz uma entrada para a pasta, uma para cada subpasta e uma para cada caderno dentro (cada uma com seu `parentId`) para que cada item possa ser restaurado individualmente. `cloudKeepsCopy` é `true` quando o item foi excluído "só local" com nuvem configurada (o `data` pesado é descartado; o item só volta com "Restaurar da nuvem"). Quando `false` (excluído "local + nuvem" ou sem nuvem), `data` guarda o item completo para restauração sem nuvem.
 
 > Sempre que precisar alterar o formato de um dado persistido, comece por `src/types.ts`
 > e depois verifique a normalização em `src/store.ts` (funções `applySyncChanges`,
@@ -220,7 +221,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 
 ### 5.2 Persistência (IndexedDB) — `src/db.ts`
 
-Banco `mamaco-notes`, versão **5**, com object stores:
+Banco `mamaco-notes`, versão **6**, com object stores:
 
 | Store | Conteúdo | Chave |
 |---|---|---|
@@ -229,6 +230,7 @@ Banco `mamaco-notes`, versão **5**, com object stores:
 | `settings` | 1 registro `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 registro `CloudSyncState` | `id` |
 | `templates` | `PageTemplate[]` (modelos personalizados) | `id` |
+| `trash` | `TrashItem[]` (lixeira local, não sincronizada) | `id` |
 
 Toda escrita em dados no app passa por `store.ts`, que chama `db.*`.
 
@@ -246,16 +248,27 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*`.
 > o conteúdo preservado; páginas já com `layers` não são alteradas. Dados vindos de
 > sync/backup também são normalizados na leitura (`store.ts`/`sync.ts`), então o
 > `SyncManifest` não mudou de versão.
+>
+> **Migração 5 → 6 (lixeira)**: `openDb()` cria a object store `trash` (keyPath `id`) se
+> estiver ausente. Não há reescrita de dados — a lixeira começa vazia e os registros
+> existentes de folders/notebooks/cloudSync são preservados intactos.
 
 ### 5.3 Stores (Zustand)
 
 - **`useAppStore`** (`src/store.ts`) — estado global principal:
-  - Dados: `folders`, `notebooks`, `templates`, `settings`, `dataVersion: number` (incrementado a
+  - Dados: `folders`, `notebooks`, `templates`, `trash`, `settings`, `dataVersion: number` (incrementado a
     cada persistência; usado para re-render e auto-sync).
   - Seleção/UI: `selectedFolderId`, `selectedNotebookId`, `selectedIds`, `currentPageIndex`,
     `tool`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`.
   - Ações CRUD: `createNotebook`, `addPage`, `updatePage`, `deleteNotebook`, `moveFolder`,
     `reorderFolder`, `reorderNotebook`, `duplicateFolder`, etc.
+  - **Lixeira local**: `restoreFromTrash(id)` (restaura um item "local + nuvem" ou sem nuvem
+    a partir de `data`, limpa tombstone/baseline e reenvia via sync), `restoreFromCloud(id)`
+    (baixa o item de volta da nuvem — usado para itens "só local" com `cloudKeepsCopy` true),
+    `purgeTrashItem(id)` (remove a entrada; a cópia na nuvem não é afetada), `runTrashPurge()`
+    (remove entradas com mais de `TOMBSTONE_RETENTION_MS` (30 dias) que não têm cópia na nuvem
+    — itens "só local" são mantidos para restar apenas "Restaurar da nuvem"). Chamada no
+    `init()` e ao abrir o modal da lixeira.
   - Desfazer/refazer: `pushUndo`, `undo`, `redo` (pilhas internas, snapshots de página,
     máx. 60 entradas).
   - Nuvem: `syncNow()`, `resolveConflicts()`.
@@ -303,7 +316,7 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 
 | Grupo | Contrato |
 |---|---|
-| **Dados** | `loaded: boolean`, `folders: Folder[]`, `notebooks: Notebook[]`, `templates: PageTemplate[]`, `settings: AppSettings`, `dataVersion: number` |
+| **Dados** | `loaded: boolean`, `folders: Folder[]`, `notebooks: Notebook[]`, `templates: PageTemplate[]`, `trash: TrashItem[]`, `settings: AppSettings`, `dataVersion: number` |
 | **Seleção/UI** | `selectedFolderId`, `selectedNotebookId`, `selectedIds: string[]`, `selectedPageIndices: number[]`, `clipboard: { ids, cut } \| null`, `currentPageIndex`, `tool: ToolKind`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`, `canUndo`, `canRedo` |
 | **Bootstrap** | `init(): Promise<void>` |
 | **Navegação/seleção** | `selectFolder(id)`, `selectNotebook(id)`, `selectPage(index)`, `setTool(tool)`, `setRotationOpen(open)`, `toggleSidebar()`, `togglePageList()`, `toggleLayers()`, `setSidebarOpen(open)`, `setPageListOpen(open)`, `setLayersOpen(open)`, `toggleSearch()` |
@@ -315,6 +328,7 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | **Camadas** | `addLayer()`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)` |
 | **Configuração** | `setSettings(patch)`, `setShortcut(action, value)`, `setCloud(patch)` |
 | **Nuvem** | `syncNow(): Promise<SyncResult \| null>` (avança `settings.cloud.lastSyncAt` **somente** quando a execução termina sem erros), `resolveConflicts(choices: Record<string, ConflictChoice>)` |
+| **Lixeira** | `restoreFromTrash(id)`, `restoreFromCloud(id)`, `purgeTrashItem(id)`, `runTrashPurge()` |
 | **Persistência/undo** | `persistNotebook(notebook)`, `pushUndo()`, `undo()`, `redo()` |
 | **Importação/modelos** | `addImageToPage(dataUrl, name, center?)`, `addPdfToPage(dataUrl, name)`, `importPdfNotebook(...)`, `addTemplate(name, pages)`, `deleteTemplate(id)`, `addPagesFromTemplate(template)`, `applyTemplateToPage(index, template)`, `replaceAllData(folders, notebooks, settings?)` |
 
@@ -344,7 +358,7 @@ ativa e **aborta** se ela estiver travada. As ações de camada incrementam `dat
 
 | Campo/Ação | Tipo |
 |---|---|
-| `openModal` | `ModalName \| null` (conjunto fechado de 17 valores, listados no topo do arquivo) |
+| `openModal` | `ModalName \| null` (conjunto fechado de 19 valores, listados no topo do arquivo) |
 | `modalData` | `Record<string, unknown>` (payload do modal aberto) |
 | `open(name, data?)` | Abre o modal e guarda o payload |
 | `close()` | Fecha o modal e zera `modalData` |
@@ -541,18 +555,45 @@ Fluxo e arquivos envolvidos:
 - **Log de falhas de download**: falhas de download de caderno/pasta em `sync.ts`
   chamam `logger.error(...)` (visível em Configurações → Logs) antes de serem exibidas no
   resultado/UI do sync, para que falhas de sync no celular gerem um log de verdade.
+- **Resiliência de rede (Android)**: `src/utils/http.ts` envolve toda chamada de rede
+  (`customFetch` nativo + web, e cada chunk Range do `downloadText`) em `withRetry(fn)` —
+  3 tentativas com backoff de 500ms→1s, aplicado **somente** quando `isConnectionError(err)`
+  casa uma falha no nível de conexão ("Failed to connect", "connect timed out", "network is
+  unreachable" etc.). Erros HTTP 4xx/5xx e de autenticação nunca são repetidos.
+  `src/utils/webdav.ts` converte falhas de conexão restantes na mensagem amigável e
+  acionável `error.networkUnreachable` ("Sem conexão com o servidor...").
+- **Correção do pull de tombstone (Bug A)**: o loop de cadernos remotos do `buildPlan`
+  pula ids sob `state.localOnlyDeleted` **e** `state.tombstones`, de modo que um caderno
+  marcado para exclusão nunca é re-baixado e transformado em conflito. Um caderno que
+  reaparece localmente **depois** de a exclusão remota ter sido confirmada (restaurado da
+  lixeira: sem tombstone ativo e sem baseline de sync) cai em um novo branch e é
+  **reenviado** (`plan.push`) em vez de ser excluído localmente de novo.
 - **Algoritmo de merge**: `src/utils/sync.ts` — `runSync()` e `applyConflictChoices()`.
   Layout remoto: `manifest.json` + `notebooks/<id>.json` + `folders/folders.json`.
   Compara `local.updatedAt`, `remote.updatedAt` e `cloudSync.notebooks[id]` para decidir
   push/pull/delete/conflito. O hash de pastas (`hashFolders`) inclui `id`, `name`,
   `parentId` e `order`, então a **reordenação de pastas é sincronizada** como qualquer
   outra mudança de pastas.
+  **Primeira sincronização (sem linha de base de pastas)**: um dispositivo que nunca
+  sincronizou tem `foldersHash` vazio (normalizado para o hash do conjunto vazio em
+  `db.ts` e `buildPlan`). Isso é tratado como "pastas locais inalteradas" em vez de uma
+  mudança local, então um dispositivo novo **puxa as pastas remotas** em vez de gerar um
+  conflito espúrio `bothModified`. Antes dessa correção, resolver esse conflito espúrio
+  com "manter local" em um dispositivo vazio enviava uma lista de pastas vazia e apagava
+  silenciosamente as pastas reais no servidor (`folders/folders.json`).
   **Garantia de commit do manifest (sem sobrescrita silenciosa)**: a linha de base local
   (`cloudSync.notebooks`/`foldersHash`) só avança **depois** que o servidor confirma o
   novo `manifest.json`. Se a gravação do manifest falhar, o `runSync` restaura um
   snapshot da linha de base e do manifest anteriores, de modo que a próxima sincronização
-  reavalie o mesmo plano (idempotente) — um manifest desatualizado nunca causa um pull
+  reavalie o mesmo plano   (idempotente) — um manifest desatualizado nunca causa um pull
   silencioso que sobrescreva alterações locais feitas desde a execução com falha.
+  **Autocorreção de arquivos remotos ausentes (404)**: quando o manifest lista um
+  caderno cujo arquivo está ausente no servidor (ex.: upload interrompido ou manifest
+  desatualizado), o `downloadFile` lança um `RemoteFileNotFoundError` tipado (ver
+  `src/utils/webdav.ts`) e o loop de pull de cadernos no `runSync` reconcilia em vez de
+  gerar erro para sempre — se houver cópia local, ela é reenviada (restaurada) e a
+  entrada do manifest é corrigida; se não houver, a entrada fantasma do manifest é
+  removida para a próxima sincronização parar de tentar baixá-la.
 - **Estado local de sync**: `db.ts` → `cloudSync` (`CloudSyncState`).
 - **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`. O `syncNow()` **só avança `settings.cloud.lastSyncAt` quando a execução termina sem erros** (uma sincronização com falha mantém o horário real do "último sync" em vez de fingir que deu certo). A assinatura de auto-sync (debounce de 20s) **enfileira uma sincronização de acompanhamento quando uma mudança chega durante uma sincronização em andamento** (`syncQueued`), para que edições feitas durante a janela de sync não sejam perdidas silenciosamente. O `applySyncChanges()` aplica dados puxados/novos/removidos e **não faz nada quando nada mudou de fato** — só incrementa `dataVersion` (que re-dispara o auto-sync) quando há mudanças reais, evitando um loop infinito de auto-sync no celular.
 - **Design/plano detalhados**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
@@ -561,8 +602,13 @@ Fluxo e arquivos envolvidos:
   scripts/verify-sync.ts`) exercita `buildPlan` e `runSync` contra um transport fake em
   memória, validando decisões de push/pull/conflito/delete, o rollback da gravação do
   manifest (a linha de base não avança e `lastSyncAt` não é definido), a re-execução
-  idempotente após o rollback e que uma falha de autenticação exibe mensagem clara
-  deixando o estado de sync intacto.
+  idempotente após o rollback, uma falha de autenticação exibindo mensagem clara
+  deixando o estado de sync intacto, a autocorreção de 404 (restaurar cópia local /
+  remover entrada fantasma do manifest), a **regressão do Bug A** (um caderno com
+  tombstone não é re-baixado e é excluído na nuvem) e o fluxo de **restauração da
+  lixeira** (um caderno que reapareceu localmente após a exclusão remota é reenviado e a
+  entrada do manifest volta para `deleted:false`). O `scripts/verify-download.ts`
+  adicionalmente valida o comportamento de **retry** (`isConnectionError`/`withRetry`).
 
 ---
 
@@ -600,6 +646,7 @@ Fluxo e arquivos envolvidos:
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
 | Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
+| Lixeira local (excluir → lixeira, restaurar, "restaurar da nuvem", excluir definitivamente, purga de 30 dias) | `src/store.ts` (`deleteNotebook`/`deleteFolder`/`deleteSelected` criam entradas `TrashItem`; `restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), `src/db.ts` (`getTrash`/`putTrashItem`/`deleteTrashItem`), `src/types.ts` (`TrashItem`), `src/components/Modals.tsx` (`TrashModal`), `src/components/Sidebar.tsx` (botão da lixeira), `src/uiStore.ts` (modal `'trash'`) |
 | Contratos das stores (estado + ações, ver §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 
 ### Nuvem / sincronização
@@ -608,7 +655,8 @@ Fluxo e arquivos envolvidos:
 |---|---|
 | Algoritmo de merge e conflitos | `src/utils/sync.ts` |
 | Transporte WebDAV + Koofr | `src/utils/webdav.ts`. No Android, `uploadFile` faz stream via plugin local `pick-directory` (`uploadFileStreaming`) e `downloadFile` usa requests Range em chunks (`downloadText` em `http.ts`, decodificado com `decodeCapacitorData` — trata os corpos parseados como JSON que o CapacitorHttp devolve para conteúdo `application/json`) — evita o OOM da bridge para cadernos grandes. |
-| Rede Nativa (Android CORS bypass) | `src/utils/http.ts` (`customFetch`, `downloadText`, `decodeCapacitorData`) — usado por `webdav.ts` e `updateCheck.ts` |
+| Rede Nativa (Android CORS bypass) | `src/utils/http.ts` (`customFetch`, `downloadText`, `decodeCapacitorData`, `isConnectionError`, `withRetry`) — usado por `webdav.ts` e `updateCheck.ts` |
+| Resiliência de rede (retry/backoff + mensagem amigável) | `src/utils/http.ts` (`isConnectionError`, `withRetry` — 3 tentativas, backoff 500ms→1s, apenas erros de conexão) + `src/utils/webdav.ts` (`rethrowConnectionError` → `error.networkUnreachable`) |
 | Estado local de sync (cloudSync) | `db.ts` + `src/types.ts` (`CloudSyncState`) |
 | Orquestração (`syncNow`, `resolveConflicts`, auto-sync) | `src/store.ts` |
 | Modal de sincronização / configuração de nuvem | `src/components/Modals.tsx` |
@@ -744,8 +792,8 @@ Fluxo e arquivos envolvidos:
 | Arquivo | O que contém | Exemplos de strings |
 |---|---|---|
 | `src/components/Toolbar.tsx` | Nomes de ferramentas, painéis, dicas, tooltips, títulos | "Caneta", "Marcador", "Borracha", "Texto", "Selecionar", "Mover", "Rotação", "Desfazer", "Refazer", "Modo de seleção", "Selecionar apenas a parte delimitada", "Ações", "Negrito", "Sublinhado", "Direção da escrita", "Código hexadecimal" |
-| `src/components/Modals.tsx` | **Todos os modais**: títulos, labels, botões, dicas, placeholders, opções | "Configurações", "Nova página", "Exportar anotações", "Sincronização em nuvem", "Conflitos de sincronização", "Modelo da primeira página", "Português (Brasil)", "Testar conexão", "Também da nuvem", "Ocultar o cursor da ferramenta" (`modal.hideToolCursor` + `modal.hideToolCursorHint`), dicas de importação |
-| `src/components/Sidebar.tsx` | Menus de contexto, prompts, confirmações, títulos de seção | "Meus Cadernos", "Sem pastas", "Nova pasta", "Renomear", "Copiar para pasta...", "Mover para pasta...", "Duplicar", "Excluir", "Excluir a nota ...?", "Arraste para redimensionar", "Arraste para reordenar. Em touch, toque longo seleciona vários itens." (`sidebar.dragHint`) |
+| `src/components/Modals.tsx` | **Todos os modais**: títulos, labels, botões, dicas, placeholders, opções | "Configurações", "Nova página", "Exportar anotações", "Sincronização em nuvem", "Conflitos de sincronização", "Modelo da primeira página", "Português (Brasil)", "Testar conexão", "Também da nuvem", "Ocultar o cursor da ferramenta" (`modal.hideToolCursor` + `modal.hideToolCursorHint`), dicas de importação, **lixeira** (`modal.trashTitle`, `modal.trashEmpty`, `modal.trashRestore`, `modal.trashRestoreCloud`, `modal.trashPurgeTitle`, `modal.trashPurgeConfirm`, `modal.trashPurgeNote`, `modal.trashKindNote`, `modal.trashKindFolder`, `modal.trashRestoreCloudHint`) |
+| `src/components/Sidebar.tsx` | Menus de contexto, prompts, confirmações, títulos de seção | "Meus Cadernos", "Sem pastas", "Nova pasta", "Renomear", "Copiar para pasta...", "Mover para pasta...", "Duplicar", "Excluir", "Excluir a nota ...?", "Arraste para redimensionar", "Arraste para reordenar. Em touch, toque longo seleciona vários itens." (`sidebar.dragHint`), "Lixeira" (`sidebar.trash`) |
 | `src/components/TopBar.tsx` | Tooltips, título do app, placeholder | "Alternar barra lateral", "Mostrar/ocultar preview das páginas", "Camadas" (`topbar.toggleLayers`), "Ocultar a barra superior", "Ocultar a barra de ferramentas", "Mostrar a barra superior", "Mostrar a barra de ferramentas", "Mostrar a barra de cadernos", "Mostrar o preview de páginas", "Tela cheia (F11)", "Mamaco Notes", "Selecione ou crie um caderno" |
 | `src/components/PageList.tsx` | Título, placeholder de busca, mensagens vazias, barra de seleção múltipla de páginas | "Páginas", "Ir para a página (nº)...", "Nenhuma página encontrada", "{{count}} página(s) selecionada(s)", "Limpar seleção de páginas", "Duplicar páginas selecionadas", "Excluir {{count}} página(s) selecionada(s)?" |
 | `src/components/LayersPanel.tsx` | Título do painel, barra de ações (nova/duplicar/excluir/mesclar), slider de opacidade da camada ativa, rodapé "Fundo", tooltips de visibilidade/lock | "Camadas", "Adicionar camada", "Duplicar camada", "Excluir camada", "Mesclar camadas", "Mesclar {{count}} camadas", "Fundo", "Fundo da página", "Opacidade", "Renomear camada", "Camada {{n}}" (nomes padrão via `layers.layerN` quando o nome casa com `^Camada \d+$`), "Mostrar/ocultar camada", "Travar camada", "Destravar camada" |

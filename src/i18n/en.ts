@@ -165,6 +165,7 @@ export const enMessages: Record<string, string> = {
 
   // ===== Sidebar (Sidebar.tsx) =====
   'sidebar.myNotebooks': 'My Notebooks',
+  'sidebar.trash': 'Trash',
   'sidebar.dragHint': 'Drag to reorder. On touch, long press to multi-select.',
   'sidebar.resizeSidebar': 'Drag to resize',
   'sidebar.newFolder': 'New folder',
@@ -397,9 +398,19 @@ export const enMessages: Record<string, string> = {
   'modal.deleteItemLabelItems': 'the items',
   'modal.deleteItemLabelNote': 'the notebook',
   'modal.deleteLocalOnly': 'Only on this device',
-  'modal.deleteLocalOnlyHint': 'Removes {{item}} from this device and keeps the copy in the cloud.',
+  'modal.deleteLocalOnlyHint': 'Removes {{item}} from this device, keeps the cloud copy and moves it to the trash.',
   'modal.deleteAlsoCloud': 'Also from the cloud',
-  'modal.deleteAlsoCloudHint': 'Removes from the cloud and syncs now to all devices.',
+  'modal.deleteAlsoCloudHint': 'Removes from the cloud, syncs to all devices and moves it to the trash.',
+  'modal.trashTitle': 'Trash',
+  'modal.trashEmpty': 'The trash is empty.',
+  'modal.trashKindNote': 'Notebook',
+  'modal.trashKindFolder': 'Folder',
+  'modal.trashRestore': 'Restore',
+  'modal.trashRestoreCloud': 'Restore from cloud',
+  'modal.trashRestoreCloudHint': 'Downloads the item back from the cloud to this device.',
+  'modal.trashPurgeTitle': 'Delete permanently',
+  'modal.trashPurgeConfirm': 'Delete "{{name}}" from the trash? The cloud copy will not be affected.',
+  'modal.trashPurgeNote': 'Items are kept for 30 days. After that, items without a cloud copy are removed and items with a cloud copy can only be restored with the "Restore from cloud" option.',
 
   // ===== Software Update =====
   'modal.updateAvailable': 'Update available',
@@ -469,6 +480,8 @@ export const enMessages: Record<string, string> = {
   'error.webdavAccessFailed': 'Failed to access the WebDAV server: {{status}}. Check the URL, username and password (app password).',
   'error.koofrAuthFailed': 'Koofr authentication failed ({{status}}). Check that the "username" is your account email and that the "password" is a valid App Password created at app.koofr.net → Settings → App Passwords.',
   'error.webdavAuthFailed': 'Authentication failed ({{status}}). Check the username and password (app password) of the WebDAV server.',
+  'error.networkUnreachable': 'No connection to the server. Check your internet connection and try again.',
+  'error.trashRestoreCloudFailed': 'Could not restore "{{name}}" from the cloud. The copy may no longer exist on the server.',
   'error.connectionOkBaseExists': 'Connection OK: server accessible and base folder exists.',
   'error.connectionOkBaseMissing': 'Connection OK: server accessible, but the folder "{{path}}" does not exist yet. Click "Create folders" before syncing.',
 

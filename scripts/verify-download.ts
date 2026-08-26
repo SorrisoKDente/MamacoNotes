@@ -15,7 +15,7 @@
  * Run: npx tsx scripts/verify-download.ts
  */
 import { Capacitor } from '@capacitor/core'
-import { decodeCapacitorData, downloadText } from '../src/utils/http'
+import { decodeCapacitorData, downloadText, isConnectionError, withRetry } from '../src/utils/http'
 
 let passed = 0
 let failed = 0
@@ -165,11 +165,203 @@ async function main(): Promise<void> {
     assert(bool !== null && dec.decode(bool) === 'true', 'boolean -> JSON.stringify')
     const raw = decodeCapacitorData('{"id":1,"name":"x",')
     assert(raw !== null && dec.decode(raw) === '{"id":1,"name":"x",', 'truncated JSON raw string -> raw bytes')
-    const b64 = decodeCapacitorData(btoa('hello world'))
-    assert(b64 !== null && dec.decode(b64) === 'hello world', 'base64 -> decoded bytes')
+    const b64 = btoa('hello world')
+    const asText = decodeCapacitorData(b64, true)
+    assert(asText !== null && dec.decode(asText) === b64, 'JSON string -> raw text (never base64)')
+    const asBytes = decodeCapacitorData(b64, false)
+    assert(asBytes !== null && dec.decode(asBytes) === 'hello world', 'non-JSON base64 string -> decoded bytes')
     const empty = decodeCapacitorData('')
     assert(empty !== null && dec.decode(empty) === '', 'empty string -> empty bytes')
     assert(decodeCapacitorData(null) === null, 'null -> null')
+  }
+
+  // 6. Native-path regression: a large JSON notebook with an embedded base64
+  //    image (bigger than one Range chunk). Simulate the Android readData JSON
+  //    branch (parseJSON per chunk) through the web CapacitorHttp plugin
+  //    (whose fetch we control) and assert downloadText reassembles the JSON
+  //    byte-exact. Regression for the bug where a chunk that lands entirely
+  //    inside a base64 dataUrl (all base64-alphabet chars, length % 4 == 0) was
+  //    mistaken for an arraybuffer payload and base64-decoded into garbage ->
+  //    "Bad control character in string literal in JSON" / "Unexpected end of
+  //    JSON input".
+  {
+    const imageB64 = 'iVBORw0KGgoAAAANSUhEUg' + 'A'.repeat(2 * 1024 * 1024)
+    const fileText = JSON.stringify({
+      version: 2,
+      notebook: {
+        id: 'n1',
+        name: 'caderno com imagem',
+        updatedAt: 123,
+        pages: [
+          {
+            id: 'p1',
+            layers: [
+              {
+                id: 'l1',
+                images: [
+                  { id: 'i1', dataUrl: `data:image/png;base64,${imageB64}`, x: 0, y: 0, width: 10, height: 10 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+    const fileBytes = new TextEncoder().encode(fileText)
+    assert(fileBytes.length > 512 * 1024, 'notebook fixture is bigger than one chunk')
+
+    // Replicates Capacitor's HttpRequestHandler.parseJSON (Android).
+    const nativeParseJSON = (input: string): unknown => {
+      const t = input.trim()
+      if (t === 'null') return null
+      if (t === 'true') return true
+      if (t === 'false') return false
+      if (t.length <= 0) return ''
+      if (/^\".*\"$/.test(t)) return t.substring(1, t.length - 1)
+      if (/^-?\d+$/.test(t)) return parseInt(t, 10)
+      if (/^-?\d+(\.\d+)?$/.test(t)) return parseFloat(t)
+      try {
+        return JSON.parse(t)
+      } catch {
+        try {
+          return JSON.parse(t)
+        } catch {
+          return t
+        }
+      }
+    }
+
+    // A Response-like object whose .json() returns the Android readData JSON
+    // branch result (parseJSON): a truncated Range chunk comes back as the raw
+    // string, a complete body as a parsed value — exactly what CapacitorHttp
+    // returns on Android for application/json content.
+    const fakeJsonResponse = (start: number, end: number): unknown => {
+      const raw = new TextDecoder('utf-8').decode(fileBytes.slice(start, end + 1))
+      const contentRange = `bytes ${start}-${end}/${fileBytes.length}`
+      const headersLike = {
+        get: (name: string) => {
+          const n = name.toLowerCase()
+          if (n === 'content-type') return 'application/json'
+          if (n === 'content-range') return contentRange
+          return null
+        },
+        forEach: (cb: (v: string, k: string) => void) => {
+          cb('application/json', 'content-type')
+          cb(contentRange, 'content-range')
+        },
+      }
+      return {
+        ok: true,
+        status: 206,
+        url: '',
+        headers: headersLike,
+        json: async () => nativeParseJSON(raw),
+        text: async () => raw,
+        blob: async () => new Blob([raw]),
+        arrayBuffer: async () => new TextEncoder().encode(raw).buffer,
+      }
+    }
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/dav/notebooks/n1.json') {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        const range = headers['Range'] ?? headers['range'] ?? ''
+        const m = /bytes=(\d+)-(\d+)/.exec(range)
+        if (!m) return new Response('Bad Range', { status: 400 })
+        const start = parseInt(m[1], 10)
+        const end = Math.min(parseInt(m[2], 10), fileBytes.length - 1)
+        return fakeJsonResponse(start, end) as unknown as Response
+      }
+      return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } })
+    }) as typeof fetch
+
+    const res = await downloadText('https://host/dav/notebooks/n1.json')
+    assert(res.ok, 'large JSON notebook 206 ok')
+    assert(res.text === fileText, 'large JSON notebook reassembled byte-exact')
+  }
+
+  // 7. Retry: connection errors are retried; HTTP 4xx/5xx and auth are not.
+  {
+    const isNative = (Capacitor as { isNativePlatform: () => boolean }).isNativePlatform
+    ;(Capacitor as { isNativePlatform: () => boolean }).isNativePlatform = () => false
+
+    assert(
+      isConnectionError(new Error('Failed to connect to app.koofr.net/167.235.4.177:443')),
+      'isConnectionError: "Failed to connect" is a connection error',
+    )
+    assert(
+      isConnectionError(new Error('network is unreachable')),
+      'isConnectionError: "network is unreachable" is a connection error',
+    )
+    assert(
+      isConnectionError(new TypeError('Failed to fetch')),
+      'isConnectionError: "Failed to fetch" is a connection error',
+    )
+    assert(
+      !isConnectionError(new Error('Falha de autenticação (401). Verifique o usuário e a senha.')),
+      'isConnectionError: auth message is NOT a connection error',
+    )
+    assert(
+      !isConnectionError(new Error('HTTP 500 Internal Server Error')),
+      'isConnectionError: 5xx message is NOT a connection error',
+    )
+
+    let calls = 0
+    await withRetry(
+      async () => {
+        calls++
+        if (calls === 1) throw new Error('Failed to connect')
+        return 'ok'
+      },
+      2,
+      [0, 0],
+    )
+    assert(calls === 2, 'withRetry: retries a connection error and succeeds')
+
+    calls = 0
+    let thrown: unknown = null
+    try {
+      await withRetry(
+        async () => {
+          calls++
+          throw new Error('HTTP 401')
+        },
+        2,
+        [0, 0],
+      )
+    } catch (e) {
+      thrown = e
+    }
+    assert(calls === 1 && thrown !== null, 'withRetry: does NOT retry a non-connection error')
+
+    let webCalls = 0
+    globalThis.fetch = (async () => {
+      webCalls++
+      if (webCalls === 1) throw new Error('Failed to fetch')
+      return new Response('hello', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      })
+    }) as typeof fetch
+    const res = await downloadText('https://host/dav/hello.txt')
+    assert(
+      webCalls === 2 && res.ok && res.text === 'hello',
+      'downloadText (web): retries a connection error and returns the body',
+    )
+
+    webCalls = 0
+    globalThis.fetch = (async () => {
+      webCalls++
+      return new Response('Server Error', { status: 500 })
+    }) as typeof fetch
+    const bad = await downloadText('https://host/dav/bad.txt')
+    assert(
+      webCalls === 1 && !bad.ok && bad.status === 500,
+      'downloadText (web): 5xx returned as ok:false, NOT retried',
+    )
+
+    ;(Capacitor as { isNativePlatform: () => boolean }).isNativePlatform = isNative
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

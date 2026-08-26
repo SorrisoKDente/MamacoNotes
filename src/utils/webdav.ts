@@ -1,7 +1,7 @@
 import type { CloudSettings } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
-import { customFetch, downloadText } from './http'
+import { customFetch, downloadText, isConnectionError } from './http'
 import { Capacitor } from '@capacitor/core'
 import { uploadFileStreaming } from './chunkedIo'
 
@@ -74,6 +74,29 @@ function webdavAuthError(status: number): Error {
   return new Error(t('error.webdavAuthFailed', { status }))
 }
 
+/**
+ * Converts a connection-level failure into a friendly, actionable message
+ * (the raw error — e.g. "Failed to connect to host:443" — is not useful to
+ * the user). Non-connection errors pass through unchanged.
+ */
+function rethrowConnectionError(err: unknown): never {
+  if (isConnectionError(err)) throw new Error(t('error.networkUnreachable'))
+  throw err
+}
+
+/**
+ * Thrown by `downloadFile` when the remote resource returns 404. Lets sync code
+ * distinguish a genuinely missing remote file (self-healable) from any other
+ * download failure, instead of parsing error message text.
+ */
+export class RemoteFileNotFoundError extends Error {
+  status = 404
+  constructor(filePath: string) {
+    super(t('error.downloadFailed', { filePath, status: 404 }))
+    this.name = 'RemoteFileNotFoundError'
+  }
+}
+
 async function koofrFetch<T>(
   apiBase: string,
   path: string,
@@ -81,14 +104,21 @@ async function koofrFetch<T>(
   init?: RequestInit,
 ): Promise<{ status: number; data?: T }> {
   // Use customFetch to bypass CORS on Android
-  const res = await customFetch(apiBase + path, {
-    ...init,
-    headers: {
-      Authorization: authHeader(settings),
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  })
+  let res: Response
+  try {
+    res = await customFetch(apiBase + path, {
+      ...init,
+      headers: {
+        Authorization: authHeader(settings),
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (err) {
+    logger.error(`Koofr API request failed: ${path}`, err)
+    rethrowConnectionError(err)
+    throw err
+  }
   if (res.status === 401 || res.status === 403) {
     throw koofrAuthError(res.status)
   }
@@ -328,7 +358,7 @@ export async function uploadFile(
     }
   } catch (err) {
     logger.error(`Upload failed: ${filePath}`, err)
-    throw err
+    rethrowConnectionError(err)
   }
 }
 
@@ -346,17 +376,21 @@ export async function downloadFile(
       const res = await downloadText(url, headers)
       if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
       if (!res.ok) {
+        if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
         throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
       }
       return res.text
     }
     const res = await customFetch(url, { headers })
     if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
-    if (!res.ok) throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+    if (!res.ok) {
+      if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
+      throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+    }
     return res.text()
   } catch (err) {
     logger.error(`Download failed: ${filePath}`, err)
-    throw err
+    rethrowConnectionError(err)
   }
 }
 

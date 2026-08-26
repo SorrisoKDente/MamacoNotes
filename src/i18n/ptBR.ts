@@ -165,6 +165,7 @@ export const ptBRMessages: Record<string, string> = {
 
   // ===== Barra lateral (Sidebar.tsx) =====
   'sidebar.myNotebooks': 'Meus Cadernos',
+  'sidebar.trash': 'Lixeira',
   'sidebar.dragHint': 'Arraste para reordenar. Em touch, toque longo seleciona vários itens.',
   'sidebar.resizeSidebar': 'Arraste para redimensionar',
   'sidebar.newFolder': 'Nova pasta',
@@ -397,9 +398,19 @@ export const ptBRMessages: Record<string, string> = {
   'modal.deleteItemLabelItems': 'os itens',
   'modal.deleteItemLabelNote': 'a nota',
   'modal.deleteLocalOnly': 'Somente neste dispositivo',
-  'modal.deleteLocalOnlyHint': 'Remove {{item}} deste dispositivo e mantém a cópia na nuvem.',
+  'modal.deleteLocalOnlyHint': 'Remove {{item}} deste dispositivo, mantém a cópia na nuvem e envia para a lixeira.',
   'modal.deleteAlsoCloud': 'Também da nuvem',
-  'modal.deleteAlsoCloudHint': 'Remove da nuvem e sincroniza agora para todos os dispositivos.',
+  'modal.deleteAlsoCloudHint': 'Remove da nuvem, sincroniza em todos os dispositivos e envia para a lixeira.',
+  'modal.trashTitle': 'Lixeira',
+  'modal.trashEmpty': 'A lixeira está vazia.',
+  'modal.trashKindNote': 'Nota',
+  'modal.trashKindFolder': 'Pasta',
+  'modal.trashRestore': 'Restaurar',
+  'modal.trashRestoreCloud': 'Restaurar da nuvem',
+  'modal.trashRestoreCloudHint': 'Baixa o item de volta da nuvem para este dispositivo.',
+  'modal.trashPurgeTitle': 'Excluir definitivamente',
+  'modal.trashPurgeConfirm': 'Excluir "{{name}}" da lixeira? A cópia na nuvem não será afetada.',
+  'modal.trashPurgeNote': 'Os itens ficam retidos por 30 dias. Depois disso, itens sem cópia na nuvem são removidos e itens com cópia na nuvem só podem ser restaurados pela opção "Restaurar da nuvem".',
 
   // ===== Atualização de Software =====
   'modal.updateAvailable': 'Atualização disponível',
@@ -469,6 +480,8 @@ export const ptBRMessages: Record<string, string> = {
   'error.webdavAccessFailed': 'Falha ao acessar o servidor WebDAV: {{status}}. Verifique a URL, o usuário e a senha (app password).',
   'error.koofrAuthFailed': 'Falha de autenticação com o Koofr ({{status}}). Confira se o "usuário" é o e-mail da conta e se a "senha" é um App Password válido criado em app.koofr.net → Configurações → App Passwords.',
   'error.webdavAuthFailed': 'Falha de autenticação ({{status}}). Verifique o usuário e a senha (app password) do servidor WebDAV.',
+  'error.networkUnreachable': 'Sem conexão com o servidor. Verifique sua conexão com a internet e tente novamente.',
+  'error.trashRestoreCloudFailed': 'Não foi possível restaurar "{{name}}" da nuvem. A cópia pode não existir mais no servidor.',
   'error.connectionOkBaseExists': 'Conexão OK: servidor acessível e pasta base existente.',
   'error.connectionOkBaseMissing': 'Conexão OK: servidor acessível, mas a pasta "{{path}}" ainda não existe. Clique em "Criar pastas" antes de sincronizar.',
 

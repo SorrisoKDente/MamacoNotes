@@ -1,6 +1,6 @@
 export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
-export const APP_VERSION = '1.0.73'
+export const APP_VERSION = '1.1.0'
 
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
@@ -198,6 +198,27 @@ export interface CloudSyncState {
 }
 
 export type DeleteScope = 'local' | 'remote'
+
+/**
+ * Entry in the local trash (NOT synced). One entry per deleted item — a
+ * deleted folder produces one entry for the folder, one for each subfolder and
+ * one for each notebook inside it (each with its own `parentId`).
+ *
+ * `cloudKeepsCopy` is true when the item was deleted "só local" (the cloud
+ * still holds a copy): the heavy `data` is discarded and the item can only be
+ * brought back with "Restaurar da nuvem". When false, the item was deleted
+ * "local + nuvem" (or there is no cloud): `data` holds the full item so it can
+ * be restored without a cloud copy.
+ */
+export interface TrashItem {
+  id: string
+  kind: 'notebook' | 'folder'
+  name: string
+  parentId: string | null
+  data: Notebook | Folder | null
+  deletedAt: number
+  cloudKeepsCopy: boolean
+}
 
 export interface SyncConflictItem {
   id: string

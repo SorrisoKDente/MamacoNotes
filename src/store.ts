@@ -17,6 +17,7 @@ import type {
   TemplateId,
   TextElement,
   ToolKind,
+  TrashItem,
 } from './types'
 import {
   DEFAULT_SETTINGS,
@@ -32,7 +33,14 @@ import {
 import { db } from './db'
 import { isMobileNow } from './hooks/useIsMobile'
 import { makeTransport } from './utils/webdav'
-import { applyConflictChoices, hashFolders, runSync } from './utils/sync'
+import {
+  applyConflictChoices,
+  FOLDERS_PATH,
+  hashFolders,
+  NOTEBOOKS_DIR,
+  runSync,
+  TOMBSTONE_RETENTION_MS,
+} from './utils/sync'
 import { useUiStore } from './uiStore'
 import type { RenderedPdfPage } from './utils/pdf'
 import { setLanguage, t } from './i18n'
@@ -111,6 +119,26 @@ export function sortNotebooksByOrder(notebooks: Notebook[]): Notebook[] {
 
 export function sortFoldersByOrder(folders: Folder[]): Folder[] {
   return folders.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+}
+
+export function sortTrash(items: TrashItem[]): TrashItem[] {
+  return items.slice().sort((a, b) => b.deletedAt - a.deletedAt)
+}
+
+/**
+ * Resolves a notebook's `folderId` against the folders that actually exist.
+ * A notebook whose folder never synced/imported (e.g. a blank `folders.json`
+ * on the cloud) would otherwise be invisible in the sidebar — it is neither a
+ * root notebook (`folderId === null`) nor listed under a known folder.
+ * Returns `null` (root) for such orphaned references.
+ */
+export function normalizeNotebookFolder(
+  nb: { folderId: string | null | undefined },
+  folderIds: ReadonlySet<string>,
+): string | null {
+  const fid = nb.folderId ?? null
+  if (fid === null) return null
+  return folderIds.has(fid) ? fid : null
 }
 
 function nextOrder(orders: Array<number | undefined>): number {
@@ -241,6 +269,7 @@ interface AppState {
   folders: Folder[]
   notebooks: Notebook[]
   templates: PageTemplate[]
+  trash: TrashItem[]
   settings: AppSettings
   dataVersion: number
 
@@ -351,6 +380,10 @@ interface AppState {
     folderId: string | null,
     rendered: RenderedPdfPage[],
   ) => Promise<Notebook | null>
+  restoreFromTrash: (id: string) => Promise<void>
+  restoreFromCloud: (id: string) => Promise<void>
+  purgeTrashItem: (id: string) => Promise<void>
+  runTrashPurge: () => Promise<void>
   replaceAllData: (
     folders: Folder[],
     notebooks: Notebook[],
@@ -385,18 +418,26 @@ export const useAppStore = create<AppState>((set, get) => {
     const removed = new Set(changes.removedLocalNotebookIds)
     let notebooks = prev.notebooks.filter((n) => !removed.has(n.id))
 
+    // Effective folders after this change (pulled folders may create the folder
+    // a notebook references). Notebooks whose folder is missing are placed at
+    // root so they are never invisible.
+    const effectiveFolderIds = new Set(
+      (changes.pulledFolders ?? prev.folders).map((f) => f.id),
+    )
+
     for (const nb of changes.pulledNotebooks) {
       const idx = notebooks.findIndex((n) => n.id === nb.id)
       const existing = idx >= 0 ? notebooks[idx] : undefined
       const norm: Notebook = {
         ...nb,
+        folderId: normalizeNotebookFolder(nb, effectiveFolderIds),
         order: typeof nb.order === 'number' ? nb.order : existing?.order,
         pages: nb.pages.map((p) => normalizePage(p)),
       }
       if (norm.order === undefined) {
         norm.order = nextOrder(
           notebooks
-            .filter((n) => (n.folderId ?? null) === (nb.folderId ?? null))
+            .filter((n) => (n.folderId ?? null) === (norm.folderId ?? null))
             .map((n) => n.order),
         )
       }
@@ -405,14 +446,16 @@ export const useAppStore = create<AppState>((set, get) => {
       await db.putNotebook(norm)
     }
     for (const nb of changes.newNotebooks) {
-      const added =
+      const resolvedFolderId = normalizeNotebookFolder(nb, effectiveFolderIds)
+      const added: Notebook =
         typeof nb.order === 'number'
-          ? nb
+          ? { ...nb, folderId: resolvedFolderId }
           : {
               ...nb,
+              folderId: resolvedFolderId,
               order: nextOrder(
                 notebooks
-                  .filter((n) => (n.folderId ?? null) === (nb.folderId ?? null))
+                  .filter((n) => (n.folderId ?? null) === resolvedFolderId)
                   .map((n) => n.order),
               ),
             }
@@ -444,6 +487,25 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   }
 
+  function normalizeRestoredNotebook(nb: Notebook): Notebook {
+    const folderIds = new Set(get().folders.map((f) => f.id))
+    const norm: Notebook = {
+      ...nb,
+      folderId: normalizeNotebookFolder(nb, folderIds),
+      order:
+        typeof nb.order === 'number'
+          ? nb.order
+          : nextOrder(get().notebooks.map((n) => n.order)),
+      pages: nb.pages.map((p) => normalizePage(p)),
+    }
+    return norm
+  }
+
+  async function removeTrashEntry(id: string): Promise<void> {
+    await db.deleteTrashItem(id)
+    set({ trash: get().trash.filter((x) => x.id !== id) })
+  }
+
   async function updateNotebookStorage(notebook: Notebook) {
     notebook.updatedAt = Date.now()
     const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? notebook : n))
@@ -461,6 +523,7 @@ export const useAppStore = create<AppState>((set, get) => {
     folders: [],
     notebooks: [],
     templates: [],
+    trash: [],
     settings: DEFAULT_SETTINGS,
     dataVersion: 0,
     selectedFolderId: null,
@@ -479,14 +542,17 @@ export const useAppStore = create<AppState>((set, get) => {
     canRedo: false,
 
     async init() {
-      const [rawFolders, rawNotebooks, settings, templates] = await Promise.all([
+      const [rawFolders, rawNotebooks, settings, templates, trashItems] = await Promise.all([
         db.getFolders(),
         db.getNotebooks(),
         db.getSettings(),
         db.getTemplates(),
+        db.getTrash(),
       ])
+      const folderIds = new Set(rawFolders.map((f) => f.id))
       const notebooks = rawNotebooks.map((nb) => ({
         ...nb,
+        folderId: normalizeNotebookFolder(nb, folderIds),
         pages: nb.pages.map((p) => normalizePage(p)),
       }))
       const rawSettings: AppSettings =
@@ -528,6 +594,7 @@ export const useAppStore = create<AppState>((set, get) => {
         folders: orderedFolders,
         notebooks: orderedNotebooks,
         templates,
+        trash: trashItems,
         settings: safeSettings,
         selectedNotebookId,
         currentPageIndex,
@@ -537,6 +604,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (settings.language === 'pt-BR' && detectLanguage() === 'en') {
         void get().setSettings({ language: 'en' })
       }
+      void get().runTrashPurge()
     },
 
     selectFolder: (id) =>
@@ -753,10 +821,12 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const cloud = get().settings.cloud
       const configured = !!cloud.webdavUrl
+      const scopeRemote = scope === 'remote' || (scope === undefined && cloud.enabled)
+      const cloudKeepsCopy = scope === 'local' && configured
       if (configured) {
         const state = await db.getCloudSyncState()
         const now = Date.now()
-        if (scope === 'remote') {
+        if (scopeRemote) {
           for (const nb of childNotebooks) state.tombstones[nb.id] = now
         } else if (scope === 'local') {
           for (const nb of childNotebooks) {
@@ -764,13 +834,38 @@ export const useAppStore = create<AppState>((set, get) => {
             delete state.notebooks[nb.id]
           }
           state.foldersHash = hashFolders(folders)
-        } else if (cloud.enabled && childNotebooks.length > 0) {
-          for (const nb of childNotebooks) {
-            state.tombstones[nb.id] = now
-          }
         }
         await db.putCloudSyncState(state)
       }
+      const deletedAt = Date.now()
+      const trashItems: TrashItem[] = []
+      for (const f of allFolders) {
+        if (!toDelete.has(f.id)) continue
+        trashItems.push({
+          id: f.id,
+          kind: 'folder',
+          name: f.name,
+          parentId: f.parentId,
+          data: { ...f },
+          deletedAt,
+          cloudKeepsCopy,
+        })
+      }
+      for (const nb of childNotebooks) {
+        trashItems.push({
+          id: nb.id,
+          kind: 'notebook',
+          name: nb.name,
+          parentId: nb.folderId,
+          data: cloudKeepsCopy ? null : { ...nb },
+          deletedAt,
+          cloudKeepsCopy,
+        })
+      }
+      for (const item of trashItems) {
+        await db.putTrashItem(item)
+      }
+      set({ trash: sortTrash([...trashItems, ...get().trash]) })
       for (const fid of toDelete) {
         await db.deleteFolder(fid)
       }
@@ -981,23 +1076,37 @@ export const useAppStore = create<AppState>((set, get) => {
     async deleteNotebook(id, scope) {
       const cloud = get().settings.cloud
       const configured = !!cloud.webdavUrl
+      const scopeRemote = scope === 'remote' || (scope === undefined && cloud.enabled)
+      const cloudKeepsCopy = scope === 'local' && configured
       if (configured) {
         const state = await db.getCloudSyncState()
-        if (scope === 'remote') {
+        if (scopeRemote) {
           state.tombstones[id] = Date.now()
         } else if (scope === 'local') {
           state.localOnlyDeleted[id] = Date.now()
           delete state.notebooks[id]
-        } else if (cloud.enabled) {
-          state.tombstones[id] = Date.now()
         }
         await db.putCloudSyncState(state)
       }
+      const nb = get().notebooks.find((n) => n.id === id)
       const notebooks = get().notebooks.filter((n) => n.id !== id)
       const selectedIds = get().selectedIds.filter((sid) => sid !== id)
       set({ notebooks, selectedIds })
       if (get().selectedNotebookId === id) {
         set({ selectedNotebookId: null, currentPageIndex: 0 })
+      }
+      if (nb) {
+        const item: TrashItem = {
+          id,
+          kind: 'notebook',
+          name: nb.name,
+          parentId: nb.folderId,
+          data: cloudKeepsCopy ? null : { ...nb },
+          deletedAt: Date.now(),
+          cloudKeepsCopy,
+        }
+        await db.putTrashItem(item)
+        set({ trash: sortTrash([item, ...get().trash]) })
       }
       await db.deleteNotebook(id)
       if (configured && scope === 'remote') {
@@ -1627,11 +1736,116 @@ export const useAppStore = create<AppState>((set, get) => {
       return notebook
     },
 
+    async restoreFromTrash(id) {
+      const item = get().trash.find((x) => x.id === id)
+      if (!item || !item.data) return
+      if (item.kind === 'folder') {
+        const folder = item.data as Folder
+        if (!get().folders.some((f) => f.id === id)) {
+          const folders = sortFoldersByOrder([...get().folders, { ...folder }])
+          set({ folders, dataVersion: get().dataVersion + 1 })
+          await db.putFolder(folder)
+        }
+      } else {
+        const nb = item.data as Notebook
+        if (!get().notebooks.some((n) => n.id === id)) {
+          const norm = normalizeRestoredNotebook(nb)
+          const notebooks = sortNotebooksByOrder([...get().notebooks, norm])
+          set({ notebooks, dataVersion: get().dataVersion + 1 })
+          await db.putNotebook(norm)
+        }
+      }
+      await removeTrashEntry(id)
+      const cloud = get().settings.cloud
+      if (cloud.webdavUrl) {
+        const state = await db.getCloudSyncState()
+        // Deleted "local + nuvem": clear the tombstone and the baseline entry so
+        // the next sync re-uploads it (buildPlan remote.deleted + no tombstone).
+        // For folders, `foldersHash` is intentionally NOT touched: if the delete
+        // already synced, the baseline no longer includes the folder, so local ≠
+        // baseline → pushFolders re-uploads it; if it didn't, the baseline still
+        // includes it and the cloud copy is intact (no spurious push).
+        delete state.tombstones[id]
+        delete state.localOnlyDeleted[id]
+        delete state.notebooks[id]
+        await db.putCloudSyncState(state)
+        void get().syncNow()
+      }
+    },
+
+    async restoreFromCloud(id) {
+      const cloud = get().settings.cloud
+      if (!cloud.webdavUrl) return
+      const item = get().trash.find((x) => x.id === id)
+      if (!item) return
+      const transport = makeTransport(cloud)
+      let restored = false
+      if (item.kind === 'folder') {
+        const text = await transport.downloadFile(`${cloud.webdavPath}/${FOLDERS_PATH}`)
+        const data = JSON.parse(text) as { folders?: Folder[] }
+        const folder = (data.folders ?? []).find((f) => f.id === id)
+        if (folder) {
+          if (!get().folders.some((f) => f.id === id)) {
+            const folders = sortFoldersByOrder([...get().folders, { ...folder }])
+            set({ folders, dataVersion: get().dataVersion + 1 })
+            await db.putFolder(folder)
+          }
+          restored = true
+        }
+      } else {
+        const text = await transport.downloadFile(
+          `${cloud.webdavPath}/${NOTEBOOKS_DIR}/${id}.json`,
+        )
+        const data = JSON.parse(text) as { notebook?: Notebook }
+        const nb = data.notebook
+        if (nb) {
+          if (!get().notebooks.some((n) => n.id === id)) {
+            const norm = normalizeRestoredNotebook(nb)
+            const notebooks = sortNotebooksByOrder([...get().notebooks, norm])
+            set({ notebooks, dataVersion: get().dataVersion + 1 })
+            await db.putNotebook(norm)
+          }
+          restored = true
+        }
+      }
+      if (!restored) {
+        throw new Error(t('error.trashRestoreCloudFailed', { name: item.name }))
+      }
+      const state = await db.getCloudSyncState()
+      delete state.tombstones[id]
+      delete state.localOnlyDeleted[id]
+      if (item.kind === 'folder') {
+        state.foldersHash = hashFolders(get().folders)
+      } else {
+        const nb = get().notebooks.find((n) => n.id === id)
+        if (nb) state.notebooks[id] = nb.updatedAt
+      }
+      await db.putCloudSyncState(state)
+      await removeTrashEntry(id)
+    },
+
+    async purgeTrashItem(id) {
+      await removeTrashEntry(id)
+    },
+
+    async runTrashPurge() {
+      const cutoff = Date.now() - TOMBSTONE_RETENTION_MS
+      const items = get().trash
+      const expired = items.filter((x) => x.deletedAt < cutoff && !x.cloudKeepsCopy)
+      if (expired.length === 0) return
+      for (const item of expired) {
+        await db.deleteTrashItem(item.id)
+      }
+      set({ trash: items.filter((x) => !expired.some((e) => e.id === x.id)) })
+    },
+
     async replaceAllData(folders, notebooks, settings) {
       const prevFolders = get().folders
       const prevNotebooks = get().notebooks
+      const folderIds = new Set(folders.map((f) => f.id))
       const next = notebooks.map((nb) => ({
         ...nb,
+        folderId: normalizeNotebookFolder(nb, folderIds),
         pages: nb.pages.map((p) => normalizePage(p)),
       }))
       let nextSettings = get().settings

@@ -1,8 +1,9 @@
-import type { Folder, Notebook, AppSettings, CloudSyncState, PageTemplate } from './types'
+import type { Folder, Notebook, AppSettings, CloudSyncState, PageTemplate, TrashItem } from './types'
 import { DEFAULT_SETTINGS, normalizePage } from './types'
+import { hashFolders } from './utils/sync'
 
 const DB_NAME = 'mamaco-notes'
-const DB_VERSION = 5
+const DB_VERSION = 6
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -100,6 +101,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('templates')) {
         db.createObjectStore('templates', { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains('trash')) {
+        db.createObjectStore('trash', { keyPath: 'id' })
       }
       needsOrderMigration = true
       needsLayersMigration = true
@@ -208,7 +212,7 @@ export const db = {
       return {
         id: 'main',
         lastSyncAt: null,
-        foldersHash: '',
+        foldersHash: hashFolders([]),
         foldersUpdatedAt: 0,
         notebooks: {},
         tombstones: {},
@@ -218,7 +222,7 @@ export const db = {
     return {
       id: 'main',
       lastSyncAt: stored.lastSyncAt ?? null,
-      foldersHash: stored.foldersHash ?? '',
+      foldersHash: stored.foldersHash ? stored.foldersHash : hashFolders([]),
       foldersUpdatedAt: stored.foldersUpdatedAt ?? 0,
       notebooks: stored.notebooks ?? {},
       tombstones: stored.tombstones ?? {},
@@ -237,5 +241,15 @@ export const db = {
   },
   async deleteTemplate(id: string): Promise<void> {
     await txAll('templates', 'readwrite', (s) => s.delete(id))
+  },
+  async getTrash(): Promise<TrashItem[]> {
+    const all = await tx('trash', 'readonly', (s) => s.getAll())
+    return all.sort((a, b) => b.deletedAt - a.deletedAt)
+  },
+  async putTrashItem(item: TrashItem): Promise<void> {
+    await txAll('trash', 'readwrite', (s) => s.put(item))
+  },
+  async deleteTrashItem(id: string): Promise<void> {
+    await txAll('trash', 'readwrite', (s) => s.delete(id))
   },
 }

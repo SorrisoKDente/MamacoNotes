@@ -30,7 +30,8 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Add, rename, duplicate, and merge layers.
     -   Adjust opacity and toggle visibility/locking.
     -   Organize content (images, text, strokes) hierarchically.
--   **Cloud Synchronization**: Bidirectional sync via **WebDAV**. Currently validated primarily with **Koofr**; while it supports the standard WebDAV protocol (Nextcloud, ownCloud, etc.), full compatibility with other providers is still being verified.
+-   **Cloud Synchronization**: Bidirectional sync via **WebDAV**. Currently validated primarily with **Koofr**; while it supports the standard WebDAV protocol (Nextcloud, ownCloud, etc.), full compatibility with other providers is still being verified. **Network resilience**: connection failures are retried automatically (3 attempts with backoff) with a friendly message when the server is unreachable — never retries HTTP/auth errors.
+-   **Local Trash**: Deleted folders and notebooks go to a local (non-synced) trash where each item can be restored individually. Items deleted "local + cloud" are restored from the local copy; items deleted "local only" with a cloud configured can be brought back with **"Restore from cloud"**. Retention is 30 days.
 -   **PDF & Image Integration**:
     -   Import PDFs as new notebooks or as page backgrounds.
     -   Insert and transform images (move, resize, rotate).
@@ -51,6 +52,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Session restoration to automatically reopen the last notebook and page.
     -   Manual full backup (JSON) import/export (**passwords excluded for security**).
     -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
+    -   **Sync bug fixes**: deleted items never come back (tombstones are respected when pulling) and a folder delete propagates to its subfolders/notebooks; restoring an item from the trash re-uploads it to the cloud instead of deleting it again.
 
 ## 🛠️ Tech Stack
 

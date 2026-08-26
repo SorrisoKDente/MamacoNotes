@@ -30,7 +30,8 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Adicionar, renomear, duplicar e mesclar camadas.
     -   Ajustar opacidade e alternar visibilidade ou bloqueio.
     -   Organizar conteúdo (imagens, texto, traços) hierarquicamente.
--   **Sincronização em Nuvem**: Sincronização bidirecional via **WebDAV**. Atualmente validado principalmente com o **Koofr**; embora suporte o protocolo WebDAV padrão (Nextcloud, ownCloud, etc.), a compatibilidade total com outros provedores ainda está sendo verificada.
+-   **Sincronização em Nuvem**: Sincronização bidirecional via **WebDAV**. Atualmente validado principalmente com o **Koofr**; embora suporte o protocolo WebDAV padrão (Nextcloud, ownCloud, etc.), a compatibilidade total com outros provedores ainda está sendo verificada. **Resiliência de rede**: falhas de conexão são repetidas automaticamente (3 tentativas com backoff) com mensagem amigável quando o servidor está inacessível — nunca repete erros HTTP/auth.
+-   **Lixeira Local**: Pastas e cadernos excluídos vão para uma lixeira local (não sincronizada) onde cada item pode ser restaurado individualmente. Itens excluídos "local + nuvem" são restaurados da cópia local; itens excluídos "só local" com nuvem configurada podem voltar com **"Restaurar da nuvem"**. A retenção é de 30 dias.
 -   **Integração com PDF e Imagens**:
     -   Importe PDFs como novos cadernos ou como fundo de páginas.
     -   Insira e transforme imagens (mover, redimensionar, rotacionar).
@@ -51,6 +52,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Restauração de sessão para reabrir automaticamente o último caderno e página.
     -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
     -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
+    -   **Correções de sync**: itens excluídos nunca mais voltam (tombstones são respeitados no pull) e excluir uma pasta se propaga para suas subpastas/cadernos; restaurar um item da lixeira o reenvia para a nuvem em vez de excluí-lo de novo.
 
 ## 🛠️ Stack Tecnológica
 

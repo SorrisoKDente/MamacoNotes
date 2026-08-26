@@ -1,5 +1,65 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core'
 
+/**
+ * Detects connection-level failures (as opposed to HTTP errors, which arrive as
+ * Response objects and never reach this check). These are transient by nature,
+ * so the caller may safely retry them. Authentication/4xx/5xx are NEVER
+ * considered connection errors: they are handled as regular HTTP responses.
+ */
+export function isConnectionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+  return (
+    lower.includes('failed to connect') ||
+    lower.includes('connect timed out') ||
+    lower.includes('connection timed out') ||
+    lower.includes('network is unreachable') ||
+    lower.includes('network error') ||
+    lower.includes('network unreachable') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('socketexception') ||
+    lower.includes('socket timeout') ||
+    lower.includes('the request timed out') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout exceeded') ||
+    lower.includes('econnrefused') ||
+    lower.includes('econnreset') ||
+    lower.includes('enetunreach') ||
+    lower.includes('enotfound') ||
+    lower.includes('eai_again') ||
+    lower.includes('unable to resolve host') ||
+    lower.includes('host lookup failed') ||
+    lower.includes('load failed') ||
+    lower.includes('the internet connection appears to be offline')
+  )
+}
+
+/**
+ * Retries `fn` on connection errors only (3 attempts, backoff 500ms -> 1s).
+ * HTTP 4xx/5xx and authentication failures never reach the retry path: they
+ * are returned by fetch as responses (not thrown), so `fn` resolves normally.
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 2,
+  delays = [500, 1000],
+): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (attempt < retries && isConnectionError(err)) {
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt]))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr
+}
+
 export async function customFetch(url: string, init?: RequestInit): Promise<Response> {
   if (Capacitor.isNativePlatform()) {
     let data: any = init?.body
@@ -28,12 +88,14 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
       }
     }
 
-    const res = await CapacitorHttp.request({
-      url,
-      method: init?.method ?? 'GET',
-      headers,
-      data,
-    })
+    const res = await withRetry(() =>
+      CapacitorHttp.request({
+        url,
+        method: init?.method ?? 'GET',
+        headers,
+        data,
+      }),
+    )
 
     return {
       ok: res.status >= 200 && res.status < 300,
@@ -48,7 +110,7 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
     } as Response
   }
 
-  return fetch(url, init)
+  return withRetry(() => fetch(url, init))
 }
 
 const DOWNLOAD_CHUNK = 512 * 1024
@@ -137,12 +199,14 @@ export async function downloadText(
 
     for (;;) {
       const end = offset + DOWNLOAD_CHUNK - 1
-      const res = await CapacitorHttp.request({
-        url,
-        method: 'GET',
-        headers: { ...allHeaders, Range: `bytes=${offset}-${end}` },
-        responseType: 'arraybuffer',
-      })
+      const res = await withRetry(() =>
+        CapacitorHttp.request({
+          url,
+          method: 'GET',
+          headers: { ...allHeaders, Range: `bytes=${offset}-${end}` },
+          responseType: 'arraybuffer',
+        }),
+      )
 
       const isJson = isJsonContentType(res.headers as Record<string, unknown>)
 
@@ -179,7 +243,7 @@ export async function downloadText(
     return { ok: true, status: 206, text }
   }
 
-  const res = await fetch(url, { headers })
+  const res = await withRetry(() => fetch(url, { headers }))
   if (!res.ok) return { ok: false, status: res.status, text: '' }
   return { ok: true, status: res.status, text: await res.text() }
 }

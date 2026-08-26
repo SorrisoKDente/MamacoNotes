@@ -11,6 +11,7 @@ import type {
   ShortcutActionId,
   SyncConflictItem,
   TemplateId,
+  TrashItem,
 } from '../types'
 import { makePage, newId, getActiveLayer, APP_VERSION } from '../types'
 import { DEFAULT_SHORTCUTS } from '../types'
@@ -184,6 +185,119 @@ function ConfirmDeleteModal() {
   )
 }
 
+function TrashModal() {
+  const { t } = useI18n()
+  const close = useUiStore((s) => s.close)
+  const trash = useAppStore((s) => s.trash)
+  const restoreFromTrash = useAppStore((s) => s.restoreFromTrash)
+  const restoreFromCloud = useAppStore((s) => s.restoreFromCloud)
+  const purgeTrashItem = useAppStore((s) => s.purgeTrashItem)
+  const cloudUrl = useAppStore((s) => s.settings.cloud.webdavUrl)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [confirmPurgeId, setConfirmPurgeId] = useState<string | null>(null)
+
+  useEffect(() => {
+    void useAppStore.getState().runTrashPurge()
+  }, [])
+
+  async function doRestore(item: TrashItem) {
+    if (busyId) return
+    setBusyId(item.id)
+    try {
+      if (item.cloudKeepsCopy) await restoreFromCloud(item.id)
+      else await restoreFromTrash(item.id)
+    } catch (e) {
+      logger.error('Trash restore failed', e)
+      alert(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function doPurge(item: TrashItem) {
+    setBusyId(item.id)
+    await purgeTrashItem(item.id)
+    setBusyId(null)
+    setConfirmPurgeId(null)
+  }
+
+  return (
+    <>
+      <h2>{t('modal.trashTitle')}</h2>
+      {trash.length === 0 ? (
+        <p className="modal-hint">{t('modal.trashEmpty')}</p>
+      ) : (
+        <div className="trash-list">
+          {trash.map((item) => (
+            <div key={item.id} className="trash-item">
+              <span className={`trash-item-icon ${item.kind === 'folder' ? 'icon-folder' : 'icon-book'}`} />
+              <span className="trash-item-info">
+                <span className="trash-item-name">{item.name}</span>
+                <span className="trash-item-meta">
+                  {item.kind === 'folder'
+                    ? t('modal.trashKindFolder')
+                    : t('modal.trashKindNote')}
+                  {' · '}
+                  {new Date(item.deletedAt).toLocaleDateString()}
+                </span>
+              </span>
+              {confirmPurgeId === item.id ? (
+                <>
+                  <span className="trash-item-confirm">
+                    {t('modal.trashPurgeConfirm', { name: item.name })}
+                  </span>
+                  <span className="trash-item-actions">
+                    <button
+                      className="btn danger"
+                      disabled={busyId !== null}
+                      onClick={() => void doPurge(item)}
+                    >
+                      {t('modal.ok')}
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={busyId !== null}
+                      onClick={() => setConfirmPurgeId(null)}
+                    >
+                      {t('modal.cancel')}
+                    </button>
+                  </span>
+                </>
+              ) : (
+                <span className="trash-item-actions">
+                  <button
+                    className="btn"
+                    disabled={busyId !== null || (item.cloudKeepsCopy && !cloudUrl)}
+                    title={
+                      item.cloudKeepsCopy ? t('modal.trashRestoreCloudHint') : undefined
+                    }
+                    onClick={() => void doRestore(item)}
+                  >
+                    {item.cloudKeepsCopy
+                      ? t('modal.trashRestoreCloud')
+                      : t('modal.trashRestore')}
+                  </button>
+                  <button
+                    className="btn danger"
+                    title={t('modal.trashPurgeTitle')}
+                    onClick={() => setConfirmPurgeId(item.id)}
+                  >
+                    {t('modal.trashPurgeTitle')}
+                  </button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="modal-hint trash-retention-note">{t('modal.trashPurgeNote')}</p>
+      <div className="modal-actions">
+        <button className="btn" onClick={close}>{t('modal.close')}</button>
+      </div>
+    </>
+  )
+}
+
 function ImageSizeChoiceModal() {
   const { t } = useI18n()
   const close = useUiStore((s) => s.close)
@@ -263,6 +377,7 @@ export function ModalsHost() {
         {openModal === 'prompt' && <PromptModal />}
         {openModal === 'confirmDelete' && <ConfirmDeleteModal />}
         {openModal === 'update' && <UpdateModal />}
+        {openModal === 'trash' && <TrashModal />}
       </ModalShell>
     </div>
   )

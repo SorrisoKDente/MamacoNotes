@@ -677,6 +677,9 @@ export function Sidebar() {
         <button className="icon-btn" title={t('sidebar.newNote')} onClick={() => open('newNotebook')}>
           <IconNotePlus />
         </button>
+        <button className="icon-btn" title={t('sidebar.trash')} onClick={() => open('trash')}>
+          <IconTrash />
+        </button>
       </div>
 
       {selectedIds.length > 0 && (
@@ -779,6 +782,17 @@ function IconPdfNote() {
       <path d="M4 3h11l4 4v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
       <path d="M15 3v4h4" />
       <path d="M8 12h8M8 15h5M8 9h2" />
+    </svg>
+  )
+}
+
+function IconTrash() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   )
 }
