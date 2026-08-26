@@ -25,7 +25,6 @@ const menuMessages = {
     'menu.reload': 'Recarregar',
     'menu.toggleFullscreen': 'Alternar tela cheia',
     'menu.toggleDevTools': 'Ferramentas de desenvolvedor',
-    'electron.pickDirectoryTitle': 'Selecionar diretório de anotações',
     'electron.backupFilter': 'Backup Mamaco Notes',
     'electron.jsonFilter': 'JSON',
   },
@@ -43,7 +42,6 @@ const menuMessages = {
     'menu.reload': 'Reload',
     'menu.toggleFullscreen': 'Toggle Full Screen',
     'menu.toggleDevTools': 'Developer Tools',
-    'electron.pickDirectoryTitle': 'Select notes directory',
     'electron.backupFilter': 'Mamaco Notes Backup',
     'electron.jsonFilter': 'JSON',
   },
@@ -126,35 +124,6 @@ app.whenReady().then(() => {
     if (lang && menuMessages[lang]) {
       appLang = lang
       Menu.setApplicationMenu(buildMenu())
-    }
-  })
-
-  ipcMain.handle('pick-directory', async () => {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-    const result = await dialog.showOpenDialog(win, {
-      title: m('electron.pickDirectoryTitle'),
-      properties: ['openDirectory', 'createDirectory'],
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]
-  })
-
-  ipcMain.handle('write-file', async (_e, dir, filename, content) => {
-    try {
-      await fs.promises.mkdir(dir, { recursive: true })
-      await fs.promises.writeFile(path.join(dir, filename), content, 'utf-8')
-      return true
-    } catch (err) {
-      console.error('Falha ao gravar arquivo local:', err)
-      return false
-    }
-  })
-
-  ipcMain.handle('read-file', async (_e, dir, filename) => {
-    try {
-      return await fs.promises.readFile(path.join(dir, filename), 'utf-8')
-    } catch {
-      return null
     }
   })
 

@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { Directory } from '@capacitor/filesystem'
 import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
-import { writeFileChunked, pickBackupFile, fileExistsInDirectory } from './chunkedIo'
+import { pickBackupFile } from './chunkedIo'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -12,27 +12,11 @@ function pad2(n: number): string {
 
 /**
  * Date-stamped backup name so a manual export never overwrites an existing
- * backup in the target folder.
+ * backup in the Documents folder.
  */
 function buildBackupFilename(date = new Date()): string {
   const stamp = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
   return `mamaco-notes-backup-${stamp}.json`
-}
-
-/**
- * Picks a unique backup name inside `uri`. If a file with the same timestamp
- * already exists (same-second export), appends a counter.
- */
-async function uniqueMobileBackupFilename(uri: string | null): Promise<string> {
-  const base = buildBackupFilename()
-  if (!uri) return base
-  let name = base
-  let counter = 1
-  while (await fileExistsInDirectory(uri, name)) {
-    name = `${base.replace(/\.json$/, '')}-${counter}.json`
-    counter += 1
-  }
-  return name
 }
 
 export interface BackupPayload {
@@ -56,8 +40,6 @@ export function sanitizeSettingsForBackup(settings: AppSettings | null | undefin
   if (!settings) return null
   return {
     ...settings,
-    saveDirectoryHandle: null,
-    saveDirectory: '',
     cloud: {
       ...settings.cloud,
       webdavPassword: '', // Never export the cloud password for security reasons
@@ -94,27 +76,19 @@ export async function exportBackup(
     }
   }
 
-  // Mobile (Android / iOS): write to the SAF directory chosen by the user, or
-  // fall back to the app Documents folder. Both paths stream the content in
-  // chunks instead of sending the whole JSON through the Capacitor bridge —
-  // Filesystem.writeFile or a custom plugin with a large content string crashes
-  // with OutOfMemoryError on Android for big backups (images/PDFs stored as
-  // data URLs).
+  // Mobile (Android / iOS): write to the app Documents folder. The content is
+  // streamed in chunks via capacitor-blob-writer instead of sending the whole
+  // JSON through the Capacitor bridge — Filesystem.writeFile crashes with
+  // OutOfMemoryError on Android for big backups (images/PDFs stored as data URLs).
   if (Capacitor.isNativePlatform()) {
     try {
-      const dir = settings?.saveDirectory
-      const contentUri = typeof dir === 'string' && dir.startsWith('content://') ? dir : null
-      const filename = await uniqueMobileBackupFilename(contentUri)
-      if (contentUri) {
-        await writeFileChunked(contentUri, filename, payload)
-      } else {
-        await write_blob({
-          path: filename,
-          directory: Directory.Documents,
-          blob: new Blob([payload], { type: 'application/json' }),
-          recursive: true,
-        })
-      }
+      const filename = buildBackupFilename()
+      await write_blob({
+        path: filename,
+        directory: Directory.Documents,
+        blob: new Blob([payload], { type: 'application/json' }),
+        recursive: true,
+      })
       return true
     } catch (err) {
       console.error('Failed to export native backup:', err)

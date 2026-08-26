@@ -39,10 +39,11 @@ source code is a single **React + TypeScript + Vite** frontend that runs in **4 
   in the project and which must be maintained:
   - Environment detection: use `window.inkfolioDesktop` (Electron) and `window.Capacitor`
     (Android); the rest is treated as Web/PWA.
-  - File system access: on desktop use the bridge `window.inkfolioDesktop` (`pick-directory`,
-    `write-file`, `read-file`, `save-file`, `open-file` via preload); in the browser use
-    the File System Access API (with fallback to download). See `src/utils/localSave.ts`,
-    `src/utils/backup.ts`.
+  - File system access: on desktop use the bridge `window.inkfolioDesktop`
+    (`save-file`, `open-file` via preload); in the browser the manual backup is a
+    download/file input; on Android the backup is written to the app Documents folder
+    via `capacitor-blob-writer` and import uses the system document picker (chunked
+    read). See `src/utils/backup.ts`.
   - PWA service worker: register **only** outside of Electron and Capacitor.
   - System fonts: use Local Font Access with fallback to a built-in list (`src/utils/fonts.ts`).
 - **Language**: all UI (button texts, modals, menus, messages) is in **Portuguese (pt-BR)**
@@ -64,8 +65,8 @@ source code is a single **React + TypeScript + Vite** frontend that runs in **4 
   modals, `src/textStore.ts` for text editing). Do not invent new stores for what
   already exists; if you need state/new state, **update the contract** (interface at the
   top of the file) and the documentation.
-- **Persistence**: all data writing goes through store → `src/db.ts` (IndexedDB) →
-  `scheduleLocalBackup()`. Do not write to IndexedDB outside these paths.
+- **Persistence**: all data writing goes through store → `src/db.ts` (IndexedDB). Do not
+  write to IndexedDB outside these paths.
 - **UI ↔ Canvas communication**: use `window.dispatchEvent(new CustomEvent('ink:...'))`
   instead of deep props. When adding an event, register it in **Section 7** of
   `docs/PROJECT_STRUCTURE.md`.

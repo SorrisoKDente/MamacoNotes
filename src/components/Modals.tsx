@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Capacitor } from '@capacitor/core'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
 import { logger } from '../utils/logger'
@@ -21,7 +20,6 @@ import { renderThumbnail } from '../renderer/thumbnail'
 import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { testWebdavConnection, ensureRemoteStructure } from '../utils/webdav'
 import { shortcutLabel, normalizeKey, findShortcutAction } from '../utils/shortcuts'
-import { pickSaveDirectory } from '../utils/localSave'
 import { exportBackup, importBackup } from '../utils/backup'
 import { useI18n } from '../i18n'
 import { SUPPORTED_LANGUAGES } from '../i18n/languages'
@@ -1013,7 +1011,6 @@ function SettingsModal() {
   const [tab, setTab] = useState<'geral' | 'atalhos' | 'nuvem' | 'aparencia' | 'logs'>('geral')
   const [capturing, setCapturing] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
-  const [dirBusy, setDirBusy] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
@@ -1090,38 +1087,13 @@ function SettingsModal() {
     setBackupBusy(true)
     setBackupMsg(null)
     try {
-      // On mobile, make sure the user has chosen a persistent SAF folder before
-      // exporting, so the backup goes to a place they can actually access.
-      if (
-        Capacitor.isNativePlatform() &&
-        !(settings.saveDirectory ?? '').startsWith('content://')
-      ) {
-        const result = await pickSaveDirectory(settings)
-        if (!result) {
-          setBackupMsg(t('modal.backupExportFailed'))
-          return
-        }
-        await setSettings({
-          saveDirectory: result.path,
-          saveDirectoryHandle: result.handle ?? null,
-        })
-      }
       const ok = await exportBackup(
         folders,
         notebooks,
         useAppStore.getState().settings,
       )
       if (ok) {
-        const dir = useAppStore.getState().settings.saveDirectory
-        if (
-          Capacitor.isNativePlatform() &&
-          typeof dir === 'string' &&
-          dir.startsWith('content://')
-        ) {
-          setBackupMsg(t('modal.backupExportedTo', { dir: formatDisplayPath(dir) }))
-        } else {
-          setBackupMsg(t('modal.backupExported'))
-        }
+        setBackupMsg(t('modal.backupExported'))
       } else {
         setBackupMsg(t('modal.backupExportFailed'))
       }
@@ -1177,51 +1149,6 @@ function SettingsModal() {
                 <option key={lang.code} value={lang.code}>{lang.label}</option>
               ))}
             </select>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.autoSave}
-                  onChange={(e) => setSettings({ autoSave: e.target.checked })}
-                />
-                {t('modal.autoSave')}
-              </label>
-              <span className="modal-hint">{t('modal.autoSaveHint')}</span>
-            </div>
-          </div>
-          <div className="settings-section">
-            <div className="settings-section-title">{t('modal.sectionDirectory')}</div>
-            <label className="form-label">{t('modal.notesDirectory')}</label>
-            <div className="directory-picker-row">
-              <div className="directory-path-display">
-                {settings.saveDirectory ? formatDisplayPath(settings.saveDirectory) : t('modal.noDirectorySelected')}
-              </div>
-              <button
-                className="btn"
-                disabled={dirBusy}
-                onClick={async () => {
-                  setDirBusy(true)
-                  try {
-                    const result = await pickSaveDirectory(settings)
-                    if (result) {
-                      await setSettings({
-                        saveDirectory: result.path,
-                        saveDirectoryHandle: result.handle ?? null,
-                      })
-                    }
-                  } finally {
-                    setDirBusy(false)
-                  }
-                }}
-              >
-                {dirBusy ? t('modal.selecting') : t('modal.select')}
-              </button>
-            </div>
-            <div className="modal-hint">
-              {settings.saveDirectory
-                ? t('modal.saveDirHint', { dir: formatDisplayPath(settings.saveDirectory) })
-                : t('modal.saveDirHintEmpty')}
-            </div>
           </div>
           <div className="settings-section">
             <div className="settings-section-title">{t('modal.sectionBackup')}</div>
@@ -1239,28 +1166,6 @@ function SettingsModal() {
                 </button>
               </div>
               {backupMsg && <div className="modal-result">{backupMsg}</div>}
-            </div>
-          </div>
-          <div className="settings-section">
-            <div className="settings-section-title">{t('modal.sectionRestore')}</div>
-            <div className="settings-reset">
-              <div className="panel-label">{t('modal.restoreShortcutsAndDir')}</div>
-              <p className="modal-hint">
-                {t('modal.restoreDefaultsHint')}
-              </p>
-              <button
-                className="btn"
-                onClick={() => {
-                  if (confirm(t('modal.restoreConfirm'))) {
-                    void setSettings({
-                      saveDirectory: '',
-                      saveDirectoryHandle: null,
-                    })
-                  }
-                }}
-              >
-                {t('modal.restoreShortcutsAndDir')}
-              </button>
             </div>
           </div>
           <div className="settings-section">
@@ -1859,25 +1764,6 @@ function MoveModal() {
 
 function safeName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '_')
-}
-
-function formatDisplayPath(path: string): string {
-  if (!path) return ''
-  if (path.startsWith('content://')) {
-    try {
-      const decoded = decodeURIComponent(path)
-      // Extract the human-readable part from SAF URI if possible
-      const parts = decoded.split('/')
-      const last = parts[parts.length - 1]
-      if (last.includes(':')) {
-        return last.split(':').pop() || last
-      }
-      return last
-    } catch {
-      return path
-    }
-  }
-  return path
 }
 
 function formatShortcut(s: string): string {

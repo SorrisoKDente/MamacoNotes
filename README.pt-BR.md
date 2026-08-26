@@ -47,11 +47,10 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Suporte a modo Escuro/Claro e visibilidade customizável de barras (com botões flutuantes para restauração rápida).
     -   Opção para ocultar o cursor da ferramenta para uma experiência de desenho mais limpa.
 -   **Segurança e Persistência**:
-    -   Dados armazenados localmente usando **IndexedDB**.
+    -   Dados armazenados localmente usando **IndexedDB** (salvamento automático).
     -   Restauração de sessão para reabrir automaticamente o último caderno e página.
-    -   Backups automáticos em disco (Electron), diretório do navegador ou **pasta no Android** (Documentos do app ou uma pasta SAF selecionada pelo usuário via o plugin local `pick-directory`) (**senhas excluídas por segurança**).
-    -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**), gravando em uma pasta SAF escolhida pelo usuário no Android.
-    -   **À prova de OOM no Android**: backups grandes e sincronização de cadernos ocorrem em chunks (streams SAF `content://`, downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
+    -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
+    -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
 
 ## 🛠️ Stack Tecnológica
 

@@ -43,9 +43,10 @@ código-fonte é um único frontend **React + TypeScript + Vite**, que roda em *
   - Detecção de ambiente: use `window.inkfolioDesktop` (Electron) e `window.Capacitor`
     (Android); o restante é tratado como Web/PWA.
   - Acesso ao sistema de arquivos: no desktop use a bridge `window.inkfolioDesktop`
-    (`pick-directory`, `write-file`, `read-file`, `save-file`, `open-file` via preload);
-    no navegador use a File System Access API (com fallback para download). Veja
-    `src/utils/localSave.ts`, `src/utils/backup.ts`.
+    (`save-file`, `open-file` via preload); no navegador o backup manual é download/input
+    de arquivo; no Android o backup é gravado na pasta Documentos do app via
+    `capacitor-blob-writer` e a importação usa o seletor de documentos do sistema
+    (leitura em chunks). Veja `src/utils/backup.ts`.
   - Service worker do PWA: registre **somente** fora do Electron e do Capacitor.
   - Fontes do sistema: use Local Font Access com fallback para uma lista embutida
     (`src/utils/fonts.ts`).
@@ -68,8 +69,8 @@ código-fonte é um único frontend **React + TypeScript + Vite**, que roda em *
   para modais, `src/textStore.ts` para edição de texto). Não invente stores novas para o
   que já existe; se precisar de estado/estado novo, **atualize o contrato** (interface no
   topo do arquivo) e a documentação.
-- **Persistência**: toda escrita de dados passa pela store → `src/db.ts` (IndexedDB) →
-  `scheduleLocalBackup()`. Não grave no IndexedDB fora desses caminhos.
+- **Persistência**: toda escrita de dados passa pela store → `src/db.ts` (IndexedDB). Não
+  grave no IndexedDB fora desses caminhos.
 - **Comunicação UI ↔ canvas**: use `window.dispatchEvent(new CustomEvent('ink:...'))` e
   não props profundas. Ao adicionar evento, registre-o na **seção 7** de
   `docs/PROJECT_STRUCTURE.md`.

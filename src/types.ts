@@ -139,7 +139,6 @@ export interface AppSettings {
   eraserMode: EraserMode
   eraserEraseWholeStroke: boolean
   freeRotate: boolean
-  autoSave: boolean
   hideTopBar: boolean
   hideToolbar: boolean
   hideSidebar: boolean
@@ -148,8 +147,6 @@ export interface AppSettings {
   hideToolCursor: boolean
   sidebarWidth: number
   pageViewMode: PageViewMode
-  saveDirectory: string
-  saveDirectoryHandle: unknown
   lastTextFontFamily: string
   lastTextFontSize: number
   lastTextColor: string
@@ -314,7 +311,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   eraserMode: 'both',
   eraserEraseWholeStroke: false,
   freeRotate: false,
-  autoSave: true,
   hideTopBar: false,
   hideToolbar: false,
   hideSidebar: false,
@@ -323,8 +319,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hideToolCursor: false,
   sidebarWidth: 260,
   pageViewMode: 'vertical',
-  saveDirectory: '',
-  saveDirectoryHandle: null,
   lastTextFontFamily: 'Segoe UI, system-ui, sans-serif',
   lastTextFontSize: 24,
   lastTextColor: '#1c1c1c',

@@ -9,9 +9,6 @@ declare module 'pdfjs-dist/build/pdf.worker.min.mjs?url' {
 interface InkfolioDesktopApi {
   isDesktop: boolean
   platform: string
-  pickDirectory: () => Promise<string | null>
-  writeFile: (dir: string, filename: string, content: string) => Promise<boolean>
-  readFile: (dir: string, filename: string) => Promise<string | null>
   saveFile: (defaultName: string, content: string) => Promise<boolean>
   openFile: () => Promise<string | null>
   setLanguage: (lang: string) => void

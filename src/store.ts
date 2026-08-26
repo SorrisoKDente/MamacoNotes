@@ -31,7 +31,6 @@ import {
 } from './types'
 import { db } from './db'
 import { isMobileNow } from './hooks/useIsMobile'
-import { scheduleLocalBackup } from './utils/localSave'
 import { makeTransport } from './utils/webdav'
 import { applyConflictChoices, hashFolders, runSync } from './utils/sync'
 import { useUiStore } from './uiStore'
@@ -443,7 +442,6 @@ export const useAppStore = create<AppState>((set, get) => {
     } else {
       set({ folders, notebooks, dataVersion: get().dataVersion + 1 })
     }
-    scheduleLocalBackup(get().notebooks, get().folders, get().settings)
   }
 
   async function updateNotebookStorage(notebook: Notebook) {
@@ -451,13 +449,11 @@ export const useAppStore = create<AppState>((set, get) => {
     const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? notebook : n))
     set({ notebooks, dataVersion: get().dataVersion + 1 })
     await db.putNotebook(notebook)
-    scheduleLocalBackup(notebooks, get().folders, get().settings)
   }
 
   async function saveSettings(next: AppSettings) {
     set({ settings: next })
     await db.putSettings(next)
-    scheduleLocalBackup(get().notebooks, get().folders, next)
   }
 
   return {
@@ -781,7 +777,6 @@ export const useAppStore = create<AppState>((set, get) => {
       for (const nb of childNotebooks) {
         await db.deleteNotebook(nb.id)
       }
-      scheduleLocalBackup(get().notebooks, get().folders, get().settings)
       if (configured && scope === 'remote') {
         void get().syncNow()
       }
@@ -831,7 +826,6 @@ export const useAppStore = create<AppState>((set, get) => {
       )
       set({ folders, dataVersion: get().dataVersion + 1 })
       for (const c of changed.values()) await db.putFolder(c)
-      scheduleLocalBackup(get().notebooks, folders, get().settings)
     },
 
     async moveFolder(id, newParentId) {
@@ -1006,7 +1000,6 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ selectedNotebookId: null, currentPageIndex: 0 })
       }
       await db.deleteNotebook(id)
-      scheduleLocalBackup(get().notebooks, get().folders, get().settings)
       if (configured && scope === 'remote') {
         void get().syncNow()
       }
@@ -1044,7 +1037,6 @@ export const useAppStore = create<AppState>((set, get) => {
       )
       set({ notebooks, dataVersion: get().dataVersion + 1 })
       for (const c of changed.values()) await db.putNotebook(c)
-      scheduleLocalBackup(notebooks, get().folders, get().settings)
     },
 
     async moveNotebook(id, folderId) {
@@ -1632,7 +1624,6 @@ export const useAppStore = create<AppState>((set, get) => {
       const notebooks = sortNotebooksByOrder([notebook, ...get().notebooks])
       set({ notebooks, selectedNotebookId: notebook.id, currentPageIndex: 0 })
       await db.putNotebook(notebook)
-      scheduleLocalBackup(notebooks, get().folders, get().settings)
       return notebook
     },
 
@@ -1650,8 +1641,6 @@ export const useAppStore = create<AppState>((set, get) => {
           ...settings,
           cloud: { ...DEFAULT_SETTINGS.cloud, ...(settings.cloud ?? {}) },
           shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...(settings.shortcuts ?? {}) },
-          saveDirectoryHandle: null,
-          saveDirectory: '',
         }
         nextSettings = safeSettings
         setLanguage(safeSettings.language === 'en' ? 'en' : 'pt-BR')
@@ -1677,7 +1666,6 @@ export const useAppStore = create<AppState>((set, get) => {
       if (settings) {
         await db.putSettings(nextSettings)
       }
-      scheduleLocalBackup(outNotebooks, outFolders, nextSettings)
     },
   }
 })

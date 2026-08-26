@@ -47,11 +47,10 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
     -   Option to hide the tool cursor for a cleaner drawing experience.
 -   **Security & Persistence**:
-    -   Data stored locally using **IndexedDB**.
+    -   Data stored locally using **IndexedDB** (saved automatically).
     -   Session restoration to automatically reopen the last notebook and page.
-    -   Automatic local backups to disk (Electron), browser directory, or **Android folder** (app Documents or a user-selected SAF folder via the local `pick-directory` plugin) (**passwords excluded for security**).
-    -   Manual full backup (JSON) import/export (**passwords excluded for security**), writing to a user-selected SAF folder on Android.
-    -   **OOM-safe on Android**: large backups and notebook sync happen in chunks (SAF `content://` streams, HTTP Range downloads, and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
+    -   Manual full backup (JSON) import/export (**passwords excluded for security**).
+    -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
 
 ## 🛠️ Tech Stack
 
