@@ -43,7 +43,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
 -   **UI & UX Inteligente**:
     -   Suporte a multi-toque para tablets e celulares (zoom de pinça, pan).
     -   Gestos customizados: toque duplo com 2 dedos para **Desfazer**, toque duplo com 3 dedos para **Refazer**, 2 dedos para mover/zoom e giro com 3 dedos para **Girar a página**.
-    -   Sistema de Atualização: verificação automática ao iniciar em todas as plataformas, com prévia das notas da versão. Atualizações no desktop instalam silenciosamente e reabrem o aplicativo automaticamente, sem diálogos que travem a instalação.
+    -   Sistema de Atualização: verificação automática ao iniciar em todas as plataformas, com prévia das notas da versão. Atualizações no desktop instalam silenciosamente e reabrem o aplicativo automaticamente, sem diálogos que travem a instalação; o instalador do Windows também migra instalações cujo desinstalador legado retorna o erro 2.
     -   Localização completa em **Português (pt-BR)** e **Inglês**.
     -   Suporte a modo Escuro/Claro e visibilidade customizável de barras (com botões flutuantes para restauração rápida).
     -   Opção para ocultar o cursor da ferramenta para uma experiência de desenho mais limpa.
@@ -51,7 +51,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Dados armazenados localmente usando **IndexedDB** (salvamento automático).
     -   Restauração de sessão para reabrir automaticamente o último caderno e página, e cada caderno lembra a última página aberta (voltando a ela ao alternar de caderno ou reabrir o app).
     -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
-    -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
+    -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada; os chunks PUT preservam o tamanho em bytes UTF-8 de notas com acentos ou texto não latino.
     -   **Correções de sync**: itens excluídos nunca mais voltam (tombstones são respeitados no pull) e excluir uma pasta se propaga para suas subpastas/cadernos; restaurar um item da lixeira o reenvia para a nuvem em vez de excluí-lo de novo.
 
 ## 🛠️ Stack Tecnológica

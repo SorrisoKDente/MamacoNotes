@@ -43,7 +43,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
     -   Custom gestures: two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, two fingers to move/zoom, and three-finger twist for **Page rotation**.
-    -   Software Update system: automatic check on startup for all platforms with release notes preview. Desktop updates install silently and restart the app automatically, without blocking dialogs.
+    -   Software Update system: automatic check on startup for all platforms with release notes preview. Desktop updates install silently and restart the app automatically, without blocking dialogs; the Windows installer also migrates installations whose legacy uninstaller returns error 2.
     -   Full localization in **English** and **Portuguese (pt-BR)**.
     -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
     -   Option to hide the tool cursor for a cleaner drawing experience.
@@ -51,7 +51,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Data stored locally using **IndexedDB** (saved automatically).
     -   Session restoration to automatically reopen the last notebook and page, and each notebook remembers its last viewed page (returning to it when you switch notebooks or reopen the app).
     -   Manual full backup (JSON) import/export (**passwords excluded for security**).
-    -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
+    -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call; PUT chunks preserve UTF-8 byte lengths for notes with accented or non-Latin text.
     -   **Sync bug fixes**: deleted items never come back (tombstones are respected when pulling) and a folder delete propagates to its subfolders/notebooks; restoring an item from the trash re-uploads it to the cloud instead of deleting it again.
 
 ## 🛠️ Tech Stack

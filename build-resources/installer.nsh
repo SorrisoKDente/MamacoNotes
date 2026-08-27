@@ -94,6 +94,28 @@
 
 !endif
 
+; During an update, skip the legacy uninstaller. Older versions can abort with
+; error 2 because their app-running check falsely detects a process.
+!macro customInit
+  ${if} ${isUpdated}
+    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString"
+  ${endIf}
+!macroend
+
+; Do not block an update if a legacy uninstaller still returns an error.
+!macro customUnInstallCheck
+  ${if} $R0 != 0
+    DetailPrint "Legacy uninstaller returned $R0; continuing update."
+  ${endIf}
+!macroend
+
+!macro customUnInstallCheckCurrentUser
+  ${if} $R0 != 0
+    DetailPrint "Legacy per-user uninstaller returned $R0; continuing update."
+  ${endIf}
+!macroend
+
 ; Verifica se não estamos compilando o desinstalador
 !ifndef BUILD_UNINSTALLER
   !define MUI_FINISHPAGE_SHOWREADME

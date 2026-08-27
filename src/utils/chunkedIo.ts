@@ -57,18 +57,20 @@ export async function uploadFileStreaming(
   content: string,
 ): Promise<number> {
   const sessionId = `up_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  const totalLength = new TextEncoder().encode(content).length
+  const encoder = new TextEncoder()
+  const totalLength = encoder.encode(content).length
   await PickDirectory.uploadStart({ sessionId, url, headers, totalLength })
   let offset = 0
   while (offset < content.length) {
-    let end = Math.min(offset + CHUNK_SIZE, content.length)
-    // Never split a surrogate pair across chunks.
-    if (end < content.length) {
-      const high = content.charCodeAt(end - 1)
-      const low = content.charCodeAt(end)
-      if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
-        end -= 1
-      }
+    let end = offset
+    let chunkBytes = 0
+    while (end < content.length) {
+      const codePoint = content.codePointAt(end)
+      const char = String.fromCodePoint(codePoint ?? 0)
+      const charBytes = encoder.encode(char).length
+      if (end > offset && chunkBytes + charBytes > CHUNK_SIZE) break
+      chunkBytes += charBytes
+      end += char.length
     }
     await PickDirectory.uploadChunk({
       sessionId,

@@ -196,9 +196,13 @@ export function Editor() {
 
   function schedulePersist(nbArg?: Notebook) {
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
-    // Capture the notebook at scheduling time so a notebook switch within the
-    // debounce window cannot make the write target the wrong notebook.
-    const nb = nbArg ?? notebookRef.current
+    const source = nbArg ?? notebookRef.current
+    const nb = source
+      ? {
+          ...source,
+          pages: source.pages.map((page) => clonePage(page)),
+        }
+      : undefined
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
       if (nb) void persistNotebook(nb)
