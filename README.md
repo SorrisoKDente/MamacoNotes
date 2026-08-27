@@ -49,7 +49,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Option to hide the tool cursor for a cleaner drawing experience.
 -   **Security & Persistence**:
     -   Data stored locally using **IndexedDB** (saved automatically).
-    -   Session restoration to automatically reopen the last notebook and page.
+    -   Session restoration to automatically reopen the last notebook and page, and each notebook remembers its last viewed page (returning to it when you switch notebooks or reopen the app).
     -   Manual full backup (JSON) import/export (**passwords excluded for security**).
     -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads), so big payloads never cross the Capacitor bridge in one call.
     -   **Sync bug fixes**: deleted items never come back (tombstones are respected when pulling) and a folder delete propagates to its subfolders/notebooks; restoring an item from the trash re-uploads it to the cloud instead of deleting it again.

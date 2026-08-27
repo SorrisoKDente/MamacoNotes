@@ -283,7 +283,11 @@ All data writes in the app go through `store.ts`, which calls `db.*`.
     (key `mamaco-notes.last-session`) the `{ notebookId, pageId }` pair whenever the
     current notebook or page changes; `init()` uses this record to reopen the last
     opened note/page (falling back to nothing selected if the record doesn't exist or
-    the notebook was deleted).
+    the notebook was deleted). The same `subscribe` also keeps a **per-notebook last
+    page map** (key `mamaco-notes.last-page`, shape `{ [notebookId]: pageId }`), and
+    `selectNotebook(id)` reads it to reopen a notebook on its last page — instead of
+    always resetting to the first page — when switching notebooks in the sidebar (and
+    validating that the remembered page still exists, otherwise falling back to page 0).
 - **`useUiStore`** (`src/uiStore.ts`) — which modal is open + modal data.
 - **`useTextStore`** (`src/textStore.ts`) — text draft, draft position/rotation, selected
   text, editing mode.
@@ -343,6 +347,9 @@ page snapshot stacks (max 60). Folders and notebooks are always sorted by `order
 recalculate the `order` of siblings within the same level (`parentId`/`folderId`), and
 `moveFolder`/`moveNotebook` delegate to `reorder*` moving to the end of the destination.
 Old data without `order` (sync/backup) is normalized by `fillFolderOrder`/`fillNotebookOrder`.
+`selectNotebook(id)` reopens the notebook on the last page remembered for it (see §5.3
+session restoration, `mamaco-notes.last-page`), falling back to page 0 if the remembered
+page no longer exists; `selectFolder(id)` and `selectNotebook(null)` reset to page 0.
 
 **Layer Guarantees**: every layer action resolves the selected notebook + current page,
 calls `pushUndo()`, mutates `page.layers`/`page.activeLayerId`, updates `page.updatedAt`,

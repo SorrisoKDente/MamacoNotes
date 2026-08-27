@@ -49,7 +49,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Opção para ocultar o cursor da ferramenta para uma experiência de desenho mais limpa.
 -   **Segurança e Persistência**:
     -   Dados armazenados localmente usando **IndexedDB** (salvamento automático).
-    -   Restauração de sessão para reabrir automaticamente o último caderno e página.
+    -   Restauração de sessão para reabrir automaticamente o último caderno e página, e cada caderno lembra a última página aberta (voltando a ela ao alternar de caderno ou reabrir o app).
     -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
     -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada.
     -   **Correções de sync**: itens excluídos nunca mais voltam (tombstones são respeitados no pull) e excluir uma pasta se propaga para suas subpastas/cadernos; restaurar um item da lixeira o reenvia para a nuvem em vez de excluí-lo de novo.

@@ -259,6 +259,34 @@ function saveLastSession(notebookId: string, pageId: string | null): void {
   }
 }
 
+const LAST_PAGE_KEY = 'mamaco-notes.last-page'
+
+function readLastPageMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LAST_PAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const out: Record<string, string> = {}
+    for (const [id, pageId] of Object.entries(parsed)) {
+      if (typeof pageId === 'string') out[id] = pageId
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveLastPage(notebookId: string, pageId: string | null): void {
+  try {
+    const map = readLastPageMap()
+    if (pageId) map[notebookId] = pageId
+    else delete map[notebookId]
+    localStorage.setItem(LAST_PAGE_KEY, JSON.stringify(map))
+  } catch {
+    /* noop */
+  }
+}
+
 let syncRunning = false
 let syncQueued = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined
@@ -615,8 +643,18 @@ export const useAppStore = create<AppState>((set, get) => {
         selectedIds: [],
         selectedPageIndices: [],
       }),
-    selectNotebook: (id) =>
-      set({ selectedNotebookId: id, currentPageIndex: 0, selectedIds: [], selectedPageIndices: [] }),
+    selectNotebook: (id) => {
+      let currentPageIndex = 0
+      if (id) {
+        const pages = get().notebooks.find((n) => n.id === id)?.pages ?? []
+        const pageId = readLastPageMap()[id]
+        if (pageId) {
+          const idx = pages.findIndex((p) => p.id === pageId)
+          if (idx >= 0) currentPageIndex = idx
+        }
+      }
+      set({ selectedNotebookId: id, currentPageIndex, selectedIds: [], selectedPageIndices: [] })
+    },
     selectPage: (index) => set({ currentPageIndex: index }),
     setTool: (tool) => set({ tool }),
     setRotationOpen: (open) => set({ rotationOpen: open }),
@@ -1910,5 +1948,7 @@ useAppStore.subscribe((state, prev) => {
   }
   if (!state.selectedNotebookId) return
   const pages = state.notebooks.find((n) => n.id === state.selectedNotebookId)?.pages ?? []
-  saveLastSession(state.selectedNotebookId, pages[state.currentPageIndex]?.id ?? null)
+  const pageId = pages[state.currentPageIndex]?.id ?? null
+  saveLastSession(state.selectedNotebookId, pageId)
+  saveLastPage(state.selectedNotebookId, pageId)
 })
