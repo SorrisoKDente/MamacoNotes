@@ -92,7 +92,7 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including interactive NSIS installer with an option to delete app data on uninstall) |
+| `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including an NSIS installer with an option to delete app data on uninstall; auto-updates install **silently** — see `electron/main.cjs` `install-update`) |
 | `SECURITY.md` | Security policy and vulnerability reporting instructions |
 | `vite.config.ts` | React/PWA plugins, `base: './'`, dev server (port 5173, `allowedHosts` for preview) |
 | `tsconfig.json` | TypeScript config (strict) |
@@ -183,7 +183,7 @@ Initialization flow:
 | `plugins/pick-directory/` | **Local Capacitor plugin** (dependency `pick-directory` via `file:plugins/pick-directory`): system document picker (`openFilePicker`/`readUriChunk`, `getUriFileInfo`) and streaming PUT upload (`uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`) — all to avoid the Android `OutOfMemoryError` of sending large content through the bridge. TS types in `index.d.ts`; the Android source lives in `android/`. |
 | `public/` | PWA static icons (favicon, apple-touch-icon, pwa-192/512, maskable) |
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
-| `build-resources/` | Desktop packaging icons (icon.ico, icon.png) |
+| `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, and a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection — which can false-positive on `crashpad_handler.exe` under `$INSTDIR` or other users' processes and get stuck in the "cannot be closed" retry loop) |
 | `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
 | `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
@@ -707,7 +707,7 @@ Flow and files involved:
 | Resize notebook bar | `src/components/Sidebar.tsx` (`.sidebar-resizer` handle on right edge, drag to increase/decrease; width saved in `settings.sidebarWidth` via `setSettings` at end of drag; limit 160–min(520, 50% of window); hidden on touch/`pointer: coarse`) |
 | Page preview (fixed thumbnail size, multiple selection with CTRL/SHIFT and selection bar) | `src/components/PageList.tsx` + `src/renderer/thumbnail.ts` (`.page-thumb-wrap` with `flex-shrink: 0` so it doesn't shrink with many pages) |
 | Modals (all) | `src/components/Modals.tsx` + `src/uiStore.ts`; close with `Esc`/back button (`ink:esc` event → `ModalsHost` calls `close()`; for `prompt`/`confirmDelete`, resolves the resolver with `null`) |
-| Software Updates | `src/utils/updateCheck.ts` (GitHub API check) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); automatically checks on startup (`App.tsx`) and allows manual check in Settings |
+| Software Updates | `src/utils/updateCheck.ts` (GitHub API check) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); automatically checks on startup (`App.tsx`) and allows manual check in Settings; applying an update runs the NSIS installer **silently** (`quitAndInstall(true, true)`) so the interactive "close the app" dialogs never block the update |
 | Translation (i18n, dictionaries, language switching) | `src/i18n/` (`languages.ts`, `ptBR.ts`, `en.ts`, `index.ts`) + `settings.language` |
 | CSS / Styles | `src/styles.css` |
 | Mobile detection | `src/hooks/useIsMobile.ts` |

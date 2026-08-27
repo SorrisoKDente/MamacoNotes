@@ -44,6 +44,24 @@ export function promptName(title: string, defaultValue = ''): Promise<string | n
   })
 }
 
+let genericConfirmResolver: ((value: boolean) => void) | null = null
+
+export function confirmAction(title: string, description?: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    genericConfirmResolver = resolve
+    useUiStore.getState().open('confirm', { title, description })
+  })
+}
+
+let alertResolver: (() => void) | null = null
+
+export function alertAction(title: string, description?: string): Promise<void> {
+  return new Promise((resolve) => {
+    alertResolver = resolve
+    useUiStore.getState().open('alert', { title, description })
+  })
+}
+
 let deleteResolver: ((scope: DeleteScope | null) => void) | null = null
 
 export function confirmDeleteScope(opts: {
@@ -115,12 +133,67 @@ function PromptModal() {
   )
 }
 
+function AlertModal() {
+  const { t } = useI18n()
+  const close = useUiStore((s) => s.close)
+  const modalData = useUiStore((s) => s.modalData)
+  const title = (modalData.title as string) ?? ''
+  const description = (modalData.description as string) ?? ''
+
+  function finish() {
+    if (alertResolver) {
+      alertResolver()
+      alertResolver = null
+    }
+    close()
+  }
+
+  return (
+    <>
+      <h2>{title}</h2>
+      {description && <p className="modal-hint">{description}</p>}
+      <div className="modal-actions">
+        <button className="btn primary" onClick={finish}>{t('modal.ok')}</button>
+      </div>
+    </>
+  )
+}
+
+function GenericConfirmModal() {
+  const { t } = useI18n()
+  const close = useUiStore((s) => s.close)
+  const modalData = useUiStore((s) => s.modalData)
+  const title = (modalData.title as string) ?? t('modal.confirmTitle')
+  const description = (modalData.description as string) ?? ''
+
+  function finish(result: boolean) {
+    if (genericConfirmResolver) {
+      genericConfirmResolver(result)
+      genericConfirmResolver = null
+    }
+    close()
+  }
+
+  return (
+    <>
+      <h2>{title}</h2>
+      {description && <p className="modal-hint">{description}</p>}
+      <div className="modal-actions">
+        <button className="btn primary" onClick={() => finish(true)}>{t('modal.confirm')}</button>
+        <button className="btn" onClick={() => finish(false)}>{t('modal.cancel')}</button>
+      </div>
+    </>
+  )
+}
+
 function ConfirmDeleteModal() {
   const { t } = useI18n()
   const close = useUiStore((s) => s.close)
   const modalData = useUiStore((s) => s.modalData)
   const kind = modalData.kind as 'notebook' | 'folder' | 'multi'
   const name = (modalData.name as string) ?? ''
+  const cloud = useAppStore((s) => s.settings.cloud)
+  const cloudConfigured = !!cloud.webdavUrl
 
   function finish(scope: DeleteScope | null) {
     if (deleteResolver) {
@@ -164,23 +237,27 @@ function ConfirmDeleteModal() {
     <>
       <h2>{title}</h2>
       <p className="modal-hint">{description}</p>
-      <div className="delete-scope-options">
-        <button className="delete-scope-option" onClick={() => finish('local')}>
-          <span className="delete-scope-title">{t('modal.deleteLocalOnly')}</span>
-          <span className="modal-hint">
-            {t('modal.deleteLocalOnlyHint', { item: itemLabel })}
-          </span>
-        </button>
-        <button className="delete-scope-option danger" onClick={() => finish('remote')}>
-          <span className="delete-scope-title">{t('modal.deleteAlsoCloud')}</span>
-          <span className="modal-hint">
-            {t('modal.deleteAlsoCloudHint')}
-          </span>
-        </button>
-      </div>
-      <div className="modal-actions">
-        <button className="btn" onClick={() => finish(null)}>{t('modal.cancel')}</button>
-      </div>
+      {cloudConfigured ? (
+        <div className="delete-scope-options">
+          <button className="delete-scope-option" onClick={() => finish('local')}>
+            <span className="delete-scope-title">{t('modal.deleteLocalOnly')}</span>
+            <span className="modal-hint">
+              {t('modal.deleteLocalOnlyHint', { item: itemLabel })}
+            </span>
+          </button>
+          <button className="delete-scope-option danger" onClick={() => finish('remote')}>
+            <span className="delete-scope-title">{t('modal.deleteAlsoCloud')}</span>
+            <span className="modal-hint">
+              {t('modal.deleteAlsoCloudHint')}
+            </span>
+          </button>
+        </div>
+      ) : (
+        <div className="modal-actions">
+          <button className="btn danger" onClick={() => finish('local')}>{t('tool.delete')}</button>
+          <button className="btn" onClick={() => finish(null)}>{t('modal.cancel')}</button>
+        </div>
+      )}
     </>
   )
 }
@@ -208,7 +285,7 @@ function TrashModal() {
       else await restoreFromTrash(item.id)
     } catch (e) {
       logger.error('Trash restore failed', e)
-      alert(e instanceof Error ? e.message : String(e))
+      void alertAction(t('modal.trashRestoreError', { message: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusyId(null)
     }
@@ -341,6 +418,14 @@ export function ModalsHost() {
         promptResolver(null)
         promptResolver = null
       }
+      if (genericConfirmResolver) {
+        genericConfirmResolver(false)
+        genericConfirmResolver = null
+      }
+      if (alertResolver) {
+        alertResolver()
+        alertResolver = null
+      }
       if (deleteResolver) {
         deleteResolver(null)
         deleteResolver = null
@@ -375,6 +460,8 @@ export function ModalsHost() {
         {openModal === 'backgroundColor' && <BackgroundColorModal />}
         {openModal === 'syncConflict' && <SyncConflictModal />}
         {openModal === 'prompt' && <PromptModal />}
+        {openModal === 'confirm' && <GenericConfirmModal />}
+        {openModal === 'alert' && <AlertModal />}
         {openModal === 'confirmDelete' && <ConfirmDeleteModal />}
         {openModal === 'update' && <UpdateModal />}
         {openModal === 'trash' && <TrashModal />}
@@ -540,9 +627,9 @@ function TemplatePicker({
                 <button
                   className="custom-template-remove"
                   title={t('modal.removeTemplate')}
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation()
-                    if (confirm(t('modal.removeTemplateConfirm', { name: tmpl.name }))) {
+                    if (await confirmAction(t('modal.removeTemplate'), t('modal.removeTemplateConfirm', { name: tmpl.name }))) {
                       void deleteTemplate(tmpl.id)
                       if (value === tmpl.id) onChange('ruled')
                     }
@@ -899,7 +986,7 @@ function ImportPdfModal() {
       setFileName(file.name)
       setSelected(rendered.length === 1 ? 0 : null)
     } catch (err) {
-      setResult(t('modal.pdfImportError', { message: err instanceof Error ? err.message : String(err) }))
+      void alertAction(t('modal.pdfImportError', { message: err instanceof Error ? err.message : String(err) }))
     } finally {
       setBusy(false)
     }
@@ -1226,7 +1313,7 @@ function SettingsModal() {
       setBackupMsg(t('modal.backupImportFailed'))
       return
     }
-    if (!confirm(t('modal.importBackupConfirm'))) {
+    if (!(await confirmAction(t('modal.importBackup'), t('modal.importBackupConfirm')))) {
       return
     }
     await replaceAllData(data.folders, data.notebooks, data.settings)
@@ -1489,8 +1576,8 @@ function SettingsModal() {
               </p>
               <button
                 className="btn"
-                onClick={() => {
-                  if (confirm(t('modal.restoreShortcutsConfirm'))) {
+                onClick={async () => {
+                  if (await confirmAction(t('modal.restoreShortcuts'), t('modal.restoreShortcutsConfirm'))) {
                     void setSettings({
                       shortcuts: { ...DEFAULT_SHORTCUTS },
                     })
@@ -1584,7 +1671,7 @@ function SettingsModal() {
               }
 
               copyToClipboard(text).then(() => {
-                alert(t('modal.logsCopied'))
+                void alertAction(t('modal.logsCopied'))
               }).catch(err => {
                 logger.error('Failed to copy logs', err)
               })

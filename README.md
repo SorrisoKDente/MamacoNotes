@@ -43,7 +43,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
     -   Custom gestures: two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, two fingers to move/zoom, and three-finger twist for **Page rotation**.
-    -   Software Update system: automatic check on startup for all platforms with release notes preview.
+    -   Software Update system: automatic check on startup for all platforms with release notes preview. Desktop updates install silently and restart the app automatically, without blocking dialogs.
     -   Full localization in **English** and **Portuguese (pt-BR)**.
     -   Dark/Light mode support and customizable toolbar/sidebar visibility (with floating buttons for quick restoration).
     -   Option to hide the tool cursor for a cleaner drawing experience.

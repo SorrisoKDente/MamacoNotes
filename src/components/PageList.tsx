@@ -6,6 +6,7 @@ import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import type { PageViewMode } from '../types'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { useI18n } from '../i18n'
+import { confirmAction } from './Modals'
 
 export function PageList() {
   const { t } = useI18n()
@@ -167,7 +168,7 @@ export function PageList() {
   async function handleDeleteSelectedPages() {
     const count = useAppStore.getState().selectedPageIndices.length
     if (count === 0) return
-    if (confirm(t('pageList.deletePagesConfirm', { count }))) {
+    if (await confirmAction(t('pageList.deletePagesTitle', { count }), t('pageList.deletePagesConfirm', { count }))) {
       await deleteSelectedPages()
     }
   }

@@ -1,7 +1,7 @@
 {
   "name": "mamaco-notes",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Mamaco Team <mamaconotes@gmail.com>",
   "desktopName": "Mamaco Notes",
   "description": "Mamaco Notes - app de anotações digitais com suporte a caneta para Windows, Linux e Android",
@@ -80,10 +80,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Mamaco Notes",
       "perMachine": false,
-      "allowElevation": false,
+      "allowElevation": true,
       "include": "build-resources/installer.nsh",
-      "deleteAppDataOnUninstall": true,
-      "guid": "5c9b2f3a-7d4e-4f1a-9c2b-8a3d5e6f1a2b"
+      "deleteAppDataOnUninstall": true
     },
     "linux": {
       "target": [

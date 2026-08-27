@@ -236,14 +236,13 @@ if (!gotTheLock) {
     })
 
     ipcMain.on('install-update', () => {
-      autoUpdater.quitAndInstall()
+      // Silent install: runs the NSIS installer with /S --updated so the
+      // interactive "close the app" dialogs never appear mid-update. The
+      // --force-run flag relaunches the app after the update is applied.
+      autoUpdater.quitAndInstall(true, true)
     })
   })
 }
-
-app.on('before-quit', () => {
-  app.exit(0)
-})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

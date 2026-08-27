@@ -20,6 +20,8 @@ export type ModalName =
   | 'confirmDelete'
   | 'update'
   | 'trash'
+  | 'alert'
+  | 'confirm'
 
 interface UiState {
   openModal: ModalName | null

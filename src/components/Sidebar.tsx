@@ -372,11 +372,6 @@ export function Sidebar() {
         toggleSelect(id)
       }, 500)
     }
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      /* noop */
-    }
   }
 
   function onItemPointerMove(e: React.PointerEvent, type: DragItem['type'], id: string) {
@@ -389,6 +384,11 @@ export function Sidebar() {
       const threshold = e.pointerType === 'mouse' ? 6 : 12
       if (dist > threshold) {
         cancelLongPress()
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        } catch {
+          /* noop */
+        }
         dragItemRef.current = { type, id }
         setDragItem({ type, id })
         suppressClickRef.current = true
@@ -479,47 +479,26 @@ export function Sidebar() {
   }
 
   async function handleDeleteNotebook(id: string, name: string) {
-    const cloud = useAppStore.getState().settings.cloud
-    if (cloud.webdavUrl) {
-      const scope = await confirmDeleteScope({ kind: 'notebook', name })
-      if (!scope) return
-      await deleteNotebook(id, scope)
-    } else {
-      if (confirm(t('sidebar.deleteNotebookConfirm', { name }))) {
-        await deleteNotebook(id)
-      }
-    }
+    const scope = await confirmDeleteScope({ kind: 'notebook', name })
+    if (!scope) return
+    await deleteNotebook(id, scope)
   }
 
   async function handleDeleteFolder(folder: Folder) {
-    const cloud = useAppStore.getState().settings.cloud
-    if (cloud.webdavUrl) {
-      const scope = await confirmDeleteScope({ kind: 'folder', name: folder.name })
-      if (!scope) return
-      await deleteFolder(folder.id, scope)
-    } else {
-      if (confirm(t('sidebar.deleteFolderConfirm', { name: folder.name }))) {
-        await deleteFolder(folder.id)
-      }
-    }
+    const scope = await confirmDeleteScope({ kind: 'folder', name: folder.name })
+    if (!scope) return
+    await deleteFolder(folder.id, scope)
   }
 
   async function handleDeleteSelected() {
     const ids = useAppStore.getState().selectedIds
     if (ids.length === 0) return
-    const cloud = useAppStore.getState().settings.cloud
-    if (cloud.webdavUrl) {
-      const scope = await confirmDeleteScope({
-        kind: 'multi',
-        name: t('sidebar.itemsSelectedName', { count: ids.length }),
-      })
-      if (!scope) return
-      await deleteSelected(scope)
-    } else {
-      if (confirm(t('sidebar.deleteItemsConfirm', { count: ids.length }))) {
-        await deleteSelected()
-      }
-    }
+    const scope = await confirmDeleteScope({
+      kind: 'multi',
+      name: t('sidebar.itemsSelectedName', { count: ids.length }),
+    })
+    if (!scope) return
+    await deleteSelected(scope)
   }
 
   async function promptNewFolder(parentId: string | null) {
