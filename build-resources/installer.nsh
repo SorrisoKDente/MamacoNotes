@@ -26,7 +26,7 @@
   !define MN_NSH_INCLUDED
 
   !macro MN_FindApp OUT
-    nsExec::Exec `"$SYSDIR\cmd.exe" /C tasklist /FI "USERNAME eq %USERNAME%" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
+    nsExec::Exec `"$SYSDIR\cmd.exe" /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
     Pop ${OUT}
   !macroend
 
@@ -41,7 +41,12 @@
     ; In the auto-update flow the app is already quitting; give it a moment to
     ; exit on its own before checking.
     ${if} ${isUpdated}
-      Sleep 500
+      Sleep 1000
+      ; The updater can be elevated while the app is not. Do not restrict this
+      ; kill by USERNAME, otherwise the app may keep its files locked.
+      nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /F /T /IM "$MN_AppExe"`
+      Pop $MN_Result
+      Sleep 1500
     ${endIf}
 
     !insertmacro MN_FindApp $MN_Result
@@ -49,25 +54,16 @@
       Goto mn_done
     ${endIf}
 
-    ; A normal (non-update) install: ask for permission to close the app.
-    ${ifNot} ${isUpdated}
-      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" /SD IDOK IDOK mn_close
-      Quit
-    ${endIf}
-
-    mn_close:
     StrCpy $MN_RetryCount 0
-    StrCpy $MN_ForceKill 0
+    StrCpy $MN_ForceKill 1
 
     mn_loop:
       IntOp $MN_RetryCount $MN_RetryCount + 1
 
-      ; First attempt a graceful close (WM_CLOSE), then force-kill the tree.
-      ${if} $MN_ForceKill == 0
-        nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /T /IM "$MN_AppExe" /FI "USERNAME eq %USERNAME%"`
-      ${else}
-        nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /F /T /IM "$MN_AppExe" /FI "USERNAME eq %USERNAME%"`
-      ${endIf}
+      ; Always force-close the app before replacing its files. This applies to
+      ; manual installs as well as silent updates, so no close dialog can block
+      ; the installer.
+      nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /F /T /IM "$MN_AppExe"`
       Pop $MN_Result
 
       Sleep 800
@@ -80,11 +76,8 @@
       StrCpy $MN_ForceKill 1
 
       ${if} $MN_RetryCount >= 4
-        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(appCannotBeClosed)" /SD IDCANCEL IDRETRY mn_retry
-        Quit
-        mn_retry:
+        ; Keep retrying silently; the app may need a moment to release files.
         StrCpy $MN_RetryCount 0
-        StrCpy $MN_ForceKill 0
       ${endIf}
 
       Goto mn_loop
@@ -94,13 +87,39 @@
 
 !endif
 
-; During an update, skip the legacy uninstaller. Older versions can abort with
-; error 2 because their app-running check falsely detects a process.
+!ifndef BUILD_UNINSTALLER
+  ; This macro runs before MUI_PAGE_INSTFILES is created. Defining the page
+  ; hook here keeps Cancel enabled while the installation is in progress.
+  !macro customPageAfterChangeDir
+    !define MUI_ABORTWARNING
+    !define MUI_PAGE_CUSTOMFUNCTION_SHOW MN_InstFilesShow
+  !macroend
+
+  Function MN_InstFilesShow
+    GetDlgItem $0 $HWNDPARENT 2
+    EnableWindow $0 1
+  FunctionEnd
+!endif
+
+; Skip the legacy uninstaller. Older versions can abort with error 2 because
+; their app-running check falsely detects a process.
 !macro customInit
-  ${if} ${isUpdated}
-    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
-    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString"
-  ${endIf}
+  ; The install mode can change the registry hive used by uninstallOldVersion.
+  ; Clear both hives so no installer mode launches the legacy uninstaller.
+  DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+  DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString"
+  DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+  DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString"
+  DeleteRegValue HKLM "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+  DeleteRegValue HKLM "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString"
+  !ifdef UNINSTALL_REGISTRY_KEY_2
+    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY_2}" "UninstallString"
+    DeleteRegValue SHCTX "${UNINSTALL_REGISTRY_KEY_2}" "QuietUninstallString"
+    DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY_2}" "UninstallString"
+    DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY_2}" "QuietUninstallString"
+    DeleteRegValue HKLM "${UNINSTALL_REGISTRY_KEY_2}" "UninstallString"
+    DeleteRegValue HKLM "${UNINSTALL_REGISTRY_KEY_2}" "QuietUninstallString"
+  !endif
 !macroend
 
 ; Do not block an update if a legacy uninstaller still returns an error.

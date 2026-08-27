@@ -31,6 +31,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Adjust opacity and toggle visibility/locking.
     -   Organize content (images, text, strokes) hierarchically.
 -   **Cloud Synchronization**: Bidirectional sync via **WebDAV**. Currently validated primarily with **Koofr**; while it supports the standard WebDAV protocol (Nextcloud, ownCloud, etc.), full compatibility with other providers is still being verified. **Network resilience**: connection failures are retried automatically (3 attempts with backoff) with a friendly message when the server is unreachable — never retries HTTP/auth errors.
+  -   **Updates**: Desktop updates force-close the running app automatically, and the installer remains cancellable while files are being copied.
 -   **Local Trash**: Deleted folders and notebooks go to a local (non-synced) trash where each item can be restored individually. Items deleted "local + cloud" are restored from the local copy; items deleted "local only" with a cloud configured can be brought back with **"Restore from cloud"**. Retention is 30 days.
 -   **PDF & Image Integration**:
     -   Import PDFs as new notebooks or as page backgrounds.

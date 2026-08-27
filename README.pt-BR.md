@@ -31,6 +31,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Ajustar opacidade e alternar visibilidade ou bloqueio.
     -   Organizar conteúdo (imagens, texto, traços) hierarquicamente.
 -   **Sincronização em Nuvem**: Sincronização bidirecional via **WebDAV**. Atualmente validado principalmente com o **Koofr**; embora suporte o protocolo WebDAV padrão (Nextcloud, ownCloud, etc.), a compatibilidade total com outros provedores ainda está sendo verificada. **Resiliência de rede**: falhas de conexão são repetidas automaticamente (3 tentativas com backoff) com mensagem amigável quando o servidor está inacessível — nunca repete erros HTTP/auth.
+  -   **Atualizações**: as atualizações do desktop forçam o fechamento do app em execução automaticamente, e o instalador continua cancelável durante a cópia dos arquivos.
 -   **Lixeira Local**: Pastas e cadernos excluídos vão para uma lixeira local (não sincronizada) onde cada item pode ser restaurado individualmente. Itens excluídos "local + nuvem" são restaurados da cópia local; itens excluídos "só local" com nuvem configurada podem voltar com **"Restaurar da nuvem"**. A retenção é de 30 dias.
 -   **Integração com PDF e Imagens**:
     -   Importe PDFs como novos cadernos ou como fundo de páginas.
