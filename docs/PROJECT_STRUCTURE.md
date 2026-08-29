@@ -93,6 +93,7 @@ Initialization flow:
 | File | Responsibility |
 |---|---|
 | `package.json` | Scripts (dev, build desktop/win/linux, android), dependencies, electron-builder config (including an NSIS installer with an option to delete app data on uninstall; auto-updates force-close the app and keep installation cancellation available — see `electron/main.cjs` `install-update` and `build-resources/installer.nsh`) |
+| `AGENTS.md` | **Agent Orchestrator**: Behavioral prompt, golden rules, and index of specialized skills. Links to [Português](AGENTS.pt-BR.md) |
 | `SECURITY.md` | Security policy and vulnerability reporting instructions |
 | `vite.config.ts` | React/PWA plugins, `base: './'`, dev server (port 5173, `allowedHosts` for preview) |
 | `tsconfig.json` | TypeScript config (strict) |
@@ -101,13 +102,26 @@ Initialization flow:
 | `.gitignore` | Ignored files |
 | `server2.mjs` | Empty file (remnant) |
 
+### `.agents/` — AI instructions
+
+| Path | Responsibility |
+|---|---|
+| `.agents/skills/` | **Technical Skills**: Modular instructions for specific domains (Android, Sync, UI/UX, Desktop, Versioning). Used by AI agents to focus context. |
+
+### `docs/` — documentation
+
+| Path | Responsibility |
+|---|---|
+| `docs/PROJECT_STRUCTURE.md` | This document (The Map). |
+| `docs/architecture/` | **Design Documents**: In-depth technical architecture for core features (Sync, Layers, Drawing Engine, i18n). |
+
 ### `src/` — application code (the core)
 
 | File | Responsibility |
 |---|---|
 | `src/main.tsx` | React Bootstrap + PWA registration |
 | `src/App.tsx` | Root component; screen composition (TopBar, Sidebar, PageList, Editor, Toolbar, Modals); init + auto-sync; Escape key → `ink:esc`; Android back button (Capacitor `@capacitor/app`) → `ink:esc` |
-| `src/types.ts` | **All domain data types** + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) |
+| `src/types.ts` | **All domain data types** + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) + **`APP_VERSION`** (version constant) |
 | `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`); version migration fills missing `order` field in old folders/notebooks and converts old pages (flat arrays) to the layer model (`migrateLayers`) |
 | `src/store.ts` | **Main store (Zustand)**: all CRUD for notebooks/folders/pages/templates, layer actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge), undo/redo, clipboard, **local trash** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, persistence |
 | `src/uiStore.ts` | Modal store (`openModal`, `modalData`, `open`, `close`) |
@@ -184,8 +198,6 @@ Initialization flow:
 | `public/` | PWA static icons (favicon, apple-touch-icon, pwa-192/512, maskable) |
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
-| `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
-| `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (stale local baseline recovery, rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix: forces the native `downloadText` path (`Capacitor.isNativePlatform()` overridden) against a mocked fetch that mimics the Android server side, asserting `decodeCapacitorData` reconstructs the correct text for parsed-JSON bodies (200), truncated JSON Range chunks (206), base64 chunks (large non-JSON file), 404 handling, the JSON-vs-base64 disambiguation (`isJson` keeps JSON strings as raw text so a chunk inside a base64 `dataUrl` is never base64-decoded), the native chunked download of a large JSON notebook with an embedded base64 image reassembles byte-exact, and the **retry behavior** (`isConnectionError` classification and `withRetry` 500ms→1s backoff: connection errors are retried, HTTP 4xx/5xx and auth errors are not). Run with `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Empty file (remnant) |
@@ -529,6 +541,7 @@ Key points:
   opacity. The `drawStroke` function implements identical pressure sensitivity and
   smoothing logic as the main editor, ensuring that thumbnails and PDF/PNG exports
   match the appearance of the live notes.
+- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** to decouple drawing from pointer events, ensuring a consistent frame rate. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs to avoid React re-renders. High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
 
 ---
 

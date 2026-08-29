@@ -94,6 +94,8 @@ Se você achar este projeto útil e quiser apoiar financeiramente o seu desenvol
 
 O Mamaco Notes é um testemunho do poder da IA na engenharia de software moderna. Toda a arquitetura, lógica de desenho, algoritmos de sincronização e componentes de UI foram desenvolvidos através de um processo colaborativo com o **MonkeyCodeAI** e o **Google Gemini**.
 
+O projeto também conta com um **sistema modular de instruções** (localizado em `.agents/skills/`), otimizando o contexto e a tomada de decisão da IA para tarefas multiplataforma complexas.
+
 ---
 
 *Feito com 🍌 pela Equipe Mamaco.*  

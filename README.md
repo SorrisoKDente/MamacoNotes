@@ -94,6 +94,8 @@ If you find this project useful and would like to support its development financ
 
 Mamaco Notes is a testament to the power of AI in modern software engineering. The entire architecture, drawing logic, synchronization algorithms, and UI components were developed through a collaborative process using **MonkeyCodeAI** and **Google Gemini**.
 
+The project also features a **modular instruction system** (located in `.agents/skills/`), optimizing the AI's context and decision-making for complex cross-platform tasks.
+
 ---
 
 *Made with 🍌 by the Mamaco Team.*  
