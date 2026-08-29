@@ -72,10 +72,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "Aguardando o release $TAG ser criado..."
-          for i in {1..20}; do
-            gh release view "$TAG" && break || sleep 30
-          done
+          echo "Garantindo que o release $TAG existe..."
+          gh release create "$TAG" --title "$TAG" --notes "Draft release for $TAG" || true
+          echo "Fazendo upload do APK..."
           gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
 
       - name: Update Release Notes
@@ -85,6 +84,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
+          echo "Garantindo que o release $TAG existe..."
+          gh release create "$TAG" --title "$TAG" --notes "Draft release for $TAG" || true
+          
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
           
           if [ -n "$PREVIOUS_TAG" ]; then
@@ -103,8 +105,5 @@ jobs:
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
           fi
           
-          echo "Aguardando o release $TAG estar disponível para edição..."
-          for i in {1..20}; do
-            gh release view "$TAG" && break || sleep 30
-          done
+          echo "Atualizando notas do release $TAG..."
           gh release edit "$TAG" --notes-file release_notes.md
