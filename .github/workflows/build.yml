@@ -9,26 +9,60 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-
+  create-release:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get_tag.outputs.tag }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Java
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
+      - name: Get Tag
+        id: get_tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes
+        id: release_notes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ steps.get_tag.outputs.tag }}
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            MESSAGE=$(git log "$PREVIOUS_TAG..$TAG" --grep="^release:" -1 --pretty=format:"%B")
+          else
+            MESSAGE=$(git log "$TAG" --grep="^release:" -1 --pretty=format:"%B")
+          fi
+          
+          if [ -z "$MESSAGE" ]; then
+            MESSAGE=$(git log -1 --pretty=format:"%B")
+          fi
+          
+          echo "$MESSAGE" > release_notes.md
+          echo "" >> release_notes.md
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
+          fi
+          
+          echo "Creating draft release $TAG..."
+          gh release create "$TAG" --draft --title "$TAG" --notes-file release_notes.md || echo "Release already exists."
+
+  build-desktop:
+    name: Build Desktop (${{ matrix.os }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -48,8 +82,33 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release: true
 
+  build-android:
+    name: Build Android
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Web Assets
+        run: npm run build
+
       - name: Build and Sign Android APK
-        if: matrix.os == 'ubuntu-latest'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -67,47 +126,9 @@ jobs:
             -Pandroid.injected.signing.key.password=$KEY_PASSWORD
 
       - name: Upload Android APK
-        if: matrix.os == 'ubuntu-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "Garantindo existência do rascunho de release $TAG..."
-          gh release create "$TAG" --draft --title "$TAG" --notes "Release $TAG" || echo "Rascunho já existe."
-          
-          echo "Aguardando 10 segundos..."
-          sleep 10
-          
-          echo "Fazendo upload do APK para o rascunho..."
+          TAG=${{ needs.create-release.outputs.tag }}
+          echo "Uploading APK to draft release $TAG..."
           gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
-
-      - name: Update Release Notes
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "Garantindo existência do rascunho de release $TAG..."
-          gh release create "$TAG" --draft --title "$TAG" --notes "Draft release for $TAG" || true
-          
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
-          
-          if [ -n "$PREVIOUS_TAG" ]; then
-            MESSAGE=$(git log "$PREVIOUS_TAG..$TAG" --grep="^release:" -1 --pretty=format:"%B")
-          else
-            MESSAGE=$(git log "$TAG" --grep="^release:" -1 --pretty=format:"%B")
-          fi
-          
-          if [ -z "$MESSAGE" ]; then
-            MESSAGE=$(git log -1 --pretty=format:"%B")
-          fi
-          
-          echo "$MESSAGE" > release_notes.md
-          echo "" >> release_notes.md
-          if [ -n "$PREVIOUS_TAG" ]; then
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS_TAG...$TAG" >> release_notes.md
-          fi
-          
-          echo "Atualizando notas do release $TAG..."
-          gh release edit "$TAG" --notes-file release_notes.md
