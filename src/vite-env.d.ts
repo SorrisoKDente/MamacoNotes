@@ -17,6 +17,7 @@ interface InkfolioDesktopApi {
   installUpdate: () => void
   onUpdateAvailable: (callback: (info: any) => void) => () => void
   onUpdateDownloaded: (callback: (info: any) => void) => () => void
+  onUpdateProgress: (callback: (percent: number) => void) => () => void
   onUpdateError: (callback: (msg: string) => void) => () => void
 }
 

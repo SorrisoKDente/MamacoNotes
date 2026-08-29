@@ -1906,8 +1906,6 @@ function UpdateModal() {
     close()
   }
 
-  const isInstalling = downloaded && downloading // Not really possible as downloading set false on unD
-
   return (
     <>
       <h2>{t('modal.updateAvailable')}</h2>
