@@ -650,16 +650,24 @@ export class PageCanvas {
   }
 
   tracePressurePolyline(ctx: CanvasRenderingContext2D, pts: Stroke['points'], baseSize: number) {
+    let lastSize = -1
+    let started = false
+
     for (let i = 1; i < pts.length; i++) {
-      const p0 = pts[i - 1]
       const p1 = pts[i]
-      const size = baseSize * clamp(p1.pressure, 0.15, 1)
-      ctx.lineWidth = Math.max(0.6, size)
-      ctx.beginPath()
-      ctx.moveTo(p0.x, p0.y)
+      const size = Math.max(0.6, baseSize * clamp(p1.pressure, 0.15, 1))
+
+      if (Math.abs(size - lastSize) > 0.01 || !started) {
+        if (started) ctx.stroke()
+        ctx.lineWidth = size
+        ctx.beginPath()
+        ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
+        started = true
+        lastSize = size
+      }
       ctx.lineTo(p1.x, p1.y)
-      ctx.stroke()
     }
+    if (started) ctx.stroke()
   }
 
   pointInStroke(stroke: Stroke, px: number, py: number, hitRadius: number): boolean {

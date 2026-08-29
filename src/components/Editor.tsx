@@ -2116,7 +2116,9 @@ export function Editor() {
       const angle = (Math.atan2(cur.y - c.y, cur.x - c.x) * 180) / Math.PI + 90
       const rot = Math.round(((((angle % 360) + 360) % 360) / 5)) * 5
       if (drag.textTarget?.type === 'existing') {
-        el.rotation = rot
+        const tid = drag.textTarget.id
+        const layer = getActiveLayer(page)
+        layer.texts = layer.texts.map((t) => (t.id === tid ? { ...t, rotation: rot } : t))
         page.updatedAt = Date.now()
         dirtyRef.current = true
         schedulePersist()
@@ -2156,29 +2158,15 @@ export function Editor() {
       const startPt = drag.startPagePt
       if (!start || !startPt) return
       const targetIdx = resolveTargetPage(pos)
-      if (targetIdx !== currentPageIndexRef.current) {
-        const pages = pagesRef.current
-        const from = pages[currentPageIndexRef.current]
-        const to = pages[targetIdx]
-        if (from && to) {
-          const fromLayer = getActiveLayer(from)
-          const toLayer = getActiveLayer(to)
-          const idx = fromLayer.images.findIndex((i) => i.id === drag.imageId)
-          if (idx >= 0) {
-            const [moved] = fromLayer.images.splice(idx, 1)
-            toLayer.images.push(moved)
-          }
-          currentPageIndexRef.current = targetIdx
-          suppressPageFocusRef.current = true
-          useAppStore.getState().selectPage(targetIdx)
-        }
-      }
+      if (targetIdx !== currentPageIndexRef.current) transferSelectionTo(targetIdx)
       const pg = pagesRef.current[currentPageIndexRef.current]
-      const img = pg ? getActiveLayer(pg).images.find((i) => i.id === drag.imageId) : undefined
-      if (!pg || !img) return
+      const layer = pg ? getActiveLayer(pg) : undefined
+      const img = layer ? layer.images.find((i) => i.id === drag.imageId) : undefined
+      if (!pg || !img || !layer) return
       const d = engine.toPageCoordsAt(pos.x, pos.y, targetIdx)
-      img.x = Math.round(start.x + (d.x - startPt.x))
-      img.y = Math.round(start.y + (d.y - startPt.y))
+      const nx = Math.round(start.x + (d.x - startPt.x))
+      const ny = Math.round(start.y + (d.y - startPt.y))
+      layer.images = layer.images.map((i) => (i.id === img.id ? { ...i, x: nx, y: ny } : i))
       pg.updatedAt = Date.now()
       dirtyRef.current = true
       requestRender()
@@ -2187,10 +2175,12 @@ export function Editor() {
 
     if (drag.kind === 'select-resize' && drag.imageId && drag.handle) {
       const pg = pageRef.current
-      const img = pg ? getActiveLayer(pg).images.find((i) => i.id === drag.imageId) : undefined
-      if (!pg || !img) return
+      const layer = pg ? getActiveLayer(pg) : undefined
+      const img = layer ? layer.images.find((i) => i.id === drag.imageId) : undefined
+      if (!pg || !img || !layer) return
       const cur = engine.toPageCoords(pos.x, pos.y)
-      applyImageResize(img, drag.handle, cur)
+      const newImg = applyImageResize(img, drag.handle, cur)
+      layer.images = layer.images.map((i) => (i.id === img.id ? newImg : i))
       pg.updatedAt = Date.now()
       dirtyRef.current = true
       requestRender()
@@ -2199,13 +2189,15 @@ export function Editor() {
 
     if (drag.kind === 'select-rotate' && drag.imageId) {
       const pg = pageRef.current
-      const img = pg ? getActiveLayer(pg).images.find((i) => i.id === drag.imageId) : undefined
-      if (!pg || !img) return
+      const layer = pg ? getActiveLayer(pg) : undefined
+      const img = layer ? layer.images.find((i) => i.id === drag.imageId) : undefined
+      if (!pg || !img || !layer) return
       const cx = img.x + img.width / 2
       const cy = img.y + img.height / 2
       const cur = engine.toPageCoords(pos.x, pos.y)
       const angle = (Math.atan2(cur.y - cy, cur.x - cx) * 180) / Math.PI
-      img.rotation = Math.round(((angle + 90) % 360) + 360) % 360
+      const rot = Math.round(((angle + 90) % 360) + 360) % 360
+      layer.images = layer.images.map((i) => (i.id === img.id ? { ...i, rotation: rot } : i))
       pg.updatedAt = Date.now()
       dirtyRef.current = true
       requestRender()
@@ -2214,10 +2206,13 @@ export function Editor() {
 
     if (drag.kind === 'text-resize' && drag.textTarget?.type === 'existing' && drag.handle) {
       const pg = pageRef.current
-      const t = pg ? getActiveLayer(pg).texts.find((e) => e.id === (drag.textTarget as { id: string }).id) : undefined
+      const layer = pg ? getActiveLayer(pg) : undefined
+      const tid = (drag.textTarget as { id: string }).id
+      const t = layer ? layer.texts.find((e) => e.id === tid) : undefined
       const snap = drag.snapshotTexts?.[0]
-      if (!pg || !t || !snap) return
-      applyTextResize(t, snap, drag.handle, engine.toPageCoords(pos.x, pos.y), engine.textLayout(snap))
+      if (!pg || !t || !snap || !layer) return
+      const newText = applyTextResize(t, snap, drag.handle, engine.toPageCoords(pos.x, pos.y), engine.textLayout(snap))
+      layer.texts = layer.texts.map((el) => (el.id === tid ? newText : el))
       pg.updatedAt = Date.now()
       dirtyRef.current = true
       requestRender()
@@ -2331,13 +2326,17 @@ export function Editor() {
           const pg = pageRef.current
           if (pg && changed.length) {
             pushUndo()
-            for (const { element, newUrl } of changed) {
-              engine.clearImageCache(element.dataUrl)
-              element.dataUrl = newUrl
-              const ov = engine.getOverrideCanvas(element.id)
-              if (ov) engine.setImageOverride(element.id, newUrl, ov)
-              engine.warmImage(element.id, newUrl)
-            }
+            const layer = getActiveLayer(pg)
+            const changedMap = new Map(changed.map((c) => [c.element.id, c.newUrl]))
+            layer.images = layer.images.map((img) => {
+              const newUrl = changedMap.get(img.id)
+              if (!newUrl) return img
+              engine.clearImageCache(img.dataUrl)
+              engine.warmImage(img.id, newUrl)
+              const ov = engine.getOverrideCanvas(img.id)
+              if (ov) engine.setImageOverride(img.id, newUrl, ov)
+              return { ...img, dataUrl: newUrl }
+            })
             pg.updatedAt = Date.now()
             notebookRef.current!.updatedAt = Date.now()
             dirtyRef.current = true
@@ -2521,10 +2520,11 @@ export function Editor() {
       const { id, patch } = (e as CustomEvent).detail
       const pg = pageRef.current
       const nb = notebookRef.current
-      const el = pg ? getActiveLayer(pg).texts.find((t) => t.id === id) : undefined
-      if (!el || !pg || !nb) return
-      Object.assign(el, patch)
-      el.createdAt = el.createdAt
+      if (!pg || !nb) return
+      const layer = getActiveLayer(pg)
+      const el = layer.texts.find((t) => t.id === id)
+      if (!el) return
+      layer.texts = layer.texts.map((t) => (t.id === id ? { ...t, ...patch } : t))
       pg.updatedAt = Date.now()
       nb.updatedAt = Date.now()
       dirtyRef.current = true
@@ -2535,9 +2535,12 @@ export function Editor() {
       const { id, degrees } = (e as CustomEvent).detail
       const pg = pageRef.current
       const nb = notebookRef.current
-      const el = pg ? getActiveLayer(pg).texts.find((t) => t.id === id) : undefined
-      if (!el || !pg || !nb) return
-      el.rotation = (((degrees % 360) + 360) % 360)
+      if (!pg || !nb) return
+      const layer = getActiveLayer(pg)
+      const el = layer.texts.find((t) => t.id === id)
+      if (!el) return
+      const rot = (((degrees % 360) + 360) % 360)
+      layer.texts = layer.texts.map((t) => (t.id === id ? { ...t, rotation: rot } : t))
       pg.updatedAt = Date.now()
       nb.updatedAt = Date.now()
       dirtyRef.current = true
@@ -2589,10 +2592,12 @@ export function Editor() {
       const nb = notebookRef.current
       const id = selectedImageIdRef.current
       if (!pg || !id || !nb) return
-      const img = getActiveLayer(pg).images.find((i) => i.id === id)
+      const layer = getActiveLayer(pg)
+      const img = layer.images.find((i) => i.id === id)
       if (!img) return
       pushUndo()
-      img.rotation = (((degrees % 360) + 360) % 360)
+      const rot = (((degrees % 360) + 360) % 360)
+      layer.images = layer.images.map((i) => (i.id === id ? { ...i, rotation: rot } : i))
       pg.updatedAt = Date.now()
       nb.updatedAt = Date.now()
       dirtyRef.current = true
@@ -2991,7 +2996,7 @@ function imageResizeCursor(handle: string): string {
   }
 }
 
-function applyImageResize(img: ImageElement, handle: string, cur: Pt) {
+function applyImageResize(img: ImageElement, handle: string, cur: Pt): ImageElement {
   const cx0 = img.x + img.width / 2
   const cy0 = img.y + img.height / 2
   const w0 = img.width
@@ -3037,10 +3042,13 @@ function applyImageResize(img: ImageElement, handle: string, cur: Pt) {
 
   const newCx = cx0 + cxLocal * cos - cyLocal * sin
   const newCy = cy0 + cxLocal * sin + cyLocal * cos
-  img.x = Math.round(newCx - nw / 2)
-  img.y = Math.round(newCy - nh / 2)
-  img.width = Math.round(nw)
-  img.height = Math.round(nh)
+  return {
+    ...img,
+    x: Math.round(newCx - nw / 2),
+    y: Math.round(newCy - nh / 2),
+    width: Math.round(nw),
+    height: Math.round(nh),
+  }
 }
 
 function rotatePointAround(
@@ -3064,16 +3072,16 @@ function applyTextResize(
   handle: string,
   cur: Pt,
   layout: TextLayout,
-) {
+): TextElement {
   const corners = textElementCorners(snap, layout)
   const order = ['nw', 'ne', 'se', 'sw']
   const idx = order.indexOf(handle)
-  if (idx < 0) return
+  if (idx < 0) return live
   const fixed = corners[(idx + 2) % 4]
   const dragged = corners[idx]
   const distFixed = Math.hypot(fixed.x - dragged.x, fixed.y - dragged.y)
   const distCur = Math.hypot(fixed.x - cur.x, fixed.y - cur.y)
-  if (distFixed < 1) return
+  if (distFixed < 1) return live
   const ratio = Math.max(0.2, Math.min(4, distCur / distFixed))
   const newSize = Math.max(8, Math.round(snap.fontSize * ratio))
   const scale = newSize / snap.fontSize
@@ -3086,10 +3094,13 @@ function applyTextResize(
   const newH = layout.h * scale
   const newCx = fixed.x - localX * scale * cos + localY * scale * sin
   const newCy = fixed.y - localX * scale * sin - localY * scale * cos
-  live.fontSize = newSize
-  live.width = Math.max(1, Math.round(snap.width * scale))
-  live.x = Math.round(newCx - newW / 2)
-  live.y = Math.round(newCy - newH / 2)
+  return {
+    ...live,
+    fontSize: newSize,
+    width: Math.max(1, Math.round(snap.width * scale)),
+    x: Math.round(newCx - newW / 2),
+    y: Math.round(newCy - newH / 2),
+  }
 }
 
 function computeUniformScale(handle: string, box: Rect, cur: Pt): number {
@@ -3117,50 +3128,67 @@ function applyGroupResize(
   pg: Page,
   handle: string,
   startBox: Rect,
-  strokes: Stroke[],
-  images: ImageElement[],
-  texts: TextElement[],
+  snapshotStrokes: Stroke[],
+  snapshotImages: ImageElement[],
+  snapshotTexts: TextElement[],
   cur: Pt,
   measure: (t: TextElement) => TextLayout,
 ) {
   const scale = computeUniformScale(handle, startBox, cur)
   const fixedX = handle === 'w' || handle === 'nw' || handle === 'sw' ? startBox.x + startBox.w : startBox.x
   const fixedY = handle === 'n' || handle === 'nw' || handle === 'ne' ? startBox.y + startBox.h : startBox.y
+
+  const strokeMap = new Map(snapshotStrokes.map((s) => [s.id, s]))
+  const imgMap = new Map(snapshotImages.map((i) => [i.id, i]))
+  const textMap = new Map(snapshotTexts.map((t) => [t.id, t]))
+
   const liveLayer = getActiveLayer(pg)
-  for (const s of strokes) {
-    const live = liveLayer.strokes.find((e) => e.id === s.id)
-    if (!live) continue
-    live.points = s.points.map((p) => ({
-      ...p,
-      x: fixedX + (p.x - fixedX) * scale,
-      y: fixedY + (p.y - fixedY) * scale,
-    }))
-  }
-  for (const img of images) {
-    const live = liveLayer.images.find((e) => e.id === img.id)
-    if (!live) continue
+
+  liveLayer.strokes = liveLayer.strokes.map((live) => {
+    const s = strokeMap.get(live.id)
+    if (!s) return live
+    return {
+      ...live,
+      points: s.points.map((p) => ({
+        ...p,
+        x: fixedX + (p.x - fixedX) * scale,
+        y: fixedY + (p.y - fixedY) * scale,
+      })),
+    }
+  })
+
+  liveLayer.images = liveLayer.images.map((live) => {
+    const img = imgMap.get(live.id)
+    if (!img) return live
     const cx = img.x + img.width / 2
     const cy = img.y + img.height / 2
     const nx = fixedX + (cx - fixedX) * scale
     const ny = fixedY + (cy - fixedY) * scale
-    live.x = Math.round(nx - (img.width * scale) / 2)
-    live.y = Math.round(ny - (img.height * scale) / 2)
-    live.width = Math.max(20, Math.round(img.width * scale))
-    live.height = Math.max(20, Math.round(img.height * scale))
-  }
-  for (const t of texts) {
-    const live = liveLayer.texts.find((e) => e.id === t.id)
-    if (!live) continue
+    return {
+      ...live,
+      x: Math.round(nx - (img.width * scale) / 2),
+      y: Math.round(ny - (img.height * scale) / 2),
+      width: Math.max(20, Math.round(img.width * scale)),
+      height: Math.max(20, Math.round(img.height * scale)),
+    }
+  })
+
+  liveLayer.texts = liveLayer.texts.map((live) => {
+    const t = textMap.get(live.id)
+    if (!t) return live
     const layout = measure(t)
     const cx = t.x + layout.w / 2
     const cy = t.y + layout.h / 2
     const nx = fixedX + (cx - fixedX) * scale
     const ny = fixedY + (cy - fixedY) * scale
-    live.x = Math.round(nx - (layout.w * scale) / 2)
-    live.y = Math.round(ny - (layout.h * scale) / 2)
-    live.fontSize = Math.max(8, Math.round(t.fontSize * scale))
-    live.width = Math.max(1, Math.round(t.width * scale))
-  }
+    return {
+      ...live,
+      x: Math.round(nx - (layout.w * scale) / 2),
+      y: Math.round(ny - (layout.h * scale) / 2),
+      fontSize: Math.max(8, Math.round(t.fontSize * scale)),
+      width: Math.max(1, Math.round(t.width * scale)),
+    }
+  })
 }
 
 function applyGroupRotation(
@@ -3183,40 +3211,54 @@ function applyGroupRotation(
 function rotateGroupBy(
   pg: Page,
   box: Rect,
-  strokes: Stroke[],
-  images: ImageElement[],
-  texts: TextElement[],
+  snapshotStrokes: Stroke[],
+  snapshotImages: ImageElement[],
+  snapshotTexts: TextElement[],
   delta: number,
   measure: (t: TextElement) => TextLayout,
 ) {
   const cx = box.x + box.w / 2
   const cy = box.y + box.h / 2
   if (Math.abs(delta) < 0.05) return
+
+  const strokeMap = new Map(snapshotStrokes.map((s) => [s.id, s]))
+  const imgMap = new Map(snapshotImages.map((i) => [i.id, i]))
+  const textMap = new Map(snapshotTexts.map((t) => [t.id, t]))
+
   const liveLayer = getActiveLayer(pg)
-  for (const s of strokes) {
-    const live = liveLayer.strokes.find((e) => e.id === s.id)
-    if (!live) continue
-    live.points = s.points.map((p) => {
-      const r = rotatePointAround(p, cx, cy, delta)
-      return { ...p, x: r.x, y: r.y }
-    })
-  }
-  for (const img of images) {
-    const live = liveLayer.images.find((e) => e.id === img.id)
-    if (!live) continue
+
+  liveLayer.strokes = liveLayer.strokes.map((live) => {
+    const s = strokeMap.get(live.id)
+    if (!s) return live
+    return {
+      ...live,
+      points: s.points.map((p) => {
+        const r = rotatePointAround(p, cx, cy, delta)
+        return { ...p, x: r.x, y: r.y }
+      }),
+    }
+  })
+
+  liveLayer.images = liveLayer.images.map((live) => {
+    const img = imgMap.get(live.id)
+    if (!img) return live
     const c = rotatePointAround(
       { x: img.x + img.width / 2, y: img.y + img.height / 2 },
       cx,
       cy,
       delta,
     )
-    live.x = Math.round(c.x - img.width / 2)
-    live.y = Math.round(c.y - img.height / 2)
-    live.rotation = Math.round(((img.rotation + delta) % 360 + 360) % 360)
-  }
-  for (const t of texts) {
-    const live = liveLayer.texts.find((e) => e.id === t.id)
-    if (!live) continue
+    return {
+      ...live,
+      x: Math.round(c.x - img.width / 2),
+      y: Math.round(c.y - img.height / 2),
+      rotation: Math.round(((img.rotation + delta) % 360 + 360) % 360),
+    }
+  })
+
+  liveLayer.texts = liveLayer.texts.map((live) => {
+    const t = textMap.get(live.id)
+    if (!t) return live
     const layout = measure(t)
     const c = rotatePointAround(
       { x: t.x + layout.w / 2, y: t.y + layout.h / 2 },
@@ -3224,10 +3266,13 @@ function rotateGroupBy(
       cy,
       delta,
     )
-    live.x = Math.round(c.x - layout.w / 2)
-    live.y = Math.round(c.y - layout.h / 2)
-    live.rotation = Math.round(((t.rotation + delta) % 360 + 360) % 360)
-  }
+    return {
+      ...live,
+      x: Math.round(c.x - layout.w / 2),
+      y: Math.round(c.y - layout.h / 2),
+      rotation: Math.round(((t.rotation + delta) % 360 + 360) % 360),
+    }
+  })
 }
 
 function splitStrokeByCircle(stroke: Stroke, cx: number, cy: number, r: number): Stroke[] {

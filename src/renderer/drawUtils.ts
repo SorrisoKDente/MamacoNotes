@@ -101,17 +101,26 @@ export function drawStroke(
     ctx.lineTo(pts[pts.length - 1].x * scale, pts[pts.length - 1].y * scale)
     ctx.stroke()
   } else {
-    // Normal pen with pressure sensitivity
+    // Normal pen with pressure sensitivity: batch segments with same pressure to reduce stroke() calls
+    let lastSize = -1
+    let started = false
+
     for (let i = 1; i < pts.length; i++) {
-      const p0 = pts[i - 1]
       const p1 = pts[i]
-      const size = stroke.size * scale * clamp(p1.pressure, 0.15, 1)
-      ctx.lineWidth = Math.max(0.6 * scale, size)
-      ctx.beginPath()
-      ctx.moveTo(p0.x * scale, p0.y * scale)
+      const size = Math.max(0.6 * scale, stroke.size * scale * clamp(p1.pressure, 0.15, 1))
+
+      // Using a small epsilon for pressure comparison to catch almost-identical values (like from mouse)
+      if (Math.abs(size - lastSize) > 0.01 || !started) {
+        if (started) ctx.stroke()
+        ctx.lineWidth = size
+        ctx.beginPath()
+        ctx.moveTo(pts[i - 1].x * scale, pts[i - 1].y * scale)
+        started = true
+        lastSize = size
+      }
       ctx.lineTo(p1.x * scale, p1.y * scale)
-      ctx.stroke()
     }
+    if (started) ctx.stroke()
   }
   ctx.restore()
 }

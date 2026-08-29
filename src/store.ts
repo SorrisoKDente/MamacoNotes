@@ -58,10 +58,11 @@ export function clonePage(page: Page): Page {
     ...page,
     layers: page.layers.map((l) => ({
       ...l,
-      strokes: l.strokes.map((s) => ({ ...s, points: s.points.slice() })),
-      images: l.images.map((i) => ({ ...i })),
-      texts: l.texts.map((t) => ({ ...t })),
+      strokes: [...l.strokes],
+      images: [...l.images],
+      texts: [...l.texts],
     })),
+    layerFolders: page.layerFolders ? page.layerFolders.map((f) => ({ ...f })) : [],
   }
 }
 
