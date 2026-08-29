@@ -72,8 +72,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "Garantindo que o release $TAG existe..."
-          gh release create "$TAG" --title "$TAG" --notes "Draft release for $TAG" || true
+          echo "Garantindo existência do release $TAG..."
+          gh release create "$TAG" --title "$TAG" --notes "Release $TAG" || echo "Release já existe ou está sendo criado."
+          
+          echo "Aguardando 10 segundos para estabilização do GitHub API..."
+          sleep 10
+          
           echo "Fazendo upload do APK..."
           gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
 
