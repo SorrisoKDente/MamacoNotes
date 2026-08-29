@@ -224,15 +224,6 @@ function ConfirmDeleteModal() {
         ? t('modal.deleteItemLabelItems')
         : t('modal.deleteItemLabelNote')
 
-  useEffect(() => {
-    return () => {
-      if (deleteResolver) {
-        deleteResolver(null)
-        deleteResolver = null
-      }
-    }
-  }, [])
-
   return (
     <>
       <h2>{title}</h2>
@@ -448,7 +439,6 @@ export function ModalsHost() {
         {openModal === 'addPagePicker' && <AddPageModal />}
         {openModal === 'templatePicker' && <TemplateModal />}
         {openModal === 'importImage' && <ImportImageModal />}
-        {openModal === 'importPdf' && <ImportPdfModal />}
         {openModal === 'importPdfNote' && <ImportPdfNoteModal />}
         {openModal === 'imageSizeChoice' && <ImageSizeChoiceModal />}
         {openModal === 'export' && <ExportModal />}
@@ -958,120 +948,6 @@ function ImportImageModal() {
       <div className="modal-actions">
         <button className="btn" onClick={close}>{t('modal.cancel')}</button>
       </div>
-    </>
-  )
-}
-
-function ImportPdfModal() {
-  const { t } = useI18n()
-  const close = useUiStore((s) => s.close)
-  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
-  const notebooks = useAppStore((s) => s.notebooks)
-  const addPage = useAppStore((s) => s.addPage)
-  const persistNotebook = useAppStore((s) => s.persistNotebook)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
-  const [pages, setPages] = useState<RenderedPdfPage[]>([])
-  const [fileName, setFileName] = useState('')
-  const [selected, setSelected] = useState<number | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  async function onFile(file: File | undefined) {
-    if (!file) return
-    setBusy(true)
-    setResult(null)
-    try {
-      const rendered = await renderPdfPages(file)
-      setPages(rendered)
-      setFileName(file.name)
-      setSelected(rendered.length === 1 ? 0 : null)
-    } catch (err) {
-      void alertAction(t('modal.pdfImportError', { message: err instanceof Error ? err.message : String(err) }))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function addSelectedPage() {
-    if (selected === null) return
-    const notebook = notebooks.find((n) => n.id === selectedNotebookId)
-    if (!notebook) {
-      setResult(t('modal.selectNotebookFirst'))
-      return
-    }
-    setBusy(true)
-    setResult(null)
-    try {
-      const rp = pages[selected]
-      const template = notebook.pages[0]?.template ?? 'blank'
-      await addPage(template)
-      const n = useAppStore.getState().notebooks.find((nn) => nn.id === notebook.id)
-      if (!n) return
-      const p = n.pages[n.pages.length - 1]
-      p.pdf = {
-        dataUrl: rp.dataUrl,
-        name: fileName,
-        pageNumber: n.pages.length,
-      }
-      p.updatedAt = Date.now()
-      n.updatedAt = Date.now()
-      await persistNotebook(n)
-      close()
-    } catch (err) {
-      setResult(t('modal.pdfImportError', { message: err instanceof Error ? err.message : String(err) }))
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <h2>{t('modal.importPdf')}</h2>
-      <p className="modal-hint">
-        {t('modal.importPdfHint')}
-      </p>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/pdf"
-        style={{ display: 'none' }}
-        onChange={(e) => onFile(e.target.files?.[0])}
-      />
-      {pages.length === 0 && (
-        <button className="btn primary" onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? t('modal.processingPdf') : t('modal.choosePdf')}
-        </button>
-      )}
-      {pages.length > 0 && (
-        <>
-          <div className="form-label">{t('modal.choosePdfPage')}</div>
-          <div className="pdf-pages-grid">
-            {pages.map((rp, i) => (
-              <button
-                key={i}
-                className={`pdf-page-card ${selected === i ? 'active' : ''}`}
-                onClick={() => setSelected(i)}
-              >
-                <img src={rp.dataUrl} alt={t('modal.pdfPageAlt', { number: i + 1 })} />
-                <span className="pdf-page-number">{i + 1}</span>
-              </button>
-            ))}
-          </div>
-          <button className="btn small" onClick={() => inputRef.current?.click()} disabled={busy}>
-            {t('modal.choosePdf')}
-          </button>
-          <div className="modal-actions">
-            <button
-              className="btn primary"
-              onClick={addSelectedPage}
-              disabled={busy || selected === null}
-            >
-              {busy ? t('modal.processingPdf') : t('modal.addSelectedPage')}
-            </button>
-            <button className="btn" onClick={close}>{t('modal.close')}</button>
-          </div>
-        </>
-      )}
-      {result && <div className="modal-result">{result}</div>}
     </>
   )
 }

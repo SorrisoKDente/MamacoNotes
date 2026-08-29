@@ -12,11 +12,12 @@ export async function renderThumbnail(
   const sin = Math.abs(Math.sin(rad))
   const bw = page.width * cos + page.height * sin
   const bh = page.width * sin + page.height * cos
-  const scale = Math.max(0.02, Math.min(width / bw, height / bh))
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1))
+  const scale = Math.max(0.02, Math.min(width / bw, height / bh) * dpr)
 
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(width))
-  canvas.height = Math.max(1, Math.round(height))
+  canvas.width = Math.max(1, Math.round(width * dpr))
+  canvas.height = Math.max(1, Math.round(height * dpr))
   const ctx = canvas.getContext('2d')!
   ctx.fillStyle = '#14141f'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -49,7 +50,7 @@ export async function renderThumbnail(
   }
   ctx.restore()
 
-  return canvas.toDataURL('image/jpeg', 0.72)
+  return canvas.toDataURL('image/jpeg', 0.8)
 }
 
 function loadLayerImages(

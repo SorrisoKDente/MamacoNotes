@@ -19,6 +19,7 @@ export function Sidebar() {
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const clearSelection = useAppStore((s) => s.clearSelection)
   const setSelectedIds = useAppStore((s) => s.setSelectedIds)
+  const setLastClicked = useAppStore((s) => s.setLastClicked)
   const copySelected = useAppStore((s) => s.copySelected)
   const cutSelected = useAppStore((s) => s.cutSelected)
   const pasteClipboard = useAppStore((s) => s.pasteClipboard)
@@ -28,7 +29,6 @@ export function Sidebar() {
   const deleteNotebook = useAppStore((s) => s.deleteNotebook)
   const duplicateNotebook = useAppStore((s) => s.duplicateNotebook)
   const duplicateFolder = useAppStore((s) => s.duplicateFolder)
-  const renameFolder = useAppStore((s) => s.renameFolder)
   const reorderNotebook = useAppStore((s) => s.reorderNotebook)
   const reorderFolder = useAppStore((s) => s.reorderFolder)
   const hidePageCount = useAppStore((s) => s.settings.hidePageCount)
@@ -39,6 +39,7 @@ export function Sidebar() {
   const [expanded, setExpanded] = useState<Set<string | null>>(new Set([null]))
   const [menuOpen, setMenuOpen] = useState<{ type: 'folder' | 'notebook'; id: string } | null>(null)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const [search, setSearch] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   const menuAnchorRef = useRef<HTMLElement | null>(null)
   const anchorRef = useRef<string | null>(null)
@@ -138,6 +139,35 @@ export function Sidebar() {
     const onEsc = () => setMenuOpen(null)
     window.addEventListener('ink:esc', onEsc)
     return () => window.removeEventListener('ink:esc', onEsc)
+  }, [])
+
+  useEffect(() => {
+    const onRename = () => {
+      const s = useAppStore.getState()
+      if (!s.sidebarOpen) return
+      const last = s.lastClicked
+      if (last) {
+        if (last.type === 'folder') void renameFolderName(last.id)
+        else if (last.type === 'notebook') void renameNotebook(last.id)
+        return
+      }
+      if (s.selectedIds.length > 1) return
+      if (s.selectedIds.length === 1) {
+        const id = s.selectedIds[0]
+        if (s.folders.some((f) => f.id === id)) void renameFolderName(id)
+        else void renameNotebook(id)
+        return
+      }
+      if (s.selectedFolderId) {
+        void renameFolderName(s.selectedFolderId)
+        return
+      }
+      if (s.selectedNotebookId) {
+        void renameNotebook(s.selectedNotebookId)
+      }
+    }
+    window.addEventListener('ink:rename', onRename)
+    return () => window.removeEventListener('ink:rename', onRename)
   }, [])
 
   useEffect(() => {
@@ -369,6 +399,7 @@ export function Sidebar() {
         longPressTimerRef.current = null
         longPressFiredRef.current = true
         suppressClickRef.current = true
+        setLastClicked(null)
         toggleSelect(id)
       }, 500)
     }
@@ -441,10 +472,12 @@ export function Sidebar() {
     }
     if (type === 'notebook') {
       if (e.shiftKey) {
+        setLastClicked(null)
         selectRange(id)
         return
       }
       if (isModifier(e)) {
+        setLastClicked(null)
         toggleSelect(id)
         return
       }
@@ -453,24 +486,28 @@ export function Sidebar() {
       const nb = notebooks.find((n) => n.id === id)
       if (nb?.folderId) selectFolder(nb.folderId)
       selectNotebook(id)
+      setLastClicked({ type: 'notebook', id })
       if (isMobileNow()) useAppStore.getState().setSidebarOpen(false)
     } else {
       if (e.shiftKey) {
+        setLastClicked(null)
         selectRange(id)
         return
       }
       if (isModifier(e)) {
+        setLastClicked(null)
         toggleSelect(id)
         return
       }
-      clearSelection()
       anchorRef.current = id
       toggleExpand(id)
+      selectFolder(id)
+      setLastClicked({ type: 'folder', id })
     }
   }
 
   async function renameNotebook(id: string) {
-    const nb = notebooks.find((n) => n.id === id)
+    const nb = useAppStore.getState().notebooks.find((n) => n.id === id)
     if (!nb) return
     const name = await promptName(t('sidebar.renameNotePrompt'), nb.name)
     if (name && name.trim()) {
@@ -509,11 +546,11 @@ export function Sidebar() {
   }
 
   async function renameFolderName(id: string) {
-    const folder = folders.find((f) => f.id === id)
+    const folder = useAppStore.getState().folders.find((f) => f.id === id)
     if (!folder) return
     const name = await promptName(t('sidebar.renameFolderPrompt'), folder.name)
     if (name && name.trim()) {
-      void renameFolder(id, name.trim())
+      void useAppStore.getState().renameFolder(id, name.trim())
     }
   }
 
@@ -575,6 +612,7 @@ export function Sidebar() {
     const childFolders = folders.filter((f) => f.parentId === folder.id)
     const childNotebooks = notebooks.filter((n) => n.folderId === folder.id)
     const isSelected = selectedIds.includes(folder.id)
+    const isActive = selectedFolderId === folder.id
     return (
       <div key={folder.id} className="sidebar-folder-block">
         <div
@@ -582,7 +620,7 @@ export function Sidebar() {
           className={`sidebar-folder-row ${dragItem?.id === folder.id ? 'dragging' : ''} ${dropIntoFolder === folder.id ? 'drop-target' : ''}`}
         >
           <button
-            className={`sidebar-item folder ${isSelected ? 'selected' : ''}`}
+            className={`sidebar-item folder ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
             data-id={folder.id}
             title={t('sidebar.dragHint')}
             onMouseEnter={(e) => showNameTooltip(e, folder.name)}
@@ -639,6 +677,60 @@ export function Sidebar() {
   const rootFolders = folders.filter((f) => f.parentId === null)
   const rootNotebooks = notebooks.filter((n) => n.folderId === null)
 
+  const query = search.trim().toLowerCase()
+  const searchFolders = query
+    ? sortFoldersByOrder(folders).filter((f) => f.name.toLowerCase().includes(query))
+    : []
+  const searchNotebooks = query
+    ? sortNotebooksByOrder(notebooks).filter((n) => n.name.toLowerCase().includes(query))
+    : []
+
+  function renderSearchFolderRow(folder: Folder) {
+    const isActive = selectedFolderId === folder.id
+    return (
+      <div key={folder.id} className="sidebar-folder-row">
+        <button
+          className={`sidebar-item folder ${isActive ? 'active' : ''} ${selectedIds.includes(folder.id) ? 'selected' : ''}`}
+          onClick={() => {
+            clearSelection()
+            resetAnchor()
+            anchorRef.current = folder.id
+            toggleExpand(folder.id)
+            selectFolder(folder.id)
+            setLastClicked({ type: 'folder', id: folder.id })
+          }}
+        >
+          <span className="chevron open" />
+          <span className="icon icon-folder" />
+          <span className="folder-name">{folder.name}</span>
+        </button>
+      </div>
+    )
+  }
+
+  function renderSearchNotebookRow(nb: { id: string; name: string; folderId: string | null; pages: { length: number } }) {
+    return (
+      <div key={nb.id} className="sidebar-notebook-row">
+        <button
+          className={`sidebar-item notebook ${selectedNotebookId === nb.id ? 'active' : ''} ${selectedIds.includes(nb.id) ? 'selected' : ''}`}
+          onClick={() => {
+            clearSelection()
+            resetAnchor()
+            anchorRef.current = nb.id
+            if (nb.folderId) selectFolder(nb.folderId)
+            selectNotebook(nb.id)
+            setLastClicked({ type: 'notebook', id: nb.id })
+            if (isMobileNow()) useAppStore.getState().setSidebarOpen(false)
+          }}
+        >
+          <span className="icon icon-book" />
+          <span className="notebook-name">{nb.name}</span>
+          {!hidePageCount && <span className="page-count">{nb.pages.length}</span>}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <aside
       ref={asideRef}
@@ -659,6 +751,21 @@ export function Sidebar() {
         <button className="icon-btn" title={t('sidebar.trash')} onClick={() => open('trash')}>
           <IconTrash />
         </button>
+      </div>
+
+      <div className="sidebar-search">
+        <input
+          type="search"
+          className="sidebar-search-input"
+          placeholder={t('sidebar.searchPlaceholder')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <button className="sidebar-search-clear" title={t('sidebar.searchClear')} onClick={() => setSearch('')}>
+            ×
+          </button>
+        )}
       </div>
 
       {selectedIds.length > 0 && (
@@ -688,25 +795,48 @@ export function Sidebar() {
       )}
 
       <div ref={scrollerRef} className={`sidebar-scroll ${dragItem ? 'sidebar-scroll-dragging' : ''}`}>
-        <button
-          className={`sidebar-item ${selectedFolderId === null && selectedNotebookId === null && selectedIds.length === 0 ? 'active' : ''}`}
-          onClick={() => {
-            clearSelection()
-            resetAnchor()
-            selectFolder(null)
-          }}
-        >
-          <span className="icon icon-all" /> {t('sidebar.allNotebooks')}
-        </button>
+        {!query ? (
+          <>
+            <button
+              className={`sidebar-item ${selectedFolderId === null && selectedNotebookId === null && selectedIds.length === 0 ? 'active' : ''}`}
+              onClick={() => {
+                clearSelection()
+                resetAnchor()
+                setLastClicked(null)
+                selectFolder(null)
+              }}
+            >
+              <span className="icon icon-all" /> {t('sidebar.allNotebooks')}
+            </button>
 
-        {rootFolders.map((f) => renderFolder(f))}
+            {rootFolders.map((f) => renderFolder(f))}
 
-        <div className="sidebar-notebooks">
-          {rootNotebooks.length === 0 && rootFolders.length === 0 && (
-            <div className="sidebar-notebooks-title">{t('sidebar.noFolders')}</div>
-          )}
-          {rootNotebooks.map((n) => renderNotebookRow(n))}
-        </div>
+            <div className="sidebar-notebooks">
+              {rootNotebooks.length === 0 && rootFolders.length === 0 && (
+                <div className="sidebar-notebooks-title">{t('sidebar.noFolders')}</div>
+              )}
+              {rootNotebooks.map((n) => renderNotebookRow(n))}
+            </div>
+          </>
+        ) : (
+          <div className="sidebar-search-results">
+            {searchFolders.length > 0 && (
+              <div className="sidebar-search-group">
+                <div className="sidebar-notebooks-title">{t('sidebar.searchFolders')}</div>
+                {searchFolders.map((f) => renderSearchFolderRow(f))}
+              </div>
+            )}
+            {searchNotebooks.length > 0 && (
+              <div className="sidebar-search-group">
+                <div className="sidebar-notebooks-title">{t('sidebar.searchNotebooks')}</div>
+                {searchNotebooks.map((n) => renderSearchNotebookRow(n))}
+              </div>
+            )}
+            {searchFolders.length === 0 && searchNotebooks.length === 0 && (
+              <div className="sidebar-notebooks-title">{t('sidebar.searchNoResults')}</div>
+            )}
+          </div>
+        )}
 
         {dragItem && dropIndicatorY !== null && (
           <div className="sidebar-drop-indicator" style={{ top: dropIndicatorY }} />

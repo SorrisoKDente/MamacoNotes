@@ -39,6 +39,8 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Exporte suas notas como arquivos PNG ou PDF de alta qualidade.
 -   **Organização**:
     -   Pastas e cadernos aninhados para fácil categorização.
+    -   **Barra de busca** para encontrar rapidamente pastas e cadernos pelo nome.
+    -   **Renomear** pastas, cadernos (barra lateral/superior) e camadas (painel de camadas) pelo menu de contexto, duplo clique ou pelo atalho **F2** no último item clicado (fallback para o item selecionado/ativo).
     -   Reordenação por arrastar e soltar de pastas, cadernos e páginas.
     -   Suporte a seleção múltipla para ações em lote (copiar, mover, excluir).
 -   **UI & UX Inteligente**:
@@ -52,8 +54,8 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Dados armazenados localmente usando **IndexedDB** (salvamento automático).
     -   Restauração de sessão para reabrir automaticamente o último caderno e página, e cada caderno lembra a última página aberta (voltando a ela ao alternar de caderno ou reabrir o app).
     -   Importação/exportação de backup manual completo (JSON) (**senhas excluídas por segurança**).
-    -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em stream), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada; os chunks PUT preservam o tamanho em bytes UTF-8 de notas com acentos ou texto não latino.
-    -   **Correções de sync**: itens excluídos nunca mais voltam (tombstones são respeitados no pull) e excluir uma pasta se propaga para suas subpastas/cadernos; restaurar um item da lixeira o reenvia para a nuvem em vez de excluí-lo de novo.
+    -   **À prova de OOM no Android**: a sincronização de cadernos ocorre em chunks (downloads HTTP por Range e uploads PUT em um único stream nativo), para que payloads grandes nunca atravessem a ponte do Capacitor em uma única chamada; os chunks PUT preservam o tamanho em bytes UTF-8 de notas com acentos ou texto não latino.
+    -   **Correções de sync**: a sincronização manual e o auto-sync usam o mesmo algoritmo — um caderno editado localmente é **enviado**, nunca baixado por cima da edição (o conteúdo puxado é aplicado antes de o baseline avançar, então uma falha na aplicação é tentada de novo no próximo sync em vez de ser pulada silenciosamente); timers de persistência locais pendentes são descartados após uma substituição pela nuvem; itens excluídos nunca mais voltam (tombstones são respeitados no pull), baselines locais antigos recuperam o caderno remoto mais novo, e excluir uma pasta se propaga para suas subpastas/cadernos; restaurar um item da lixeira o reenvia para a nuvem em vez de excluí-lo de novo.
 
 ## 🛠️ Stack Tecnológica
 

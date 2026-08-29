@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, normalizePage } from './types'
 import { hashFolders } from './utils/sync'
 
 const DB_NAME = 'mamaco-notes'
-const DB_VERSION = 6
+const DB_VERSION = 7
 
 let dbPromise: Promise<IDBDatabase> | null = null
 

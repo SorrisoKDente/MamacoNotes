@@ -138,6 +138,25 @@ console.log('== buildPlan ==')
 }
 
 {
+  // Regression: a failed notebook upload may have advanced the local baseline
+  // through the manifest while leaving the local body stale. A newer remote
+  // notebook must be pulled instead of pushing the stale local copy.
+  const nb = makeNotebook('nb-stale', 'Stale local', 1000)
+  const manifest: SyncManifest = {
+    version: 2,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: nb.id, name: 'Updated remote', updatedAt: 2000, deleted: false }],
+  }
+  const state = makeState({ notebooks: { [nb.id]: 2000 } })
+  const plan = buildPlan([nb], [], state, manifest)
+  assert(
+    plan.pullIds.length === 1 && plan.push.length === 0,
+    'newer remote notebook wins over stale local baseline',
+  )
+}
+
+{
   const nb = makeNotebook('nb-1', 'Remote', 1000)
   const manifest: SyncManifest = {
     version: 2,
@@ -148,6 +167,26 @@ console.log('== buildPlan ==')
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
   const plan = buildPlan([nb], [], state, manifest)
   assert(plan.pullIds.length === 1 && plan.push.length === 0, 'remote changed -> pull')
+}
+
+{
+  // Regression: clicking "sincronizar agora" must NOT discard local edits. A
+  // notebook edited locally (newer than the baseline, remote unchanged) is
+  // PUSHED. The previous "force pull" behavior downloaded the remote (old) copy
+  // over the local edit — the app reported "synced" but the changes vanished.
+  const nb = makeNotebook('nb-manual', 'Local', 2000)
+  const manifest: SyncManifest = {
+    version: 2,
+    updatedAt: 1000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: nb.id, name: nb.name, updatedAt: 1000, deleted: false }],
+  }
+  const state = makeState({ notebooks: { [nb.id]: 1000 } })
+  const plan = buildPlan([nb], [], state, manifest)
+  assert(
+    plan.push.length === 1 && plan.push[0].id === nb.id && plan.pullIds.length === 0,
+    'manual sync with local edits pushes, never pulls over the edit',
+  )
 }
 
 {

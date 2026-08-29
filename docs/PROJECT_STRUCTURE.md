@@ -118,12 +118,12 @@ Initialization flow:
 
 | File | Responsibility |
 |---|---|
-| `TopBar.tsx` | Top bar: sidebar/page toggles (always visible; if panel is hidden by `settings.hideSidebar`/`hidePageList`, the toggle re-shows it), notebook title (renamable), Image/PDF/Page/Export/Sync/Settings/Fullscreen buttons |
-| `Sidebar.tsx` | Folder/notebook tree, context menu, **drag-and-drop reordering and moving** (custom DnD via Pointer Events, works with mouse and touch; dragging over a folder moves inside it; insertion position indicator; autoscroll), **multiple selection** (CTRL/Meta click toggles, SHIFT click selects range between anchor and clicked item, **long touch on touchscreens toggles selection**; selection bar with copy/cut/paste/duplicate/delete; hidden page count via `settings.hidePageCount`), resizable bar (`sidebar-resizer` handle, width persisted in `settings.sidebarWidth`, limit 160–min(520, 50% of window)); context menu "…" closes when clicking outside (global `pointerdown` listener); **"Lixeira" (trash) button in the header** (opens the `trash` modal) |
-| `PageList.tsx` | Page preview (thumbnails), search by number, view mode (V/H/S), drag-drop, per-page menu, multiple page selection (CTRL click toggles, SHIFT click selects range; selection bar with duplicate/export PDF/rotate/delete). **Thumbnail regeneration is guarded**: `thumbTimesRef` tracks each page's `updatedAt`, so only pages whose `updatedAt` changed are re-rendered on `dataVersion` bumps — a drawing burst re-renders just the current page instead of all pages |
-| `Editor.tsx` | **Largest component (~2900 lines)**: editing canvas, zoom/pan, drawing, eraser, selection, inline text, pointer gestures (including two-finger double tap = Undo), all drags. **Debounced persistence**: `schedulePersist()` (400ms) deep-clones the notebook pages at scheduling time and persists the snapshot via `persistNotebook` after the debounce, so a drawing burst commits strokes without freezing the UI after each pointer release |
+| `TopBar.tsx` | Top bar: sidebar/page toggles (always visible; if panel is hidden by `settings.hideSidebar`/`hidePageList`, the toggle re-shows it), notebook title (renamable — click to edit inline, or **`ink:rename` (F2)** when neither the sidebar nor the layers panel are open), Image/Page/Export buttons (shown only with a selected notebook), **PDF button always available** (`open('importPdfNote')` — "Adicionar PDF como nota", the same flow as the Sidebar button — works even without a selected notebook) plus Sync/Settings/Fullscreen buttons |
+| `Sidebar.tsx` | Folder/notebook tree, context menu, **drag-and-drop reordering and moving** (custom DnD via Pointer Events, works with mouse and touch; dragging over a folder moves inside it; insertion position indicator; autoscroll), **multiple selection** (CTRL/Meta click toggles, SHIFT click selects range between anchor and clicked item, **long touch on touchscreens toggles selection**; selection bar with copy/cut/paste/duplicate/delete; hidden page count via `settings.hidePageCount`), **name search bar** (filters folders/notebooks by name in a flat grouped list; results shown while typing, cleared with the × button), resizable bar (`sidebar-resizer` handle, width persisted in `settings.sidebarWidth`, limit 160–min(520, 50% of window)); context menu "…" closes when clicking outside (global `pointerdown` listener); **"Lixeira" (trash) button in the header** (opens the `trash` modal). **Rename via `ink:rename` (F2)** renames the **last clicked item** — a single click records `lastClicked` (`folder`/`notebook`, including search results), multi-select (CTRL/SHIFT/long touch) resets it to `null` — falling back to single explicit selection, then the selected folder, then the selected notebook (prompt modal); with a sidebar multi-selection it does nothing; whenever the sidebar is open with any selection (one or more selected items, or a selected folder/notebook), this wins even when the layers panel is open (the layers panel then skips) |
+| `PageList.tsx` | Page preview (thumbnails), search by number, view mode (V/H/S), drag-drop, per-page menu, multiple page selection (CTRL click toggles, SHIFT click selects range; selection bar with duplicate/export PDF/rotate/delete). **Thumbnail regeneration is guarded**: `thumbTimesRef` tracks each page's `updatedAt`, so only pages whose `updatedAt` changed are re-rendered on `dataVersion` bumps; replacing the pages array, such as after a cloud pull, invalidates all cached thumbnails |
+| `Editor.tsx` | **Largest component (~2900 lines)**: editing canvas, zoom/pan, drawing, eraser, selection, inline text, pointer gestures (including two-finger double tap = Undo), all drags. **Debounced persistence**: `schedulePersist()` (400ms) persists the **current live notebook** via `persistNotebook` after the debounce — keeping the same object reference in the store, so the canvas engine is not recreated (image cache lost) after every stroke, which caused a screen flicker on release — and discards the timer when a cloud pull has replaced that notebook object, so stale local edits cannot overwrite the downloaded copy. **Mobile keyboard resize guard**: while an INPUT/TEXTAREA/SELECT has focus (plus a 600ms grace after blur), the window/`visualViewport` resize handler skips `fitPage()` and only re-renders — preserving the user's zoom/position while the on-screen keyboard opens/closes (e.g. typing a tool size on the phone) and keeping the canvas backing store correct |
 | `Toolbar.tsx` | Side toolbar: pen/highlighter/eraser/text/select/move/rotation, undo/redo, per-tool configuration panels |
-| `LayersPanel.tsx` | Layers panel (right side): current page layers list (bottom→top inverted in UI), single/multiple selection (CTRL/SHIFT and long touch), drag reordering, inline rename, toggle visibility/lock, opacity, add/duplicate/delete/merge layers; fixed footer with page background color |
+| `LayersPanel.tsx` | Layers panel (right side): current page layers list (bottom→top inverted in UI), single/multiple selection (CTRL/SHIFT and long touch), drag reordering, inline rename (double-click or **`ink:rename` (F2) renames the last clicked folder or layer**, resetting to `null` on multi-select; **skipped whenever the sidebar is open with any selection — one or more selected items, or a selected folder/notebook — which the sidebar renames instead**), toggle visibility/lock, opacity, add/duplicate/delete/merge layers, **layer folders** (create via "+ pasta", rename via double-click / "…" menu / F2, delete via "…" menu with confirm, drag a layer into/out of a folder and reorder folders among themselves), **resizable panel** (`.layers-resizer` handle on the left edge, width persisted in `settings.layersWidth`, clamp 180–min(420, 50% of window)); fixed footer with page background color |
 | `Modals.tsx` | **All modals**: new notebook, page, template, import image/PDF, export, settings, cloud, move/copy, background color, sync conflicts, prompt, confirmation, **trash** (Restore / Restore from cloud / Delete permanently, empty state, 30-day retention note). Settings backup section exposes export and import of a single JSON (`exportBackup`/`importBackup` → `replaceAllData`) |
 
 #### `src/renderer/` — drawing engine (Canvas)
@@ -132,20 +132,20 @@ Initialization flow:
 |---|---|
 | `canvas.ts` | `PageCanvas` class: renders pages (continuous/separate), layers (visibility/opacity), strokes, images, texts, PDF, templates, selection; coordinate conversion; hit tests |
 | `drawUtils.ts` | Pure drawing functions reused by thumbnail/export: `drawTemplate`, `drawLayer`, `drawStroke`, `drawTextOnCanvas` |
-| `thumbnail.ts` | Generates page thumbnails (used in PageList and custom templates) |
+| `thumbnail.ts` | Generates page thumbnails (used in PageList and custom templates), rendered at `devicePixelRatio` resolution (capped at 3×) with JPEG quality 0.8 — keeping the CSS size (160×207) so previews stay sharp on retina phones |
 
 #### `src/utils/` — support logic
 
 | File | Responsibility |
 |---|---|
 | `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. Exports `customFetch` (body converts `Uint8Array`/`ArrayBuffer`/`Blob` to text), `decodeCapacitorData(data, isJson?)` (decodes CapacitorHttp's `data` field: base64 string, raw string, or a JS object/array that CapacitorHttp parsed despite `responseType: 'arraybuffer'` when Content-Type is JSON), `isConnectionError(err)` and `withRetry(fn)` (**network resilience**: 3 attempts with 500ms→1s backoff, only for connection-level failures — never for HTTP 4xx/5xx or authentication), and `downloadText` (**chunked Range download** used on Android: requests `Range: bytes=…` with `responseType: 'arraybuffer'`, reassembles chunks in JS via `decodeCapacitorData` — avoids the bridge OOM for large notebook JSON). `downloadText` detects the response `Content-Type` and passes `isJson` to `decodeCapacitorData`, which then treats strings as raw text (never base64) for JSON responses — this fixes the "Bad control character in string literal in JSON" / "Unexpected end of JSON input" errors on Android caused by a Range chunk landing entirely inside a base64 image `dataUrl` in the notebook JSON and being base64-decoded into garbage. |
-| `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `readBackupFileFromUri` (chunked read via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (system document picker → chunked read), and `uploadFileStreaming` (PUT streamed via the plugin's `uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`, with chunks bounded by UTF-8 byte length). |
+| `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `readBackupFileFromUri` (chunked read via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (system document picker → chunked read), and `uploadFileStreaming` (PUT streamed via one native `OutputStream`, sending base64-encoded byte chunks with the declared UTF-8 byte length). |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
 | `export.ts` | Page rendering to canvas and PNG/PDF export (generates simple PDF without external library) |
 | `pdf.ts` | Rendering PDF files to images via `pdfjs-dist` (`renderPdfPages`) |
-| `webdav.ts` | WebDAV transport (PROPFIND/MKCOL/PUT/DELETE fetch), special Koofr support, `makeTransport`. On Android the transport uses the **chunked native paths**: `downloadFile` via `http.ts` `downloadText` (Range + arraybuffer) and `uploadFile` via `chunkedIo.ts` `uploadFileStreaming` (PUT streamed through the `pick-directory` plugin's `HttpURLConnection`) — both avoid the bridge OOM. **Connection-level failures** (from `http.ts` `isConnectionError`) are re-thrown as a friendly `error.networkUnreachable` message so the user is told to check the internet connection. |
-| `sync.ts` | **Bidirectional synchronization algorithm** (merge, conflicts, tombstone, migration). On download failure (notebook/folder), logs the error via `logger.error` (visible in the Settings → Logs tab) **before** surfacing it in the result/UI — on mobile, failures without this logging were silently invisible. `buildPlan` ignores ids under `localOnlyDeleted`/`tombstones` in the pull loop, and a notebook that reappeared locally after its remote deletion (restored from the trash, no active tombstone/baseline) is **re-pushed** instead of deleted again. |
+| `webdav.ts` | WebDAV transport (PROPFIND/MKCOL/PUT/DELETE fetch), special Koofr support, `makeTransport`. On Android the transport uses the **chunked native paths**: `downloadFile` via `http.ts` `downloadText` (Range + arraybuffer) and `uploadFile` via `chunkedIo.ts` `uploadFileStreaming` (PUT streamed through the `pick-directory` plugin's `HttpURLConnection`) — both avoid the bridge OOM. Native uploads verify the remote size with HEAD when supported, rejecting empty/truncated objects before the manifest advances. **Connection-level failures** (from `http.ts` `isConnectionError`) are re-thrown as a friendly `error.networkUnreachable` message so the user is told to check the internet connection. |
+| `sync.ts` | **Bidirectional synchronization algorithm** (merge, conflicts, tombstone, migration). A clearly newer remote notebook takes precedence over a stale local baseline left by a failed upload. Manual sync ("Sincronizar agora") runs the same algorithm as auto-sync — a notebook edited locally is **pushed**, never force-pulled over the edit. On download failure (notebook/folder), logs the error via `logger.error` (visible in the Settings → Logs tab) **before** surfacing it in the result/UI — on mobile, failures without this logging were silently invisible. `buildPlan` ignores ids under `localOnlyDeleted`/`tombstones` in the pull loop, and a notebook that reappeared locally after its remote deletion (restored from the trash, no active tombstone/baseline) is **re-pushed** instead of deleted again. |
 | `backup.ts` | Export/import full JSON backup (folders, notebooks, and settings; sanitizes settings and **removes cloud passwords** for security). On mobile the export writes to the app Documents folder via `capacitor-blob-writer` (chunked stream, avoids the Capacitor bridge OOM caused by `Filesystem.writeFile` with large content), always with a **date-stamped filename** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`); import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron `save-file`/`open-file` bridge and on web triggers a download/file input. |
 | `imageErase.ts` | Eraser on images: offscreen canvas erasing session and re-encode at the end |
 | `colors.ts` | Color palette and HEX/RGB conversion helpers |
@@ -186,7 +186,7 @@ Initialization flow:
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
 | `docs/superpowers/specs/` | Approved design documents (bidirectional sync; layers) |
 | `docs/superpowers/plans/` | Implementation plans (bidirectional sync; layers) |
-| `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
+| `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (stale local baseline recovery, rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix: forces the native `downloadText` path (`Capacitor.isNativePlatform()` overridden) against a mocked fetch that mimics the Android server side, asserting `decodeCapacitorData` reconstructs the correct text for parsed-JSON bodies (200), truncated JSON Range chunks (206), base64 chunks (large non-JSON file), 404 handling, the JSON-vs-base64 disambiguation (`isJson` keeps JSON strings as raw text so a chunk inside a base64 `dataUrl` is never base64-decoded), the native chunked download of a large JSON notebook with an embedded base64 image reassembles byte-exact, and the **retry behavior** (`isConnectionError` classification and `withRetry` 500ms→1s backoff: connection errors are retried, HTTP 4xx/5xx and auth errors are not). Run with `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Empty file (remnant) |
 
@@ -200,13 +200,14 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 
 - `Folder { id, name, parentId, createdAt, order? }` — nested folders; `order` is the position among siblings of the same `parentId` (used in drag-and-drop reordering).
 - `Notebook { id, name, folderId, pages, createdAt, updatedAt, order? }` — notebook; `order` is the position among notebooks of the same `folderId` (used in drag-and-drop reordering).
-- `Page { id, template, width, height, rotation, backgroundColor, layers, activeLayerId, pdf?, createdAt, updatedAt }` — all editable content resides in **layers**; `activeLayerId` persists the active layer (falls back to the last one in the array if null/non-existent). The old flat arrays `strokes`/`images`/`texts` have been **removed**.
-- `Layer { id, name, visible, opacity, locked, strokes, images, texts }` — content layer. `layers` array order: **index 0 = bottom** (drawn first), **last = top**. Inside each layer, the sub-drawing order is **images → texts → strokes**. A locked layer (`locked: true`) receives no content and is not editable on the canvas (draw/erase/select/move), but can still be renamed, reordered, duplicated, deleted, hidden, have its opacity adjusted, become active, and participate in a merge.
+- `Page { id, template, width, height, rotation, backgroundColor, layers, layerFolders, activeLayerId, pdf?, createdAt, updatedAt }` — all editable content resides in **layers**; `activeLayerId` persists the active layer (falls back to the last one in the array if null/non-existent). The old flat arrays `strokes`/`images`/`texts` have been **removed**. `layerFolders` groups layers visually (see `LayerFolder`).
+- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts }` — content layer. `layers` array order: **index 0 = bottom** (drawn first), **last = top**. Inside each layer, the sub-drawing order is **images → texts → strokes**. A locked layer (`locked: true`) receives no content and is not editable on the canvas (draw/erase/select/move), but can still be renamed, reordered, duplicated, deleted, hidden, have its opacity adjusted, become active, and participate in a merge. `folderId` is the `LayerFolder` this layer belongs to (`null`/`undefined` = root, i.e. no folder).
+- `LayerFolder { id, name, order? }` — **layer folder** (one level, no nesting). Lives inside the page JSON (`Page.layerFolders`), so existing notebook sync/backup already carries it. `order` is the folder's position among siblings (used in drag-and-drop reordering). A folder groups layers visually; deleting a folder moves its layers to the root (`folderId = null`).
 - `Stroke { id, kind(pen|highlighter), color, size, points[] }` — stroke with pressure.
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF used as page background (resides **at page level**, below all layers; not a `Layer`).
-- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`).
+- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`, **layers panel width via `layersWidth`**).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — sync data.
 - `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **local trash entry** (NOT synced). One entry per deleted item: deleting a folder produces one entry for the folder, one for each subfolder and one for each notebook inside (each with its own `parentId`) so every item can be restored individually. `cloudKeepsCopy` is `true` when the item was deleted "só local" with a cloud configured (the heavy `data` is discarded; the item can only be brought back with "Restaurar da nuvem"). When `false` (deleted "local + nuvem" or no cloud), `data` holds the full item for a cloud-less restore.
 
@@ -215,15 +216,17 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 > `replaceAllData` functions) and in `src/db.ts`.
 >
 > **Layers**: `makePage` creates a page with 1 default layer "Camada 1" (or "Layer 1")
-> (`visible: true`, `opacity: 1`, `locked: false`). `normalizePage(page)` (pure function in
+> (`visible: true`, `opacity: 1`, `locked: false`, `folderId: null`, `layerFolders: []`).
+> `normalizePage(page)` (pure function in
 > `types.ts`) converts legacy/partial pages: if `layers` is missing/empty, it creates 1
-> layer from old flat arrays; normalizes each layer defensively; validates `activeLayerId`
+> layer from old flat arrays; normalizes each layer defensively (including `folderId ??
+> null`); normalizes `layerFolders` (defaulting to `[]`); validates `activeLayerId`
 > (fallback last layer) and **removes** legacy flat fields from the result.
 > `getActiveLayer(page)` resolves the active layer (or the last one).
 
 ### 5.2 Persistence (IndexedDB) — `src/db.ts`
 
-Database `mamaco-notes`, version **6**, with object stores:
+Database `mamaco-notes`, version **7**, with object stores:
 
 | Store | Content | Key |
 |---|---|---|
@@ -254,6 +257,12 @@ All data writes in the app go through `store.ts`, which calls `db.*`.
 > **Migration 5 → 6 (trash)**: `openDb()` creates the `trash` object store (keyPath `id`)
 > if missing. No data rewrite is needed — the trash starts empty and existing
 > folders/notebooks/cloudSync records are preserved untouched.
+>
+> **Migration 6 → 7 (layer folders)**: bumping the version re-runs `migrateLayers()`
+> (idempotent), which rewrites every notebook page through `normalizePage` — now adding
+> `layerFolders: []` and `folderId: null` to pages/layers without them. Data arriving from
+> sync/backup is also normalized on read in `store.ts` (`init`, `applySyncChanges`,
+> `replaceAllData`), so no sync version change is needed.
 
 ### 5.3 Stores (Zustand)
 
@@ -324,15 +333,15 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | Group | Contract |
 |---|---|
 | **Data** | `loaded: boolean`, `folders: Folder[]`, `notebooks: Notebook[]`, `templates: PageTemplate[]`, `trash: TrashItem[]`, `settings: AppSettings`, `dataVersion: number` |
-| **Selection/UI** | `selectedFolderId`, `selectedNotebookId`, `selectedIds: string[]`, `selectedPageIndices: number[]`, `clipboard: { ids, cut } | null`, `currentPageIndex`, `tool: ToolKind`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`, `canUndo`, `canRedo` |
+| **Selection/UI** | `selectedFolderId`, `selectedNotebookId`, `selectedIds: string[]`, `selectedPageIndices: number[]`, `clipboard: { ids, cut } | null`, `lastClicked: LastClickedTarget` (last single-clicked item: `{ type: 'folder'|'notebook'|'layer'|'layerFolder'; id }`, `{ type: 'notebookTitle' }`, or `null` — used by the `ink:rename` (F2) listeners to rename exactly the item the user clicked last; set by the Sidebar/LayersPanel/TopBar click handlers and reset to `null` on multi-select and when the item is deleted), `currentPageIndex`, `tool: ToolKind`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`, `canUndo`, `canRedo` |
 | **Bootstrap** | `init(): Promise<void>` |
 | **Navigation/Selection** | `selectFolder(id)`, `selectNotebook(id)`, `selectPage(index)`, `setTool(tool)`, `setRotationOpen(open)`, `toggleSidebar()`, `togglePageList()`, `toggleLayers()`, `setSidebarOpen(open)`, `setPageListOpen(open)`, `setLayersOpen(open)`, `toggleSearch()` |
-| **Selection Editing** | `toggleSelect(id)`, `clearSelection()`, `setSelectedIds(ids)`, `copySelected()`, `cutSelected()`, `pasteClipboard()`, `duplicateSelected()`, `deleteSelected(scope?)` |
+| **Selection Editing** | `toggleSelect(id)`, `clearSelection()`, `setSelectedIds(ids)`, `setLastClicked(target: LastClickedTarget)`, `copySelected()`, `cutSelected()`, `pasteClipboard()`, `duplicateSelected()`, `deleteSelected(scope?)` |
 | **Page Selection** | `selectedPageIndices`, `toggleSelectPage(index)`, `setPageSelection(indices)`, `clearPageSelection()`, `duplicateSelectedPages()`, `deleteSelectedPages()`, `rotateSelectedPagesBy(delta)` |
 | **Folders** | `addFolder(name, parentId?)`, `deleteFolder(id, scope?)`, `renameFolder(id, name)`, `moveFolder(id, newParentId)`, `reorderFolder(id, parentId, beforeId)`, `duplicateFolder(id)`, `copyFolder(id, targetParentId)` |
 | **Notebooks** | `createNotebook(name, folderId, template)`, `createNotebookFromTemplate(...)`, `deleteNotebook(id, scope?)`, `moveNotebook(id, folderId)`, `reorderNotebook(id, folderId, beforeId)`, `copyNotebook(id, folderId)`, `duplicateNotebook(id)`, `updateNotebook(notebook)` |
 | **Pages** | `addPage(template)`, `addPageAfter(index, template)`, `duplicatePage(index)`, `deletePage(index)`, `movePage(from, to)`, `rotatePage(index)`, `rotatePageBy(index, delta)`, `updatePage(index, patch: Partial<Page>)` |
-| **Layers** | `addLayer()`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)` |
+| **Layers** | `addLayer(folderId?)`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `moveLayerToFolder(from, folderId, beforeId)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)`, **layer folders**: `addLayerFolder(name)`, `renameLayerFolder(id, name)`, `deleteLayerFolder(id)`, `reorderLayerFolder(id, beforeId)` |
 | **Configuration** | `setSettings(patch)`, `setShortcut(action, value)`, `setCloud(patch)` |
 | **Cloud** | `syncNow(): Promise<SyncResult | null>` (advances `settings.cloud.lastSyncAt` **only** when the run finishes with zero errors), `resolveConflicts(choices: Record<string, ConflictChoice>)` |
 | **Trash** | `restoreFromTrash(id)`, `restoreFromCloud(id)`, `purgeTrashItem(id)`, `runTrashPurge()` |
@@ -350,6 +359,10 @@ Old data without `order` (sync/backup) is normalized by `fillFolderOrder`/`fillN
 `selectNotebook(id)` reopens the notebook on the last page remembered for it (see §5.3
 session restoration, `mamaco-notes.last-page`), falling back to page 0 if the remembered
 page no longer exists; `selectFolder(id)` and `selectNotebook(null)` reset to page 0.
+`lastClicked` is a pure UI convenience (set by `setLastClicked`, never persisted): it is
+cleared when the referenced folder/notebook/layer/layer-folder is deleted, when a cloud
+pull or backup restore replaces the data, and when the selected notebook is removed by a
+sync change.
 
 **Layer Guarantees**: every layer action resolves the selected notebook + current page,
 calls `pushUndo()`, mutates `page.layers`/`page.activeLayerId`, updates `page.updatedAt`,
@@ -363,12 +376,25 @@ selected layers in bottom→top order, the result occupies the position of the t
 active; non-selected layers preserve relative order. `addImageToPage` resolves the active
 layer and **aborts** if it is locked. Layer actions increment `dataVersion` (re-renders
 Editor and `LayersPanel`) — they do not use `ink:*` events.
+**Layer folder guarantees**: `page.layers` stays the single source of z-order (index 0 =
+bottom); folder grouping is a *view* on top of the flat array (display order = `layerFolders`
+order). `addLayer(folderId?)` inserts the new layer at the **top of the target group**
+(the same rule as `moveLayerToFolder` with `beforeId = null`); with no folder, it keeps the
+legacy behavior (insert after the active layer). `moveLayerToFolder(from, folderId, beforeId)`
+sets the layer's `folderId` and repositions it: with `beforeId`, right before that layer;
+otherwise at the **top of the target folder group** (or root group). `deleteLayerFolder(id)`
+removes the folder and sets `folderId = null` on all its layers (they move to root).
+`reorderLayerFolder(id, beforeId)` recomputes sibling `order` like `reorderFolder`.
+`moveLayer(from, to)` remains for backward compatibility (no other caller after the panel
+switched to `moveLayerToFolder`). `mergeSelectedLayers` spreads the top layer (keeps its
+`folderId`); `cloneLayerWithNewIds` and page clones also keep `folderId`, so duplicated/
+merged layers stay in the same folder.
 
 #### `useUiStore` (`src/uiStore.ts:22`) — modals
 
 | Field/Action | Type |
 |---|---|
-| `openModal` | `ModalName | null` (closed set of 19 values, listed at the top of the file) |
+| `openModal` | `ModalName | null` (closed set of 20 values, listed at the top of the file) |
 | `modalData` | `Record<string, unknown>` (payload of the open modal) |
 | `open(name, data?)` | Opens the modal and stores the payload |
 | `close()` | Closes the modal and resets `modalData` |
@@ -518,6 +544,7 @@ triggered/heard:
 | `ink:image-rotate` | `number` (degrees) | `Toolbar.tsx` (Selection panel) | `Editor.tsx` |
 | `ink:image-selected` | `{ id }` | `Editor.tsx` | `Toolbar.tsx` (Selection panel) |
 | `ink:recenter` | — | `recenter` shortcut | `Editor.tsx` |
+| `ink:rename` | — | `rename` shortcut (`useShortcuts.ts`, default F2) | `Sidebar.tsx` (renames the **last clicked** folder/notebook — via `store.lastClicked`, set on single click incl. search results, `null` on multi-select — falling back to single explicit selection, then the selected folder, then the selected notebook, via prompt modal; with a sidebar multi-selection it does nothing; whenever the sidebar is open with any selection this wins even when the layers panel is open), `LayersPanel.tsx` (inline renames the **last clicked** layer/layer-folder — via `store.lastClicked`, `null` on multi-select — else the selected folder row, else the active layer; only when the layers panel is open, and skipped whenever the sidebar is open with any selection), `TopBar.tsx` (starts editing the current notebook title when the **last clicked** item was the title, or when neither sidebar nor layers panel are open) |
 | `ink:request-add-page` | — | `Editor.tsx` (`onAddPage`, re-dispatch of `ink:add-page`) | `App.tsx` (opens `addPagePicker`) |
 | `ink:save` | — | `save` shortcut | `App.tsx` (persists current notebook) |
 | `ink:selection-action` | `'copy'|'cut'|'paste'|'duplicate'|'delete'` | `Toolbar.tsx` | `Editor.tsx` |
@@ -616,6 +643,11 @@ Flow and files involved:
   `applySyncChanges()` applies pulled/new/removed data and **no-ops when nothing actually
   changed** — it only bumps `dataVersion` (which re-triggers auto-sync) when real changes
   are applied, avoiding an endless auto-sync loop on mobile.
+  **Content-first commit (no "synced but changes missing")**: `syncNow()` applies the
+  pulled content (`applySyncChanges`) **before** persisting the advanced baseline
+  (`db.putCloudSyncState`). If applying the content fails, the baseline stays put, so the
+  next sync re-pulls the same notebooks (idempotent) instead of marking them as synced
+  while the local copy never changed.
 - **Detailed Design/Plan**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
   and `docs/superpowers/plans/2026-08-17-sync-bidirecional-plan.md`.
 - **Regression verification**: `scripts/verify-sync.ts` (run with `npx tsx
@@ -652,8 +684,9 @@ Flow and files involved:
 | Inline text (typing in place) | `Editor.tsx` (`InlineTextInput`, `commitInlineText`) |
 | Text formatting (font, markers, direction) | `src/utils/drawText.ts` + `Toolbar.tsx` |
 | Undo/redo | `src/store.ts` (`pushUndo`, `undo`, `redo`); on touch, two consecutive two-finger taps on the canvas equal Undo (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); two taps with 3 fingers = Redo (`useAppStore.redo()`); `pushUndo` is only called when the stroke/eraser/rotation actually changes the page; multi-finger taps discard the in-progress content drag (no stray stroke/undo entry) |
-| Layers: model and helpers (legacy page normalization) | `src/types.ts` (`Layer`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
-| Layers: state actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
+| Layers: model and helpers (legacy page normalization) | `src/types.ts` (`Layer`, `LayerFolder`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
+| Layers: state actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `moveLayerToFolder`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
+| Layer folders (create/rename/delete/reorder, move layer into/out of folder, drop onto folder row / root zone) | `src/store.ts` (`addLayerFolder`, `renameLayerFolder`, `deleteLayerFolder`, `reorderLayerFolder`, `moveLayerToFolder`) + `src/components/LayersPanel.tsx` (`.layer-folder-row`, `dragFolderIdRef`, `dropIntoFolderRef`, folder "…" menu) + `src/types.ts` (`LayerFolder`) |
 
 ### Data and Persistence
 
@@ -688,7 +721,7 @@ Flow and files involved:
 | Subject | File(s) |
 |---|---|
 | Import image to page | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`) |
-| Import PDF to current page (choose a page from PDF) | `Modals.tsx` (`ImportPdfModal`) + `store.ts` (`addPage`, `persistNotebook`) |
+| Import PDF as page background (via page/notebook creation → "Import template (image/PDF)") | `Modals.tsx` (`AddPageModal`/`NewNotebookModal` → `TemplatePicker`, `buildPdfTemplatePage`) + `store.ts` (`createNotebook`, `addPage`, `addPagesFromTemplate`) |
 | Import PDF as new notebook | `Modals.tsx` (`ImportPdfNoteModal`) + `store.ts` (`importPdfNotebook`) |
 | Render PDF → images | `src/utils/pdf.ts` |
 | Export PNG | `src/utils/export.ts` (`exportPageAsPng`) |
@@ -707,11 +740,16 @@ Flow and files involved:
 | Theme support (Dark/Light/System) | Settings (**Appearance tab**) → `settings.theme`; applied in `App.tsx` via CSS classes and media queries. |
 | Mobile safe areas (status bar / notch / gestures) | `index.html` uses `viewport-fit=cover`; `src/styles.css` respects `env(safe-area-inset-top)` in `.topbar` (height/padding) and in the `.ui-restore-btn.top-center` floating button, and `env(safe-area-inset-bottom)` in `.toolbar` in mobile mode — prevents the top bar from being covered/inaccessible on phones with a hidden notification bar (edge-to-edge) |
 | Top bar | `src/components/TopBar.tsx`. Contains sidebar/preview toggles on the left, the notebook title in the center, and action buttons (Import, Export, Sync, Settings, **Hide UI bars**) on the right. On mobile, the right side is scrollable. |
-| Layers panel (right side; "Layers" button in `TopBar` toggles `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (layer actions) |
+| Layers panel (right side; "Layers" button in `TopBar` toggles `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (layer + layer folder actions) |
 | Folder/notebook tree | `src/components/Sidebar.tsx` (custom tooltip `.sidebar-name-tooltip` shows full notebook/folder name on hover; `.sidebar-item` inside rows uses `flex: 1 1 auto; min-width: 0` and `.row-menu` with `z-index` to keep the "…" button clickable even with long names; "…" menu closes when clicking outside via global `pointerdown` listener; scrollable content in `.sidebar-scroll`) |
+| Search folders/notebooks by name | `src/components/Sidebar.tsx` (search input `.sidebar-search` in the header; filters `folders`/`notebooks` by name with a flat grouped result list while typing, "no results" empty state, × button clears; clicking a result selects the item and expands the parent folder) |
+| Rename folder/notebook (F2) | `src/types.ts` (`DEFAULT_SHORTCUTS.rename` = `f2`), `src/hooks/useShortcuts.ts` (dispatches `ink:rename`), `src/components/Sidebar.tsx` (`ink:rename` listener → `renameNotebook`/`renameFolderName` via prompt modal; also available in the "…" context menu) |
+| Rename layer / layer folder (F2) | `src/components/LayersPanel.tsx` (`ink:rename` listener starts the inline rename of the selected folder — else the active layer; double-click on the folder/layer name also renames) |
+| Rename current notebook title (F2) | `src/components/TopBar.tsx` (`ink:rename` listener opens the inline title input when neither the sidebar nor the layers panel are open; clicking the title also renames) |
 | Drag-and-drop folder/notebook reordering (reorder same level + move into folder) | `src/components/Sidebar.tsx` (Custom DnD via Pointer Events: `onItemPointerDown/Move/Up`, `computeSlot`, `updateDropPosition`, autoscroll, `.sidebar-drop-indicator` indicator, `.drop-target` highlight) + `src/store.ts` (`reorderFolder`/`reorderNotebook` recalculate sibling `order`; `moveFolder`/`moveNotebook` move to destination) + `order` field in `src/types.ts` |
 | Multiple folder/notebook selection (CTRL/SHIFT on PC, long touch on touchscreens) | `src/components/Sidebar.tsx` (`toggleSelect`, `selectRange`; ~500ms timer on touch `pointerdown` triggers `toggleSelect`; `.selection-bar` bar) + `src/store.ts` (`toggleSelect`, `clearSelection`, `selectedIds`) |
 | Resize notebook bar | `src/components/Sidebar.tsx` (`.sidebar-resizer` handle on right edge, drag to increase/decrease; width saved in `settings.sidebarWidth` via `setSettings` at end of drag; limit 160–min(520, 50% of window); hidden on touch/`pointer: coarse`) |
+| Resize layers panel | `src/components/LayersPanel.tsx` (`.layers-resizer` handle on the **left** edge, mirror of the sidebar resizer; width = `dragWidth ?? settings.layersWidth`, clamp 180–min(420, 50% of window); saved to `settings.layersWidth` via `setSettings` on release; hidden on mobile where the panel width is fixed at 280px) |
 | Page preview (fixed thumbnail size, multiple selection with CTRL/SHIFT and selection bar) | `src/components/PageList.tsx` + `src/renderer/thumbnail.ts` (`.page-thumb-wrap` with `flex-shrink: 0` so it doesn't shrink with many pages) |
 | Modals (all) | `src/components/Modals.tsx` + `src/uiStore.ts`; close with `Esc`/back button (`ink:esc` event → `ModalsHost` calls `close()`; for `prompt`/`confirmDelete`, resolves the resolver with `null`) |
 | Software Updates | `src/utils/updateCheck.ts` (GitHub API check) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); automatically checks on startup (`App.tsx`) and allows manual check in Settings; applying an update runs the NSIS installer **silently** (`quitAndInstall(true, true)`) so the interactive "close the app" dialogs never block the update |
@@ -737,6 +775,7 @@ Flow and files involved:
 | Shortcut normalization/registration | `src/hooks/useShortcuts.ts` (`initGlobalShortcuts` automatically disables shortcuts when a modal is open or when the user is typing in an input field to prevent interference). |
 | Key labels and normalization | `src/utils/shortcuts.ts` |
 | Hide bars / free rotation / selection mode shortcuts (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`. Note: the `pan` shortcut is handled exclusively as a "hold-to-activate" modifier in `Editor.tsx` and does not switch the global tool state. |
+| Rename (F2) | `src/types.ts` (`DEFAULT_SHORTCUTS.rename` = `f2`) + `src/hooks/useShortcuts.ts` (dispatches `ink:rename`; each panel that has a name renames its selected/active item — sidebar folder/notebook, layers panel active layer, topbar notebook title — see section 7) |
 | Keyboard Shortcut Configuration UI | `Modals.tsx` (`SettingsModal` → "Shortcuts" tab). Allows searching by name, mapping keys (including standalone modifiers like `Alt`), and **restoring default shortcuts** independently from other settings. |
 | Key labels and normalization | `src/utils/shortcuts.ts` (`normalizeKey` handles combinations and standalone modifier keys) |
 
@@ -749,7 +788,7 @@ Flow and files involved:
   going through persistence).
 - **Persistence**: every data change persists via `db.*` (IndexedDB is the primary store).
   Inside the editor, canvas edits persist through `schedulePersist()` (`Editor.tsx`),
-  **debounced (400ms)** with the notebook captured at scheduling time — high-frequency
+  **debounced (400ms)** persisting the current live notebook at fire time — high-frequency
   edits (drawing strokes) are written at most once per window with the latest state,
   instead of a full `persistNotebook` write on every pointer release.
 - **UI ↔ canvas communication**: via `CustomEvent` (`ink:*`), never deep props.
@@ -814,12 +853,12 @@ Flow and files involved:
 |---|---|---|
 | `src/components/Toolbar.tsx` | Tool names, panels, tips, tooltips, titles | "Pen", "Highlighter", "Eraser", "Text", "Select", "Move", "Rotation", "Undo", "Redo", "Selection mode", "Select delimited only", "Actions", "Bold", "Underline", "Writing direction", "Hex code" |
 | `src/components/Modals.tsx` | **All modals**: titles, labels, buttons, tips, placeholders, options | "Settings", "New page", "Export notes", "Cloud synchronization", "Sync conflicts", "First page template", "Português (Brasil)", "Test connection", "Also from cloud", "Hide tool cursor" (`modal.hideToolCursor` + `modal.hideToolCursorHint`), import tips, **trash** (`modal.trashTitle`, `modal.trashEmpty`, `modal.trashRestore`, `modal.trashRestoreCloud`, `modal.trashPurgeTitle`, `modal.trashPurgeConfirm`, `modal.trashPurgeNote`, `modal.trashKindNote`, `modal.trashKindFolder`, `modal.trashRestoreCloudHint`), import tips |
-| `src/components/Sidebar.tsx` | Context menus, prompts, confirmations, section titles | "My Notebooks", "No folders", "New folder", "Rename", "Copy to folder...", "Move to folder...", "Duplicate", "Delete", "Delete note ...?", "Drag to resize", "Drag to reorder. Long touch selects multiple items on touch." (`sidebar.dragHint`), "Trash" (`sidebar.trash`) |
+| `src/components/Sidebar.tsx` | Context menus, prompts, confirmations, section titles, **search bar** | "My Notebooks", "No folders", "New folder", "Rename", "Copy to folder...", "Move to folder...", "Duplicate", "Delete", "Delete note ...?", "Drag to resize", "Drag to reorder. Long touch selects multiple items on touch." (`sidebar.dragHint`), "Trash" (`sidebar.trash`), **"Search folders and notebooks..." (`sidebar.searchPlaceholder`), "Folders" (`sidebar.searchFolders`), "Notebooks" (`sidebar.searchNotebooks`), "No folders or notebooks found" (`sidebar.searchNoResults`), "Clear search" (`sidebar.searchClear`)** |
 | `src/components/TopBar.tsx` | Tooltips, app title, placeholder | "Toggle sidebar", "Show/hide page preview", "Layers" (`topbar.toggleLayers`), "Hide top bar", "Hide toolbar", "Show top bar", "Show toolbar", "Show notebook bar", "Show page preview", "Fullscreen (F11)", "Mamaco Notes", "Select or create a notebook" |
 | `src/components/PageList.tsx` | Title, search placeholder, empty messages, multiple page selection bar | "Pages", "Go to page (no.)...", "No pages found", "{{count}} page(s) selected", "Clear page selection", "Duplicate selected pages", "Delete {{count}} selected page(s)?" |
-| `src/components/LayersPanel.tsx` | Panel title, action bar (new/duplicate/delete/merge), active layer opacity slider, "Background" footer, visibility/lock tooltips | "Layers", "Add layer", "Duplicate layer", "Delete layer", "Merge layers", "Merge {{count}} layers", "Background", "Page background", "Opacity", "Rename layer", "Layer {{n}}" (default names via `layers.layerN` when name matches `^Camada \d+$`), "Show/hide layer", "Lock layer", "Unlock layer" |
+| `src/components/LayersPanel.tsx` | Panel title, action bar (new layer / new folder / duplicate / delete / merge), active layer opacity slider, "Background" footer, visibility/lock tooltips, **folder UX strings** | "Layers", "Add layer", "Duplicate layer", "Delete layer", "Merge layers", "Merge {{count}} layers", "Background", "Page background", "Opacity", "Rename layer", "Layer {{n}}" (default names via `layers.layerN` when name matches `^Camada \d+$`), "Show/hide layer", "Lock layer", "Unlock layer", **"New layer folder" (`layers.newFolder`), "Rename folder" (`layers.renameFolder`), "Delete folder" (`layers.deleteFolder`), "Delete folder ...? Its layers will be moved to the root" (`layers.deleteFolderConfirm`), "New layer folder name:" (`layers.newFolderPrompt`), "New layer folder name:" (`layers.renameFolderPrompt`), "Drag to resize" (`layers.resizePanel`), "No layers" (`layers.folderEmpty`)** |
 | `src/components/Editor.tsx` | Inline text placeholder, zoom tooltips | "Type text...", "Zoom out", "Reset zoom / recenter", "Recenter page" |
-| `src/utils/shortcuts.ts` | Shortcut labels shown in Settings (`shortcutLabel`) | "Pen", "Eraser", "Undo", "Zoom in", "Add page", "Delete page", "Fullscreen", etc. |
+| `src/utils/shortcuts.ts` | Shortcut labels shown in Settings (`shortcutLabel`) | "Pen", "Eraser", "Undo", "Zoom in", "Add page", "Delete page", "Fullscreen", **"Rename" (`shortcut.rename`)**, etc. |
 | `src/store.ts` | Item duplication suffix | `t('copySuffix')` → `' (cópia)'` / `' (copy)'` |
 | `src/utils/sync.ts` | Merge error messages | `'invalid notebook'`, `'invalid remote notebook'` |
 | `src/utils/webdav.ts` | WebDAV connection error/status messages | "Koofr server not recognized.", "Connection OK: ...", Koofr URL tip |

@@ -130,6 +130,9 @@ export function initGlobalShortcuts(): () => void {
         s.setTool('select')
         void s.setSettings({ lastSelectMode: 'rect' })
         break
+      case 'rename':
+        window.dispatchEvent(new CustomEvent('ink:rename'))
+        break
       default:
         break
     }

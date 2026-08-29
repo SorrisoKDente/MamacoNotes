@@ -15,13 +15,23 @@ export const PickDirectory = registerPlugin<{
     sessionId: string
     url: string
     headers: Record<string, string>
-    totalLength: number
   }) => Promise<void>
   uploadChunk: (options: { sessionId: string; content: string }) => Promise<void>
-  uploadEnd: (options: { sessionId: string }) => Promise<{ status: number }>
+  uploadEnd: (options: { sessionId: string }) => Promise<{ status: number; bytesWritten: number }>
 }>('PickDirectory')
 
-export const CHUNK_SIZE = 512 * 1024
+// Base64 adds roughly one third to the bridge payload. Keep each native call
+// small enough that large notebooks do not freeze the Android WebView.
+export const CHUNK_SIZE = 128 * 1024
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const step = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += step) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + step))
+  }
+  return btoa(binary)
+}
 
 async function decodeChunked(
   size: number,
@@ -54,31 +64,23 @@ async function decodeChunked(
 export async function uploadFileStreaming(
   url: string,
   headers: Record<string, string>,
-  content: string,
+  content: Uint8Array,
 ): Promise<number> {
   const sessionId = `up_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  const encoder = new TextEncoder()
-  const totalLength = encoder.encode(content).length
-  await PickDirectory.uploadStart({ sessionId, url, headers, totalLength })
-  let offset = 0
-  while (offset < content.length) {
-    let end = offset
-    let chunkBytes = 0
-    while (end < content.length) {
-      const codePoint = content.codePointAt(end)
-      const char = String.fromCodePoint(codePoint ?? 0)
-      const charBytes = encoder.encode(char).length
-      if (end > offset && chunkBytes + charBytes > CHUNK_SIZE) break
-      chunkBytes += charBytes
-      end += char.length
-    }
+  await PickDirectory.uploadStart({ sessionId, url, headers })
+  for (let offset = 0; offset < content.byteLength; offset += CHUNK_SIZE) {
+    const end = Math.min(offset + CHUNK_SIZE, content.byteLength)
     await PickDirectory.uploadChunk({
       sessionId,
-      content: content.slice(offset, end),
+      content: bytesToBase64(content.subarray(offset, end)),
     })
-    offset = end
   }
-  const { status } = await PickDirectory.uploadEnd({ sessionId })
+  const { status, bytesWritten } = await PickDirectory.uploadEnd({ sessionId })
+  if (bytesWritten !== content.byteLength) {
+    throw new Error(
+      `Android upload was incomplete: expected ${content.byteLength} bytes, wrote ${bytesWritten}`,
+    )
+  }
   return status
 }
 

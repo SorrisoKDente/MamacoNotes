@@ -134,6 +134,15 @@ export const enMessages: Record<string, string> = {
   'layers.toggleVisible': 'Show/hide layer',
   'layers.lock': 'Lock layer',
   'layers.unlock': 'Unlock layer',
+  'layers.newFolder': 'New layer folder',
+  'layers.renameFolder': 'Rename folder',
+  'layers.deleteFolder': 'Delete folder',
+  'layers.deleteFolderConfirm':
+    'Delete the folder "{{name}}"? Its layers will be moved to the root.',
+  'layers.newFolderPrompt': 'New layer folder name:',
+  'layers.renameFolderPrompt': 'New layer folder name:',
+  'layers.resizePanel': 'Drag to resize',
+  'layers.folderEmpty': 'No layers',
 
   // ===== Page list (PageList.tsx) =====
   'pageList.title': 'Pages',
@@ -197,6 +206,11 @@ export const enMessages: Record<string, string> = {
   'sidebar.pasteSelectedTitle': 'Paste copied/cut items',
   'sidebar.duplicateSelectedTitle': 'Duplicate selected',
   'sidebar.deleteSelectedTitle': 'Delete selected',
+  'sidebar.searchPlaceholder': 'Search folders and notebooks...',
+  'sidebar.searchFolders': 'Folders',
+  'sidebar.searchNotebooks': 'Notebooks',
+  'sidebar.searchNoResults': 'No folders or notebooks found',
+  'sidebar.searchClear': 'Clear search',
 
   // ===== Editor (Editor.tsx) =====
   'editor.textPlaceholder': 'Type text...',
@@ -254,14 +268,9 @@ export const enMessages: Record<string, string> = {
   'modal.importImageHint': 'The image will be inserted in the center of the current page. You can move and resize it using the "Move/Edit image" tool.',
   'modal.chooseImage': 'Choose image',
   'modal.preview': 'Preview',
-  'modal.importPdf': 'Import PDF',
-  'modal.importPdfHint': 'Choose a PDF file. Its pages will be shown so you can select which one to add to the current notebook, keeping the PDF as background so you can write on top.',
   'modal.processingPdf': 'Processing PDF...',
   'modal.choosePdf': 'Choose PDF file',
-  'modal.choosePdfPage': 'Select the PDF page you want to add:',
   'modal.pdfPageAlt': 'PDF page {{number}}',
-  'modal.addSelectedPage': 'Add selected page',
-  'modal.selectNotebookFirst': 'Select a notebook before importing the PDF.',
   'modal.pdfImported': 'PDF imported with {{count}} page(s).',
   'modal.pdfImportError': 'Error importing PDF: {{message}}',
   'modal.imageSizeChoiceTitle': 'How to use the image in the template?',
@@ -462,6 +471,7 @@ export const enMessages: Record<string, string> = {
   'shortcut.selectFree': 'Select (lasso)',
   'shortcut.selectCircle': 'Select (circle)',
   'shortcut.selectRect': 'Select (square)',
+  'shortcut.rename': 'Rename',
 
   // ===== Copy suffix =====
   'copySuffix': ' (copy)',

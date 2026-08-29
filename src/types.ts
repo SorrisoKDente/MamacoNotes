@@ -1,6 +1,6 @@
 export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
-export const APP_VERSION = '1.1.8'
+export const APP_VERSION = '1.2.1'
 
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
@@ -73,12 +73,19 @@ export interface PdfBackground {
   pageNumber: number
 }
 
+export interface LayerFolder {
+  id: string
+  name: string
+  order?: number
+}
+
 export interface Layer {
   id: string
   name: string
   visible: boolean
   opacity: number
   locked: boolean
+  folderId?: string | null
   strokes: Stroke[]
   images: ImageElement[]
   texts: TextElement[]
@@ -92,6 +99,7 @@ export interface Page {
   rotation: number
   backgroundColor: string
   layers: Layer[]
+  layerFolders?: LayerFolder[]
   activeLayerId: string | null
   pdf?: PdfBackground
   createdAt: number
@@ -146,6 +154,7 @@ export interface AppSettings {
   hidePageCount: boolean
   hideToolCursor: boolean
   sidebarWidth: number
+  layersWidth: number
   pageViewMode: PageViewMode
   lastTextFontFamily: string
   lastTextFontSize: number
@@ -280,6 +289,7 @@ export type ShortcutActionId =
   | 'selectFree'
   | 'selectCircle'
   | 'selectRect'
+  | 'rename'
 
 export type ShortcutMap = Record<ShortcutActionId, string>
 
@@ -316,6 +326,7 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
   selectFree: 'l',
   selectCircle: 'o',
   selectRect: 'q',
+  rename: 'f2',
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -339,6 +350,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hidePageCount: false,
   hideToolCursor: false,
   sidebarWidth: 260,
+  layersWidth: 260,
   pageViewMode: 'vertical',
   lastTextFontFamily: 'Segoe UI, system-ui, sans-serif',
   lastTextFontSize: 24,
@@ -391,6 +403,7 @@ export function makeLayer(
     visible: true,
     opacity: 1,
     locked: false,
+    folderId: null,
     strokes: opts?.strokes ?? [],
     images: opts?.images ?? [],
     texts: opts?.texts ?? [],
@@ -419,9 +432,15 @@ export function normalizePage(
     visible: layer.visible ?? true,
     opacity: layer.opacity ?? 1,
     locked: layer.locked ?? false,
+    folderId: layer.folderId ?? null,
     strokes: layer.strokes ?? [],
     images: layer.images ?? [],
     texts: layer.texts ?? [],
+  }))
+  const layerFolders: LayerFolder[] = (page.layerFolders ?? []).map((f) => ({
+    id: f.id,
+    name: f.name ?? 'Pasta',
+    ...(typeof f.order === 'number' ? { order: f.order } : {}),
   }))
   const activeLayerId =
     page.activeLayerId != null && layers.some((l) => l.id === page.activeLayerId)
@@ -435,6 +454,7 @@ export function normalizePage(
     rotation: page.rotation ?? 0,
     backgroundColor: page.backgroundColor ?? '#ffffff',
     layers,
+    layerFolders,
     activeLayerId,
     ...(page.pdf ? { pdf: page.pdf } : {}),
     createdAt: page.createdAt ?? Date.now(),
@@ -461,6 +481,7 @@ export function makePage(
     rotation: 0,
     backgroundColor: '#ffffff',
     layers: [layer],
+    layerFolders: [],
     activeLayerId: layer.id,
     createdAt: now,
     updatedAt: now,

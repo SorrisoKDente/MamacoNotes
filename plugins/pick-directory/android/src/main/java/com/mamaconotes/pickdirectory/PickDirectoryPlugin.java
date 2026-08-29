@@ -28,7 +28,19 @@ import java.util.Map;
 @CapacitorPlugin(name = "PickDirectory")
 public class PickDirectoryPlugin extends Plugin {
 
-    private final Map<String, HttpURLConnection> uploadSessions = new HashMap<>();
+    private static class UploadSession {
+        final HttpURLConnection connection;
+        final OutputStream output;
+        long bytesWritten;
+
+        UploadSession(HttpURLConnection connection, OutputStream output) {
+            this.connection = connection;
+            this.output = output;
+            this.bytesWritten = 0;
+        }
+    }
+
+    private final Map<String, UploadSession> uploadSessions = new HashMap<>();
 
     @PluginMethod
     public void pick(PluginCall call) {
@@ -253,8 +265,6 @@ public class PickDirectoryPlugin extends Plugin {
         String sessionId = call.getString("sessionId");
         String url = call.getString("url");
         JSObject headers = call.getObject("headers");
-        Integer totalLength = call.getInt("totalLength", 0);
-
         if (sessionId == null || url == null) {
             call.reject("Missing parameters");
             return;
@@ -266,11 +276,11 @@ public class PickDirectoryPlugin extends Plugin {
             conn.setDoOutput(true);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(120000);
-            if (totalLength != null && totalLength > 0) {
-                conn.setFixedLengthStreamingMode(totalLength);
-            } else {
-                conn.setChunkedStreamingMode(64 * 1024);
-            }
+            // The body is delivered over several Capacitor calls. Chunked
+            // transfer avoids committing a possibly stale Content-Length when
+            // a bridge call is interrupted and prevents a successful 0-byte
+            // WebDAV object from being mistaken for a complete upload.
+            conn.setChunkedStreamingMode(64 * 1024);
             if (headers != null) {
                 Iterator<String> keys = headers.keys();
                 while (keys.hasNext()) {
@@ -279,7 +289,7 @@ public class PickDirectoryPlugin extends Plugin {
                 }
             }
             conn.connect();
-            uploadSessions.put(sessionId, conn);
+            uploadSessions.put(sessionId, new UploadSession(conn, conn.getOutputStream()));
             call.resolve();
         } catch (Exception e) {
             call.reject(e.getMessage());
@@ -296,20 +306,26 @@ public class PickDirectoryPlugin extends Plugin {
             return;
         }
 
-        HttpURLConnection conn = uploadSessions.get(sessionId);
-        if (conn == null) {
+        UploadSession session = uploadSessions.get(sessionId);
+        if (session == null) {
             call.reject("No upload session");
             return;
         }
 
         try {
-            OutputStream os = conn.getOutputStream();
-            os.write(content.getBytes(StandardCharsets.UTF_8));
-            os.flush();
+            byte[] chunk = Base64.decode(content, Base64.DEFAULT);
+            session.output.write(chunk);
+            session.output.flush();
+            session.bytesWritten += chunk.length;
             call.resolve();
         } catch (Exception e) {
             uploadSessions.remove(sessionId);
-            conn.disconnect();
+            try {
+                session.output.close();
+            } catch (IOException ignored) {
+                // The upload is already failing; preserve the original error.
+            }
+            session.connection.disconnect();
             call.reject(e.getMessage());
         }
     }
@@ -322,19 +338,19 @@ public class PickDirectoryPlugin extends Plugin {
             return;
         }
 
-        HttpURLConnection conn = uploadSessions.remove(sessionId);
-        if (conn == null) {
+        UploadSession session = uploadSessions.remove(sessionId);
+        if (session == null) {
             call.reject("No upload session");
             return;
         }
 
         try {
-            OutputStream os = conn.getOutputStream();
-            os.close();
-            int code = conn.getResponseCode();
+            session.output.close();
+            int code = session.connection.getResponseCode();
             if (code >= 200 && code < 300) {
                 JSObject ret = new JSObject();
                 ret.put("status", code);
+                ret.put("bytesWritten", session.bytesWritten);
                 call.resolve(ret);
             } else {
                 call.reject("Upload failed with status " + code);
@@ -342,7 +358,7 @@ public class PickDirectoryPlugin extends Plugin {
         } catch (Exception e) {
             call.reject(e.getMessage());
         } finally {
-            conn.disconnect();
+            session.connection.disconnect();
         }
     }
 

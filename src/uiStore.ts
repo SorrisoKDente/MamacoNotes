@@ -6,7 +6,6 @@ export type ModalName =
   | 'export'
   | 'templatePicker'
   | 'importImage'
-  | 'importPdf'
   | 'importPdfNote'
   | 'imageSizeChoice'
   | 'addPagePicker'

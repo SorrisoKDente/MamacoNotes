@@ -8,6 +8,7 @@ import type {
   Folder,
   ImageElement,
   Layer,
+  LayerFolder,
   Notebook,
   Page,
   PageTemplate,
@@ -147,6 +148,13 @@ function nextOrder(orders: Array<number | undefined>): number {
     if (typeof o === 'number' && o > max) max = o
   }
   return max + 1
+}
+
+function topOfGroupInsertIndex(layers: Layer[], folderId: string | null): number {
+  for (let i = layers.length - 1; i >= 0; i--) {
+    if ((layers[i].folderId ?? null) === folderId) return i + 1
+  }
+  return layers.length
 }
 
 function fillNotebookOrder(
@@ -292,6 +300,14 @@ let syncQueued = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined
 let pendingResume: PendingResume | null = null
 
+export type LastClickedTarget =
+  | { type: 'folder'; id: string }
+  | { type: 'notebook'; id: string }
+  | { type: 'layer'; id: string }
+  | { type: 'layerFolder'; id: string }
+  | { type: 'notebookTitle' }
+  | null
+
 interface AppState {
   loaded: boolean
   folders: Folder[]
@@ -306,6 +322,7 @@ interface AppState {
   selectedIds: string[]
   selectedPageIndices: number[]
   clipboard: { ids: string[]; cut: boolean } | null
+  lastClicked: LastClickedTarget
   currentPageIndex: number
   tool: ToolKind
   sidebarOpen: boolean
@@ -331,6 +348,7 @@ interface AppState {
   toggleSelect: (id: string) => void
   clearSelection: () => void
   setSelectedIds: (ids: string[]) => void
+  setLastClicked: (target: LastClickedTarget) => void
   copySelected: () => void
   cutSelected: () => void
   pasteClipboard: () => Promise<void>
@@ -377,16 +395,25 @@ interface AppState {
   rotatePageBy: (index: number, delta: number) => Promise<void>
   updatePage: (index: number, patch: Partial<Page>) => Promise<void>
 
-  addLayer: () => Promise<void>
+  addLayer: (folderId?: string | null) => Promise<void>
   renameLayer: (index: number, name: string) => Promise<void>
   duplicateLayer: (index: number) => Promise<void>
   deleteLayer: (index: number) => Promise<void>
   moveLayer: (from: number, to: number) => Promise<void>
+  moveLayerToFolder: (
+    from: number,
+    folderId: string | null,
+    beforeId: string | null,
+  ) => Promise<void>
   setLayerVisible: (index: number, visible: boolean) => Promise<void>
   setLayerOpacity: (index: number, opacity: number) => Promise<void>
   setLayerLocked: (index: number, locked: boolean) => Promise<void>
   setActiveLayer: (id: string) => Promise<void>
   mergeSelectedLayers: (indices: number[]) => Promise<void>
+  addLayerFolder: (name: string) => Promise<void>
+  renameLayerFolder: (id: string, name: string) => Promise<void>
+  deleteLayerFolder: (id: string) => Promise<void>
+  reorderLayerFolder: (id: string, beforeId: string | null) => Promise<void>
 
   setSettings: (patch: Partial<AppSettings>) => Promise<void>
   setShortcut: (action: keyof AppSettings['shortcuts'], value: string) => Promise<void>
@@ -508,6 +535,7 @@ export const useAppStore = create<AppState>((set, get) => {
         notebooks,
         selectedNotebookId: null,
         currentPageIndex: 0,
+        lastClicked: null,
         dataVersion: get().dataVersion + 1,
       })
     } else {
@@ -559,6 +587,7 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedIds: [],
     selectedPageIndices: [],
     clipboard: null,
+    lastClicked: null,
     currentPageIndex: 0,
     tool: 'pen',
     sidebarOpen: !isMobileNow(),
@@ -645,15 +674,24 @@ export const useAppStore = create<AppState>((set, get) => {
       }),
     selectNotebook: (id) => {
       let currentPageIndex = 0
+      let folderId: string | null = null
       if (id) {
-        const pages = get().notebooks.find((n) => n.id === id)?.pages ?? []
+        const nb = get().notebooks.find((n) => n.id === id)
+        folderId = nb?.folderId ?? null
+        const pages = nb?.pages ?? []
         const pageId = readLastPageMap()[id]
         if (pageId) {
           const idx = pages.findIndex((p) => p.id === pageId)
           if (idx >= 0) currentPageIndex = idx
         }
       }
-      set({ selectedNotebookId: id, currentPageIndex, selectedIds: [], selectedPageIndices: [] })
+      set({
+        selectedNotebookId: id,
+        selectedFolderId: folderId,
+        currentPageIndex,
+        selectedIds: [],
+        selectedPageIndices: [],
+      })
     },
     selectPage: (index) => set({ currentPageIndex: index }),
     setTool: (tool) => set({ tool }),
@@ -678,6 +716,8 @@ export const useAppStore = create<AppState>((set, get) => {
     clearSelection: () => set({ selectedIds: [] }),
 
     setSelectedIds: (ids) => set({ selectedIds: ids }),
+
+    setLastClicked: (target) => set({ lastClicked: target }),
 
     toggleSelectPage: (index) => {
       const selectedPageIndices = get().selectedPageIndices
@@ -853,6 +893,14 @@ export const useAppStore = create<AppState>((set, get) => {
       const folders = allFolders.filter((f) => !toDelete.has(f.id))
       const removedIds = new Set([...toDelete, ...childNotebooks.map((n) => n.id)])
       const selectedIds = get().selectedIds.filter((sid) => !removedIds.has(sid))
+      const lastClicked = get().lastClicked
+      if (
+        lastClicked &&
+        ((lastClicked.type === 'folder' && removedIds.has(lastClicked.id)) ||
+          (lastClicked.type === 'notebook' && removedIds.has(lastClicked.id)))
+      ) {
+        set({ lastClicked: null })
+      }
       set({ folders, notebooks, selectedIds })
       if (get().selectedFolderId && toDelete.has(get().selectedFolderId!)) {
         set({ selectedFolderId: null, selectedNotebookId: null, currentPageIndex: 0 })
@@ -1129,6 +1177,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const nb = get().notebooks.find((n) => n.id === id)
       const notebooks = get().notebooks.filter((n) => n.id !== id)
       const selectedIds = get().selectedIds.filter((sid) => sid !== id)
+      const lastClicked = get().lastClicked
+      if (lastClicked && lastClicked.type === 'notebook' && lastClicked.id === id) {
+        set({ lastClicked: null })
+      }
       set({ notebooks, selectedIds })
       if (get().selectedNotebookId === id) {
         set({ selectedNotebookId: null, currentPageIndex: 0 })
@@ -1336,7 +1388,7 @@ export const useAppStore = create<AppState>((set, get) => {
       await updateNotebookStorage(notebook)
     },
 
-    async addLayer() {
+    async addLayer(folderId) {
       const id = get().selectedNotebookId
       if (!id) return
       const notebook = get().notebooks.find((n) => n.id === id)
@@ -1350,8 +1402,15 @@ export const useAppStore = create<AppState>((set, get) => {
         if (m) maxN = Math.max(maxN, parseInt(m[1], 10))
       }
       const layer = makeLayer(`Camada ${maxN + 1}`)
-      const activeIdx = page.layers.findIndex((l) => l.id === page.activeLayerId)
-      const insertAt = activeIdx >= 0 ? activeIdx + 1 : page.layers.length
+      const targetFolder = folderId ?? null
+      let insertAt: number
+      if (targetFolder !== null) {
+        layer.folderId = targetFolder
+        insertAt = topOfGroupInsertIndex(page.layers, targetFolder)
+      } else {
+        const activeIdx = page.layers.findIndex((l) => l.id === page.activeLayerId)
+        insertAt = activeIdx >= 0 ? activeIdx + 1 : page.layers.length
+      }
       page.layers.splice(insertAt, 0, layer)
       page.activeLayerId = layer.id
       page.updatedAt = Date.now()
@@ -1407,6 +1466,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const wasActive = layer.id === page.activeLayerId
       get().pushUndo()
       page.layers.splice(index, 1)
+      const lastClicked = get().lastClicked
+      if (lastClicked && lastClicked.type === 'layer' && lastClicked.id === layer.id) {
+        set({ lastClicked: null })
+      }
       if (wasActive) {
         const below = page.layers[index - 1]
         const above = page.layers[index]
@@ -1431,6 +1494,130 @@ export const useAppStore = create<AppState>((set, get) => {
       get().pushUndo()
       const [layer] = page.layers.splice(f, 1)
       page.layers.splice(t, 0, layer)
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
+    async moveLayerToFolder(from, folderId, beforeId) {
+      const id = get().selectedNotebookId
+      if (!id) return
+      const notebook = get().notebooks.find((n) => n.id === id)
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page || page.layers.length === 0) return
+      const layer = page.layers[from]
+      if (!layer) return
+      const target = folderId ?? null
+      const rest = page.layers.filter((_, i) => i !== from)
+      let insertAt: number
+      if (beforeId !== null) {
+        const idx = rest.findIndex((l) => l.id === beforeId)
+        insertAt = idx >= 0 ? idx : rest.length
+      } else {
+        let hi = -1
+        for (let i = 0; i < rest.length; i++) {
+          if ((rest[i].folderId ?? null) === target) hi = i
+        }
+        insertAt = hi >= 0 ? hi + 1 : (layer.folderId ?? null) === target ? from : rest.length
+      }
+      if ((layer.folderId ?? null) === target && insertAt === from) return
+      get().pushUndo()
+      page.layers.splice(from, 1)
+      layer.folderId = target
+      page.layers.splice(insertAt, 0, layer)
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
+    async addLayerFolder(name) {
+      const id = get().selectedNotebookId
+      if (!id) return
+      const notebook = get().notebooks.find((n) => n.id === id)
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page) return
+      const trimmed = name.trim()
+      if (!trimmed) return
+      get().pushUndo()
+      const folders = page.layerFolders ?? []
+      const folder: LayerFolder = {
+        id: newId(),
+        name: trimmed,
+        order: nextOrder(folders.map((f) => f.order)),
+      }
+      folders.push(folder)
+      page.layerFolders = folders
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
+    async renameLayerFolder(id, name) {
+      const nb = get().selectedNotebookId
+      if (!nb) return
+      const notebook = get().notebooks.find((n) => n.id === nb)
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page) return
+      const folder = (page.layerFolders ?? []).find((f) => f.id === id)
+      if (!folder) return
+      const trimmed = name.trim()
+      if (trimmed === folder.name) return
+      get().pushUndo()
+      folder.name = trimmed || folder.name
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
+    async deleteLayerFolder(id) {
+      const nb = get().selectedNotebookId
+      if (!nb) return
+      const notebook = get().notebooks.find((n) => n.id === nb)
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page) return
+      const folders = page.layerFolders ?? []
+      if (!folders.some((f) => f.id === id)) return
+      get().pushUndo()
+      page.layerFolders = folders.filter((f) => f.id !== id)
+      const lastClicked = get().lastClicked
+      if (lastClicked && lastClicked.type === 'layerFolder' && lastClicked.id === id) {
+        set({ lastClicked: null })
+      }
+      for (const l of page.layers) {
+        if ((l.folderId ?? null) === id) l.folderId = null
+      }
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
+    async reorderLayerFolder(id, beforeId) {
+      const nb = get().selectedNotebookId
+      if (!nb) return
+      const notebook = get().notebooks.find((n) => n.id === nb)
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page) return
+      const folders = page.layerFolders ?? []
+      const folder = folders.find((f) => f.id === id)
+      if (!folder) return
+      const siblings = folders.filter((f) => f.id !== id)
+      const list: LayerFolder[] = []
+      if (beforeId) {
+        const idx = siblings.findIndex((s) => s.id === beforeId)
+        if (idx >= 0) list.push(...siblings.slice(0, idx), folder, ...siblings.slice(idx))
+        else list.push(...siblings, folder)
+      } else {
+        list.push(...siblings, folder)
+      }
+      const ordered = list.map((f, i) => ({ ...f, order: i }))
+      if (ordered.every((f, i) => f.id === (folders[i]?.id ?? null) && f.order === folders[i]?.order)) return
+      get().pushUndo()
+      page.layerFolders = ordered
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
@@ -1577,13 +1764,18 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
           })
-          await db.putCloudSyncState(out.nextState)
+          // Apply the pulled/new content BEFORE committing the advanced baseline
+          // (`db.putCloudSyncState`). If the content application fails (e.g. an
+          // IndexedDB error), the baseline is left untouched, so the next sync
+          // re-pulls the same notebooks (idempotent) instead of silently marking
+          // them as synced — which would make remote changes never appear.
           await applySyncChanges({
             pulledNotebooks: out.pulledNotebooks,
             newNotebooks: [],
             removedLocalNotebookIds: out.removedLocalNotebookIds,
             pulledFolders: out.pulledFolders,
           })
+          await db.putCloudSyncState(out.nextState)
           if (out.pendingConflicts.length > 0) {
             pendingResume = {
               cloud,
@@ -1837,12 +2029,13 @@ export const useAppStore = create<AppState>((set, get) => {
         const data = JSON.parse(text) as { notebook?: Notebook }
         const nb = data.notebook
         if (nb) {
-          if (!get().notebooks.some((n) => n.id === id)) {
-            const norm = normalizeRestoredNotebook(nb)
-            const notebooks = sortNotebooksByOrder([...get().notebooks, norm])
-            set({ notebooks, dataVersion: get().dataVersion + 1 })
-            await db.putNotebook(norm)
-          }
+          const norm = normalizeRestoredNotebook(nb)
+          const existingIndex = get().notebooks.findIndex((n) => n.id === id)
+          const notebooks = [...get().notebooks]
+          if (existingIndex >= 0) notebooks[existingIndex] = norm
+          else notebooks.push(norm)
+          set({ notebooks: sortNotebooksByOrder(notebooks), dataVersion: get().dataVersion + 1 })
+          await db.putNotebook(norm)
           restored = true
         }
       }
@@ -1906,6 +2099,7 @@ export const useAppStore = create<AppState>((set, get) => {
         selectedFolderId: null,
         selectedNotebookId: outNotebooks[0]?.id ?? null,
         currentPageIndex: 0,
+        lastClicked: null,
       })
       for (const f of outFolders) await db.putFolder(f)
       for (const nb of outNotebooks) await db.putNotebook(nb)

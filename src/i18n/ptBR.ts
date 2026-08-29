@@ -134,6 +134,15 @@ export const ptBRMessages: Record<string, string> = {
   'layers.toggleVisible': 'Mostrar/ocultar camada',
   'layers.lock': 'Travar camada',
   'layers.unlock': 'Destravar camada',
+  'layers.newFolder': 'Nova pasta de camadas',
+  'layers.renameFolder': 'Renomear pasta',
+  'layers.deleteFolder': 'Excluir pasta',
+  'layers.deleteFolderConfirm':
+    'Excluir a pasta "{{name}}"? As camadas dentro dela serão movidas para a raiz.',
+  'layers.newFolderPrompt': 'Nome da nova pasta de camadas:',
+  'layers.renameFolderPrompt': 'Novo nome da pasta de camadas:',
+  'layers.resizePanel': 'Arrastar para redimensionar',
+  'layers.folderEmpty': 'Sem camadas',
 
   // ===== Lista de páginas (PageList.tsx) =====
   'pageList.title': 'Páginas',
@@ -197,6 +206,11 @@ export const ptBRMessages: Record<string, string> = {
   'sidebar.pasteSelectedTitle': 'Colar itens copiados/recortados',
   'sidebar.duplicateSelectedTitle': 'Duplicar selecionados',
   'sidebar.deleteSelectedTitle': 'Excluir selecionados',
+  'sidebar.searchPlaceholder': 'Pesquisar pastas e notas...',
+  'sidebar.searchFolders': 'Pastas',
+  'sidebar.searchNotebooks': 'Notas',
+  'sidebar.searchNoResults': 'Nenhuma pasta ou nota encontrada',
+  'sidebar.searchClear': 'Limpar busca',
 
   // ===== Editor (Editor.tsx) =====
   'editor.textPlaceholder': 'Digite o texto...',
@@ -254,14 +268,9 @@ export const ptBRMessages: Record<string, string> = {
   'modal.importImageHint': 'A imagem será inserida no centro da página atual. Você pode mover e redimensionar usando a ferramenta "Mover/Editar imagem".',
   'modal.chooseImage': 'Escolher imagem',
   'modal.preview': 'Prévia',
-  'modal.importPdf': 'Importar PDF',
-  'modal.importPdfHint': 'Escolha um arquivo PDF. As páginas serão exibidas para você selecionar qual deseja adicionar ao caderno atual, mantendo o PDF como fundo para que você possa escrever por cima.',
   'modal.processingPdf': 'Processando PDF...',
   'modal.choosePdf': 'Escolher arquivo PDF',
-  'modal.choosePdfPage': 'Selecione a página do PDF que deseja adicionar:',
   'modal.pdfPageAlt': 'Página {{number}} do PDF',
-  'modal.addSelectedPage': 'Adicionar página selecionada',
-  'modal.selectNotebookFirst': 'Selecione um caderno antes de importar o PDF.',
   'modal.pdfImported': 'PDF importado com {{count}} página(s).',
   'modal.pdfImportError': 'Erro ao importar o PDF: {{message}}',
   'modal.imageSizeChoiceTitle': 'Como usar a imagem no modelo?',
@@ -462,6 +471,7 @@ export const ptBRMessages: Record<string, string> = {
   'shortcut.selectFree': 'Selecionar (laço)',
   'shortcut.selectCircle': 'Selecionar (círculo)',
   'shortcut.selectRect': 'Selecionar (quadrado)',
+  'shortcut.rename': 'Renomear',
 
   // ===== Sufixo de cópia =====
   'copySuffix': ' (cópia)',

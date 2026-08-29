@@ -124,6 +124,7 @@ export function Editor() {
 
   const followTimerRef = useRef<number | null>(null)
   const resizeTimerRef = useRef<number | null>(null)
+  const keyboardFocusRef = useRef(false)
   const autoFollowRef = useRef(false)
   const suppressPageFocusRef = useRef(false)
   const prevPageIndexRef = useRef(currentPageIndex)
@@ -197,15 +198,18 @@ export function Editor() {
   function schedulePersist(nbArg?: Notebook) {
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
     const source = nbArg ?? notebookRef.current
-    const nb = source
-      ? {
-          ...source,
-          pages: source.pages.map((page) => clonePage(page)),
-        }
-      : undefined
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
-      if (nb) void persistNotebook(nb)
+      if (!source) return
+      const current = useAppStore.getState().notebooks.find((item) => item.id === source.id)
+      // A cloud pull replaces the notebook object. Do not let a persistence
+      // timer created before that pull write stale local edits back. Persist
+      // the current live notebook (already rendered) instead of a snapshot, so
+      // the store keeps the same object reference and the canvas engine is not
+      // torn down (losing its image cache) after every stroke, which caused a
+      // screen flicker on release.
+      if (current !== source) return
+      void persistNotebook(current)
     }, 400)
   }
 
@@ -291,6 +295,7 @@ export function Editor() {
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
+  const notebookObjectRef = useRef<Notebook | undefined>(undefined)
 
   useEffect(() => {
     if (tool !== 'select') {
@@ -370,6 +375,10 @@ export function Editor() {
       engineRef.current = null
       return
     }
+    if (notebookObjectRef.current !== undefined && notebookObjectRef.current !== notebook) {
+      engineRef.current = null
+    }
+    notebookObjectRef.current = notebook
     if (!engineRef.current || engineRef.current.canvas !== canvas) {
       engineRef.current = new PageCanvas({
         canvas,
@@ -2430,6 +2439,31 @@ export function Editor() {
   finalizeRegionRef.current = finalizeRegion
 
   useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+        keyboardFocusRef.current = true
+      }
+    }
+    const onFocusOut = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+        // Keep suppressing re-fit for a short grace so the keyboard-close
+        // resize (which fires right after blur) also preserves the zoom.
+        window.setTimeout(() => {
+          keyboardFocusRef.current = false
+        }, 600)
+      }
+    }
+    window.addEventListener('focusin', onFocusIn)
+    window.addEventListener('focusout', onFocusOut)
+    return () => {
+      window.removeEventListener('focusin', onFocusIn)
+      window.removeEventListener('focusout', onFocusOut)
+    }
+  }, [])
+
+  useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const handler = (e: WheelEvent) => onWheel(e)
@@ -2666,6 +2700,14 @@ export function Editor() {
       if (resizeTimerRef.current) window.clearTimeout(resizeTimerRef.current)
       resizeTimerRef.current = window.setTimeout(() => {
         resizeTimerRef.current = null
+        // On mobile the on-screen keyboard resizes the viewport while typing
+        // (e.g. tool size inputs). Do not re-fit the page in that case — keep
+        // the user's zoom/position — but still re-render so the canvas backing
+        // store matches the new element size.
+        if (keyboardFocusRef.current) {
+          requestRenderRef.current()
+          return
+        }
         fitPage()
       }, 150)
     }

@@ -116,12 +116,12 @@ Fluxo de inicialização:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável), botões Imagem/PDF/Página/Exportar/Sincronizar/Configurações/tela cheia |
-| `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`); **botão "Lixeira" no cabeçalho** (abre o modal `trash`) |
-| `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir) |
-| `Editor.tsx` | **Maior componente (~2900 lines)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags. **Persistência com debounce**: `schedulePersist()` (400ms) clona profundamente as páginas do caderno no momento do agendamento e persiste o snapshot via `persistNotebook`, evitando que uma edição posterior altere o conteúdo aguardando gravação |
+| `TopBar.tsx` | Barra superior: toggles de sidebar/página (sempre visíveis; se o painel estiver oculto por `settings.hideSidebar`/`hidePageList`, o toggle o reexibe), título do caderno (renomeável — clique para editar inline, ou **`ink:rename` (F2)** quando nem a barra lateral nem o painel de camadas estiverem abertos), botões Imagem/Página/Exportar (somente com um caderno selecionado), **botão PDF sempre disponível** (`open('importPdfNote')` — "Adicionar PDF como nota", o mesmo fluxo do botão da Sidebar — funciona sem caderno selecionado) além de Sincronizar/Configurações/tela cheia |
+| `Sidebar.tsx` | Árvore de pastas/cadernos, menu de contexto, **reordenação e movimento por arrastar** (DnD custom via Pointer Events, funciona com mouse e touch; arrastar sobre uma pasta move para dentro dela; indicador de posição de inserção; autoscroll), **seleção múltipla** (CTRL/Meta clique alterna, SHIFT clique seleciona faixa entre o item âncora e o clicado, **toque longo no touch alterna a seleção**; barra de seleção com copiar/recortar/colar/duplicar/excluir; nº de páginas ocultável via `settings.hidePageCount`), barra redimensionável (handle `sidebar-resizer`, largura persistida em `settings.sidebarWidth`, limite 160–min(520, 50% da janela)); menu de contexto "…" fecha ao clicar fora (listener global de `pointerdown`); **botão "Lixeira" no cabeçalho** (abre o modal `trash`). **Renomear via `ink:rename` (F2)** renomeia o **último item clicado** — um clique simples registra `lastClicked` (`folder`/`notebook`, inclusive resultados da busca), multi-seleção (CTRL/SHIFT/toque longo) o redefine para `null` — com fallback para a seleção explícita única, depois a pasta selecionada, depois o caderno selecionado (modal de prompt); com uma multi-seleção na barra lateral ele não faz nada; sempre que a barra lateral estiver aberta com qualquer seleção (um ou mais itens selecionados, ou uma pasta/caderno selecionado), isso vence mesmo com o painel de camadas aberto (o painel de camadas então ignora) |
+| `PageList.tsx` | Preview de páginas (thumbnails), busca por número, modo de visualização (V/H/S), drag-drop, menu por página, seleção múltipla de páginas (CTRL clique alterna, SHIFT clique seleciona faixa entre a âncora e a clicada; barra de seleção com duplicar/exportar PDF/girar/excluir). Quando o array de páginas é substituído, como após um pull da nuvem, todas as miniaturas em cache são invalidadas |
+| `Editor.tsx` | **Maior componente (~2900 lines)**: canvas de edição, zoom/pan, desenho, borracha, seleção, texto inline, gestos de pointer (incluindo toque duplo com 2 dedos = Desfazer, 3 dedos = Refazer, 2 dedos = mover/zoom e 3 dedos = girar a página), todos os drags. **Persistência com debounce**: `schedulePersist()` (400ms) persiste o **caderno vivo atual** via `persistNotebook` após o debounce — mantendo a mesma referência de objeto na store, para que o motor do canvas não seja recriado (perda do cache de imagens) após cada traço, o que causava um flicker na tela ao soltar o traço — e descarta o timer quando um pull da nuvem substitui esse objeto do caderno, evitando que uma edição local antiga sobrescreva a cópia baixada. **Proteção contra resize do teclado no celular**: enquanto um INPUT/TEXTAREA/SELECT estiver focado (mais 600ms de margem após o blur), o handler de resize da janela/`visualViewport` pula o `fitPage()` e apenas re-renderiza — preservando o zoom/posição do usuário enquanto o teclado virtual abre/fecha (ex.: digitando o tamanho da ferramenta no celular) e mantendo o backing store do canvas correto |
 | `Toolbar.tsx` | Barra de ferramentas lateral: caneta/marcador/borracha/texto/selecionar/mover/rotação, undo/redo, painéis de configuração por ferramenta |
-| `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline, alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas; rodapé fixo com a cor de fundo da página |
+| `LayersPanel.tsx` | Painel de camadas (lateral direita): lista de camadas da página atual (base→topo invertida na UI), seleção única/múltipla (CTRL/SHIFT e toque longo), reordenação por arrastar, renomear inline (duplo clique ou **`ink:rename` (F2) renomeia a última pasta ou camada clicada**, redefinindo para `null` na multi-seleção; **ignorado sempre que a barra lateral estiver aberta com qualquer seleção — um ou mais itens selecionados, ou uma pasta/caderno selecionado — que a barra lateral renomeia em vez disso**), alternar visibilidade/bloqueio, opacidade, adicionar/duplicar/excluir/mesclar camadas, **pastas de camadas** (criar via "+ pasta", renomear via duplo clique / menu "…" / F2, excluir via menu "…" com confirmação, arrastar camada para dentro/fora de pasta e reordenar pastas entre si), **painel redimensionável** (handle `.layers-resizer` na borda esquerda, largura persistida em `settings.layersWidth`, limite 180–min(420, 50% da janela)); rodapé fixo com a cor de fundo da página |
 | `Modals.tsx` | **Todos os modais**: novo caderno, página, modelo, importar imagem/PDF, exportar, configurações, nuvem, mover/copiar, cor de fundo, conflitos de sync, prompt, confirmação, **lixeira** (Restaurar / Restaurar da nuvem / Excluir definitivamente, estado vazio, nota de retenção de 30 dias). A seção de backup das Configurações expõe exportação e importação de um único JSON (`exportBackup`/`importBackup` → `replaceAllData`) |
 
 #### `src/renderer/` — motor de desenho (Canvas)
@@ -130,20 +130,20 @@ Fluxo de inicialização:
 |---|---|
 | `canvas.ts` | Classe `PageCanvas`: renderiza páginas (contínuo/separado), camadas (visibilidade/opacidade), traços, imagens, textos, PDF, templates, seleção; conversão de coordenadas; hit tests |
 | `drawUtils.ts` | Funções puras de desenho reutilizadas por thumbnail/export: `drawTemplate`, `drawLayer`, `drawStroke`, `drawTextOnCanvas` |
-| `thumbnail.ts` | Gera miniaturas das páginas (usado no PageList e nos modelos personalizados) |
+| `thumbnail.ts` | Gera miniaturas das páginas (usado no PageList e nos modelos personalizados), renderizadas na resolução do `devicePixelRatio` (limitada a 3×) com qualidade JPEG 0.8 — mantendo o tamanho CSS (160×207) para os previews ficarem nítidos em celulares retina |
 
 #### `src/utils/` — lógica de apoio
 
 | Arquivo | Responsabilidade |
 |---|---|
 | `http.ts` | **Wrapper de fetch agnóstico à plataforma**: alterna entre o `fetch` padrão (Web/Electron) e o `CapacitorHttp` nativo (Android) para contornar CORS e restrições de rede. Exporta `customFetch` (corpo converte `Uint8Array`/`ArrayBuffer`/`Blob` em texto), `decodeCapacitorData(data, isJson?)` (decodifica o campo `data` do CapacitorHttp: string base64, string crua ou objeto/array JS que o CapacitorHttp parseou apesar do `responseType: 'arraybuffer'` quando o Content-Type é JSON), `isConnectionError(err)` e `withRetry(fn)` (**resiliência de rede**: 3 tentativas com backoff de 500ms→1s, apenas para falhas no nível de conexão — nunca para HTTP 4xx/5xx ou autenticação) e `downloadText` (**download em chunks via Range** usado no Android: pede `Range: bytes=…` com `responseType: 'arraybuffer'` e remonta os chunks no JS via `decodeCapacitorData` — evita o OOM da bridge para JSON de cadernos grandes). O `downloadText` detecta o `Content-Type` da resposta e passa `isJson` para `decodeCapacitorData`, que então trata strings como texto cru (nunca base64) para respostas JSON — isso corrige os erros "Bad control character in string literal in JSON" / "Unexpected end of JSON input" no Android causados por um chunk de Range caindo inteiramente dentro de um `dataUrl` de imagem base64 no JSON do caderno e sendo decodificado como base64 em lixo binário. |
-| `chunkedIo.ts` | **Ponte para o plugin Capacitor local `pick-directory`**: registra `PickDirectory` e expõe primitivas em chunks que nunca enviam um arquivo grande inteiro pela bridge JS↔nativo: `readBackupFileFromUri` (leitura em chunks via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (seletor de documentos do sistema → leitura em chunks) e `uploadFileStreaming` (PUT em stream via `uploadStart`/`uploadChunk`/`uploadEnd` do plugin sobre `HttpURLConnection`, com chunks limitados por bytes UTF-8). |
+| `chunkedIo.ts` | **Ponte para o plugin Capacitor local `pick-directory`**: registra `PickDirectory` e expõe primitivas em chunks que nunca enviam um arquivo grande inteiro pela bridge JS↔nativo: `readBackupFileFromUri` (leitura em chunks via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (seletor de documentos do sistema → leitura em chunks) e `uploadFileStreaming` (PUT em stream usando um único `OutputStream` nativo, enviando chunks de bytes codificados em base64 com o tamanho UTF-8 declarado). |
 | `layout.ts` | Cálculo de offsets/posição das páginas em modo contínuo (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Medição e desenho de elementos de texto (horizontal/vertical, marcadores, sublinhado/riscado) |
 | `export.ts` | Renderização da página em canvas e exportação PNG/PDF (gera PDF simples sem biblioteca externa) |
 | `pdf.ts` | Renderização de arquivos PDF em imagens via `pdfjs-dist` (`renderPdfPages`) |
-| `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport`. No Android o transporte usa os **caminhos nativos em chunks**: `downloadFile` via `downloadText` do `http.ts` (Range + arraybuffer) e `uploadFile` via `uploadFileStreaming` do `chunkedIo.ts` (PUT em stream pelo plugin `pick-directory` via `HttpURLConnection`) — ambos evitam o OOM da bridge. **Falhas no nível de conexão** (de `isConnectionError` do `http.ts`) são relançadas como mensagem amigável `error.networkUnreachable` para orientar o usuário a verificar a conexão com a internet. |
-| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração). Em falha de download (caderno/pasta), registra o erro via `logger.error` (visível na aba Configurações → Logs) **antes** de exibi-lo no resultado/UI — no celular, falhas sem esse log eram invisíveis silenciosamente. O `buildPlan` ignora ids sob `localOnlyDeleted`/`tombstones` no loop de pull, e um caderno que reapareceu localmente depois da exclusão remota (restaurado da lixeira, sem tombstone/baseline ativo) é **reenviado** em vez de ser excluído de novo. |
+| `webdav.ts` | Transporte WebDAV (fetch PROPFIND/MKCOL/PUT/DELETE), suporte especial Koofr, `makeTransport`. No Android o transporte usa os **caminhos nativos em chunks**: `downloadFile` via `downloadText` do `http.ts` (Range + arraybuffer) e `uploadFile` via `uploadFileStreaming` do `chunkedIo.ts` (PUT em stream pelo plugin `pick-directory` via `HttpURLConnection`) — ambos evitam o OOM da bridge. Uploads nativos verificam o tamanho remoto via HEAD quando suportado, rejeitando objetos vazios/truncados antes de o manifest avançar. **Falhas no nível de conexão** (de `isConnectionError` do `http.ts`) são relançadas como mensagem amigável `error.networkUnreachable` para orientar o usuário a verificar a conexão com a internet. |
+| `sync.ts` | **Algoritmo de sincronização bidirecional** (merge, conflitos, tombstone, migração). Um caderno remoto claramente mais novo tem prioridade sobre um baseline local antigo deixado por upload falho. A sincronização manual ("Sincronizar agora") roda o mesmo algoritmo do auto-sync — um caderno editado localmente é **enviado**, nunca baixado por cima da edição. Em falha de download (caderno/pasta), registra o erro via `logger.error` (visível na aba Configurações → Logs) **antes** de exibi-lo no resultado/UI — no celular, falhas sem esse log eram invisíveis silenciosamente. O `buildPlan` ignora ids sob `localOnlyDeleted`/`tombstones` no loop de pull, e um caderno que reapareceu localmente depois da exclusão remota (restaurado da lixeira, sem tombstone/baseline ativo) é **reenviado** em vez de ser excluído de novo. |
 | `backup.ts` | Exportar/importar backup JSON completo (pastas, cadernos e configurações; sanitiza as configurações e **remove senhas de nuvem** por segurança). No celular a exportação grava na **pasta Documentos do app** via `capacitor-blob-writer` (fluxo em chunks, evita o OOM da bridge do Capacitor causado por `Filesystem.writeFile` com conteúdo grande), sempre com **nome com carimbo de data** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`) para nunca sobrescrever um backup existente; a importação usa o seletor de documentos do sistema (`pickBackupFile`, leitura em chunks). No desktop usa as pontes `save-file`/`open-file` do Electron e na web dispara download/input de arquivo. |
 | `imageErase.ts` | Borracha em imagens: sessão de apagar em canvas offscreen e re-encode ao final |
 | `colors.ts` | Paleta de cores e helpers de conversão HEX/RGB |
@@ -184,7 +184,7 @@ Fluxo de inicialização:
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) e o script NSIS customizado `installer.nsh` (atalho na Área de Trabalho, limpeza do atalho na desinstalação, detecção robusta do app e hooks de migração que ignoram/toleram desinstaladores legados que retornam erro 2) |
 | `docs/superpowers/specs/` | Documentos de design aprovados (sync bidirecional; camadas) |
 | `docs/superpowers/plans/` | Planos de implementação (sync bidirecional; camadas) |
-| `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação, autocorreção de 404, **regressão do Bug A do tombstone**: um caderno com tombstone nunca é re-baixado; **restauração da lixeira**: um caderno que reapareceu localmente após a exclusão remota é reenviado e a entrada do manifest volta para `deleted:false`). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
+| `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transport fake em memória (recuperação de baseline local antigo, rollback na falha de gravação do manifest, re-execução idempotente, erro de autenticação, autocorreção de 404, **regressão do Bug A do tombstone**: um caderno com tombstone nunca é re-baixado; **restauração da lixeira**: um caderno que reapareceu localmente após a exclusão remota é reenviado e a entrada do manifest volta para `deleted:false`). Rodar com `npx tsx scripts/verify-sync.ts`; verificado por tipo via `tsconfig.json` |
 | `scripts/verify-download.ts` | Verificação standalone da correção de download no Android: força o caminho nativo do `downloadText` (`Capacitor.isNativePlatform()` sobrescrito) contra um fetch mockado que simula o lado servidor Android, validando que `decodeCapacitorData` reconstrói o texto correto para corpos JSON parseados (200), chunks Range JSON truncados (206), chunks base64 (arquivo grande não-JSON), 404, a desambiguação JSON-vs-base64 (`isJson` mantém strings JSON como texto cru para que um chunk dentro de um `dataUrl` base64 nunca seja decodificado como base64), que o download em chunks de um caderno JSON grande com imagem base64 embutida remonta byte a byte e o **comportamento de retry** (`isConnectionError` e `withRetry` com backoff 500ms→1s: erros de conexão são repetidos, HTTP 4xx/5xx e autenticação não). Rodar com `npx tsx scripts/verify-download.ts` |
 | `server2.mjs` | Arquivo vazio (resquício) |
 
@@ -198,13 +198,14 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 
 - `Folder { id, name, parentId, createdAt, order? }` — pastas aninhadas; `order` é a posição entre os irmãos do mesmo `parentId` (usado na reordenação por arrastar).
 - `Notebook { id, name, folderId, pages, createdAt, updatedAt, order? }` — caderno; `order` é a posição entre os cadernos do mesmo `folderId` (usado na reordenação por arrastar).
-- `Page { id, template, width, height, rotation, backgroundColor, layers, activeLayerId, pdf?, createdAt, updatedAt }` — o conteúdo editável fica todo nas **camadas** (`layers`); `activeLayerId` persiste a camada ativa (fallback para a última do array se nulo/inexistente). Os antigos arrays planos `strokes`/`images`/`texts` foram **removidos**.
-- `Layer { id, name, visible, opacity, locked, strokes, images, texts }` — camada de conteúdo. Ordem do array `layers`: **índice 0 = base** (desenhada primeiro), **último = topo**. Dentro de cada camada mantém-se a ordem de sub-desenho **imagens → textos → traços**. Uma camada travada (`locked: true`) não recebe conteúdo nem é editável no canvas (desenho/borracha/seleção/mover), mas continua podendo ser renomeada, reordenada, duplicada, excluída, ocultada, ter opacidade ajustada, tornar-se ativa e participar de um merge.
+- `Page { id, template, width, height, rotation, backgroundColor, layers, layerFolders, activeLayerId, pdf?, createdAt, updatedAt }` — o conteúdo editável fica todo nas **camadas** (`layers`); `activeLayerId` persiste a camada ativa (fallback para a última do array se nulo/inexistente). Os antigos arrays planos `strokes`/`images`/`texts` foram **removidos**. `layerFolders` agrupa camadas visualmente (ver `LayerFolder`).
+- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts }` — camada de conteúdo. Ordem do array `layers`: **índice 0 = base** (desenhada primeiro), **último = topo**. Dentro de cada camada mantém-se a ordem de sub-desenho **imagens → textos → traços**. Uma camada travada (`locked: true`) não recebe conteúdo nem é editável no canvas (desenho/borracha/seleção/mover), mas continua podendo ser renomeada, reordenada, duplicada, excluída, ocultada, ter opacidade ajustada, tornar-se ativa e participar de um merge. `folderId` é o `LayerFolder` ao qual a camada pertence (`null`/indefinido = raiz, ou seja, sem pasta).
+- `LayerFolder { id, name, order? }` — **pasta de camadas** (um único nível, sem aninhamento). Vive dentro do JSON da página (`Page.layerFolders`), então o sync/backup de cadernos existente já a carrega. `order` é a posição da pasta entre as irmãs (usado na reordenação por arrastar). Uma pasta agrupa camadas visualmente; excluir uma pasta move suas camadas para a raiz (`folderId = null`).
 - `Stroke { id, kind(pen|highlighter), color, size, points[] }` — traço com pressão.
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF usado como fundo da página (fica **no nível da página**, abaixo de todas as camadas; não é uma `Layer`).
-- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, ignorar uma versão específica de atualização via `ignoreVersion`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`).
+- `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, ignorar uma versão específica de atualização via `ignoreVersion`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`, **largura do painel de camadas via `layersWidth`**).
 - `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — dados do sync.
 - `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **entrada da lixeira local** (NÃO sincronizada). Uma entrada por item excluído: excluir uma pasta produz uma entrada para a pasta, uma para cada subpasta e uma para cada caderno dentro (cada uma com seu `parentId`) para que cada item possa ser restaurado individualmente. `cloudKeepsCopy` é `true` quando o item foi excluído "só local" com nuvem configurada (o `data` pesado é descartado; o item só volta com "Restaurar da nuvem"). Quando `false` (excluído "local + nuvem" ou sem nuvem), `data` guarda o item completo para restauração sem nuvem.
 
@@ -213,15 +214,17 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 > `init`, `replaceAllData`) e em `src/db.ts`.
 >
 > **Camadas**: `makePage` cria uma página com 1 camada padrão "Camada 1"
-> (`visible: true`, `opacity: 1`, `locked: false`). `normalizePage(page)` (função pura em
+> (`visible: true`, `opacity: 1`, `locked: false`, `folderId: null`, `layerFolders: []`).
+> `normalizePage(page)` (função pura em
 > `types.ts`) converte páginas legadas/parciais: se `layers` estiver ausente/vazio, cria 1
-> camada a partir dos arrays planos antigos; normaliza cada camada defensivamente; valida
+> camada a partir dos arrays planos antigos; normaliza cada camada defensivamente
+> (incluindo `folderId ?? null`); normaliza `layerFolders` (padrão `[]`); valida
 > `activeLayerId` (fallback última camada) e **remove** os campos planos legados do
 > resultado. `getActiveLayer(page)` resolve a camada ativa (ou a última).
 
 ### 5.2 Persistência (IndexedDB) — `src/db.ts`
 
-Banco `mamaco-notes`, versão **6**, com object stores:
+Banco `mamaco-notes`, versão **7**, com object stores:
 
 | Store | Conteúdo | Chave |
 |---|---|---|
@@ -252,6 +255,12 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*`.
 > **Migração 5 → 6 (lixeira)**: `openDb()` cria a object store `trash` (keyPath `id`) se
 > estiver ausente. Não há reescrita de dados — a lixeira começa vazia e os registros
 > existentes de folders/notebooks/cloudSync são preservados intactos.
+>
+> **Migração 6 → 7 (pastas de camadas)**: o aumento da versão re-executa `migrateLayers()`
+> (idempotente), que reescreve as páginas de todos os cadernos via `normalizePage` — agora
+> adicionando `layerFolders: []` e `folderId: null` às páginas/camadas sem esses campos.
+> Dados vindos de sync/backup também são normalizados na leitura em `store.ts` (`init`,
+> `applySyncChanges`, `replaceAllData`), então não é preciso mudar a versão do sync.
 
 ### 5.3 Stores (Zustand)
 
@@ -317,15 +326,15 @@ useAppStore.subscribe (auto-sync)  ──►  syncNow()  ──►  webdav.ts + 
 | Grupo | Contrato |
 |---|---|
 | **Dados** | `loaded: boolean`, `folders: Folder[]`, `notebooks: Notebook[]`, `templates: PageTemplate[]`, `trash: TrashItem[]`, `settings: AppSettings`, `dataVersion: number` |
-| **Seleção/UI** | `selectedFolderId`, `selectedNotebookId`, `selectedIds: string[]`, `selectedPageIndices: number[]`, `clipboard: { ids, cut } \| null`, `currentPageIndex`, `tool: ToolKind`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`, `canUndo`, `canRedo` |
+| **Seleção/UI** | `selectedFolderId`, `selectedNotebookId`, `selectedIds: string[]`, `selectedPageIndices: number[]`, `clipboard: { ids, cut } \| null`, `lastClicked: LastClickedTarget` (último item com clique único: `{ type: 'folder'\|'notebook'\|'layer'\|'layerFolder'; id }`, `{ type: 'notebookTitle' }` ou `null` — usado pelos listeners de `ink:rename` (F2) para renomear exatamente o item clicado por último; definido pelos handlers de clique da Sidebar/LayersPanel/TopBar e redefinido para `null` na multi-seleção e quando o item é excluído), `currentPageIndex`, `tool: ToolKind`, `sidebarOpen`, `pageListOpen`, `layersOpen`, `searchOpen`, `rotationOpen`, `canUndo`, `canRedo` |
 | **Bootstrap** | `init(): Promise<void>` |
 | **Navegação/seleção** | `selectFolder(id)`, `selectNotebook(id)`, `selectPage(index)`, `setTool(tool)`, `setRotationOpen(open)`, `toggleSidebar()`, `togglePageList()`, `toggleLayers()`, `setSidebarOpen(open)`, `setPageListOpen(open)`, `setLayersOpen(open)`, `toggleSearch()` |
-| **Edição de seleção** | `toggleSelect(id)`, `clearSelection()`, `setSelectedIds(ids)`, `copySelected()`, `cutSelected()`, `pasteClipboard()`, `duplicateSelected()`, `deleteSelected(scope?)` |
+| **Edição de seleção** | `toggleSelect(id)`, `clearSelection()`, `setSelectedIds(ids)`, `setLastClicked(target: LastClickedTarget)`, `copySelected()`, `cutSelected()`, `pasteClipboard()`, `duplicateSelected()`, `deleteSelected(scope?)` |
 | **Seleção de páginas** | `selectedPageIndices`, `toggleSelectPage(index)`, `setPageSelection(indices)`, `clearPageSelection()`, `duplicateSelectedPages()`, `deleteSelectedPages()`, `rotateSelectedPagesBy(delta)` |
 | **Pastas** | `addFolder(name, parentId?)`, `deleteFolder(id, scope?)`, `renameFolder(id, name)`, `moveFolder(id, newParentId)`, `reorderFolder(id, parentId, beforeId)`, `duplicateFolder(id)`, `copyFolder(id, targetParentId)` |
 | **Cadernos** | `createNotebook(name, folderId, template)`, `createNotebookFromTemplate(...)`, `deleteNotebook(id, scope?)`, `moveNotebook(id, folderId)`, `reorderNotebook(id, folderId, beforeId)`, `copyNotebook(id, folderId)`, `duplicateNotebook(id)`, `updateNotebook(notebook)` |
 | **Páginas** | `addPage(template)`, `addPageAfter(index, template)`, `duplicatePage(index)`, `deletePage(index)`, `movePage(from, to)`, `rotatePage(index)`, `rotatePageBy(index, delta)`, `updatePage(index, patch: Partial<Page>)` |
-| **Camadas** | `addLayer()`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)` |
+| **Camadas** | `addLayer(folderId?)`, `renameLayer(index, name)`, `duplicateLayer(index)`, `deleteLayer(index)`, `moveLayer(from, to)`, `moveLayerToFolder(from, folderId, beforeId)`, `setLayerVisible(index, visible)`, `setLayerOpacity(index, opacity)` (0..1), `setLayerLocked(index, locked)`, `setActiveLayer(id)`, `mergeSelectedLayers(indices)`, **pastas de camadas**: `addLayerFolder(name)`, `renameLayerFolder(id, name)`, `deleteLayerFolder(id)`, `reorderLayerFolder(id, beforeId)` |
 | **Configuração** | `setSettings(patch)`, `setShortcut(action, value)`, `setCloud(patch)` |
 | **Nuvem** | `syncNow(): Promise<SyncResult \| null>` (avança `settings.cloud.lastSyncAt` **somente** quando a execução termina sem erros), `resolveConflicts(choices: Record<string, ConflictChoice>)` |
 | **Lixeira** | `restoreFromTrash(id)`, `restoreFromCloud(id)`, `purgeTrashItem(id)`, `runTrashPurge()` |
@@ -340,6 +349,10 @@ por `order` (`sortFoldersByOrder`/`sortNotebooksByOrder`); `reorderFolder`/`reor
 recalculam `order` dos irmãos dentro do mesmo nível (`parentId`/`folderId`) e
 `moveFolder`/`moveNotebook` delegam a `reorder*` movendo para o fim do destino. Dados
 antigos sem `order` (sync/backup) são normalizados por `fillFolderOrder`/`fillNotebookOrder`.
+`lastClicked` é uma conveniência puramente de UI (definida por `setLastClicked`, nunca
+persistida): é limpo quando a pasta/caderno/camada/pasta-de-camadas referenciada é
+excluída, quando um pull da nuvem ou uma restauração de backup substitui os dados, e
+quando o caderno selecionado é removido por uma mudança de sync.
 
 **Garantias das camadas**: toda ação de camada resolve o notebook selecionado + página
 atual, chama `pushUndo()`, muta `page.layers`/`page.activeLayerId`, atualiza
@@ -353,12 +366,26 @@ selecionadas em ordem base→topo, o resultado ocupa a posição da mais acima (
 camadas não selecionadas preservam a ordem relativa. `addImageToPage` resolve a camada
 ativa e **aborta** se ela estiver travada. As ações de camada incrementam `dataVersion`
 (re-render do Editor e do `LayersPanel`) — não usam eventos `ink:*`.
+**Garantias das pastas de camadas**: `page.layers` continua sendo a única fonte da ordem z
+(índice 0 = base); o agrupamento por pasta é uma *visão* sobre o array plano (ordem de
+exibição = ordem de `layerFolders`). `addLayer(folderId?)` insere a nova camada no **topo
+do grupo-alvo** (a mesma regra de `moveLayerToFolder` com `beforeId = null`); sem pasta,
+mantém o comportamento legado (insere após a camada ativa). `moveLayerToFolder(from,
+folderId, beforeId)` define o `folderId` da camada e a reposiciona: com `beforeId`, logo
+antes dessa camada; caso contrário, no **topo do grupo da pasta-alvo** (ou do grupo raiz).
+`deleteLayerFolder(id)` remove a pasta e define `folderId = null` em todas as suas camadas
+(elas vão para a raiz). `reorderLayerFolder(id, beforeId)` recalcula o `order` das irmãs
+como `reorderFolder`. `moveLayer(from, to)` permanece para compatibilidade (nenhum outro
+chamador depois que o painel passou a usar `moveLayerToFolder`).
+`mergeSelectedLayers` faz spread da camada do topo (mantém seu `folderId`);
+`cloneLayerWithNewIds` e os clones de página também mantêm `folderId`, então camadas
+duplicadas/mescladas permanecem na mesma pasta.
 
 #### `useUiStore` (`src/uiStore.ts:22`) — modais
 
 | Campo/Ação | Tipo |
 |---|---|
-| `openModal` | `ModalName \| null` (conjunto fechado de 19 valores, listados no topo do arquivo) |
+| `openModal` | `ModalName \| null` (conjunto fechado de 20 valores, listados no topo do arquivo) |
 | `modalData` | `Record<string, unknown>` (payload do modal aberto) |
 | `open(name, data?)` | Abre o modal e guarda o payload |
 | `close()` | Fecha o modal e zera `modalData` |
@@ -510,6 +537,7 @@ disparados/ouvidos:
 | `ink:image-rotate` | `number` (graus) | `Toolbar.tsx` (painel Seleção) | `Editor.tsx` |
 | `ink:image-selected` | `{ id }` | `Editor.tsx` | `Toolbar.tsx` (painel Seleção) |
 | `ink:recenter` | — | atalho `recenter` | `Editor.tsx` |
+| `ink:rename` | — | atalho `rename` (`useShortcuts.ts`, padrão F2) | `Sidebar.tsx` (renomeia a **última** pasta/caderno **clicada** — via `store.lastClicked`, definido no clique simples incl. resultados da busca, `null` na multi-seleção — com fallback para a seleção explícita única, depois a pasta selecionada, depois o caderno selecionado, via modal de prompt; com uma multi-seleção na barra lateral ele não faz nada; sempre que a barra lateral estiver aberta com qualquer seleção isso vence mesmo com o painel de camadas aberto), `LayersPanel.tsx` (renomeia inline a **última camada/pasta-de-camadas clicada** — via `store.lastClicked`, `null` na multi-seleção — senão a linha de pasta selecionada, senão a camada ativa; somente quando o painel de camadas está aberto, e ignorado sempre que a barra lateral estiver aberta com qualquer seleção), `TopBar.tsx` (inicia a edição do título do caderno atual quando o **último item clicado** foi o título, ou quando nem a barra lateral nem o painel de camadas estão abertos) |
 | `ink:request-add-page` | — | `Editor.tsx` (`onAddPage`, re-dispatch do `ink:add-page`) | `App.tsx` (abre `addPagePicker`) |
 | `ink:save` | — | atalho `save` | `App.tsx` (persiste o caderno atual) |
 | `ink:selection-action` | `'copy'|'cut'|'paste'|'duplicate'|'delete'` | `Toolbar.tsx` | `Editor.tsx` |
@@ -596,6 +624,7 @@ Fluxo e arquivos envolvidos:
   removida para a próxima sincronização parar de tentar baixá-la.
 - **Estado local de sync**: `db.ts` → `cloudSync` (`CloudSyncState`).
 - **Orquestração**: `store.ts` → `syncNow()` (guard de reentrância + debounce), `resolveConflicts()`. O `syncNow()` **só avança `settings.cloud.lastSyncAt` quando a execução termina sem erros** (uma sincronização com falha mantém o horário real do "último sync" em vez de fingir que deu certo). A assinatura de auto-sync (debounce de 20s) **enfileira uma sincronização de acompanhamento quando uma mudança chega durante uma sincronização em andamento** (`syncQueued`), para que edições feitas durante a janela de sync não sejam perdidas silenciosamente. O `applySyncChanges()` aplica dados puxados/novos/removidos e **não faz nada quando nada mudou de fato** — só incrementa `dataVersion` (que re-dispara o auto-sync) quando há mudanças reais, evitando um loop infinito de auto-sync no celular.
+  **Commit após conteúdo ("sincronizou, mas falta alteração")**: o `syncNow()` aplica o conteúdo puxado (`applySyncChanges`) **antes** de persistir o baseline avançado (`db.putCloudSyncState`). Se a aplicação do conteúdo falhar, o baseline permanece como estava, então a próxima sincronização re-puxa os mesmos cadernos (idempotente) em vez de marcá-los como sincronizados com a cópia local intacta.
 - **Design/plano detalhados**: `docs/superpowers/specs/2026-08-17-sync-bidirecional-design.md`
   e `docs/superpowers/plans/2026-08-17-sync-bidirecional-plan.md`.
 - **Verificação de regressão**: `scripts/verify-sync.ts` (rodar com `npx tsx
@@ -632,8 +661,9 @@ Fluxo e arquivos envolvidos:
 | Texto inline (digitação no lugar) | `Editor.tsx` (`InlineTextInput`, `commitInlineText`) |
 | Formatação de texto (fonte, marcadores, direção) | `src/utils/drawText.ts` + `Toolbar.tsx` |
 | Desfazer/refazer | `src/store.ts` (`pushUndo`, `undo`, `redo`); no toque, dois toques seguidos com 2 dedos no canvas equivalem ao Desfazer (`Editor.tsx`, `onPointerUp` → `useAppStore.undo()`); dois toques com 3 dedos = Refazer (`useAppStore.redo()`); `pushUndo` só é chamado quando o traço/borracha/rotação realmente altera a página |
-| Camadas: modelo e helpers (normalização de páginas legadas) | `src/types.ts` (`Layer`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
-| Camadas: ações de estado (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
+| Camadas: modelo e helpers (normalização de páginas legadas) | `src/types.ts` (`Layer`, `LayerFolder`, `makeLayer`, `normalizePage`, `getActiveLayer`) |
+| Camadas: ações de estado (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge) | `src/store.ts` (`addLayer`, `renameLayer`, `duplicateLayer`, `deleteLayer`, `moveLayer`, `moveLayerToFolder`, `setLayerVisible`, `setLayerOpacity`, `setLayerLocked`, `setActiveLayer`, `mergeSelectedLayers`) |
+| Pastas de camadas (criar/renomear/excluir/reordenar, mover camada para dentro/fora de pasta, soltar na linha da pasta / zona raiz) | `src/store.ts` (`addLayerFolder`, `renameLayerFolder`, `deleteLayerFolder`, `reorderLayerFolder`, `moveLayerToFolder`) + `src/components/LayersPanel.tsx` (`.layer-folder-row`, `dragFolderIdRef`, `dropIntoFolderRef`, menu "…" da pasta) + `src/types.ts` (`LayerFolder`) |
 
 ### Dados e persistência
 
@@ -669,7 +699,7 @@ Fluxo e arquivos envolvidos:
 | Assunto | Arquivo(s) |
 |---|---|
 | Importar imagem na página | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`) |
-| Importar PDF na página atual (escolhe uma página do PDF) | `Modals.tsx` (`ImportPdfModal`) + `store.ts` (`addPage`, `persistNotebook`) |
+| Importar PDF como fundo de página (via criação de página/caderno → "Importar modelo (imagem/PDF)") | `Modals.tsx` (`AddPageModal`/`NewNotebookModal` → `TemplatePicker`, `buildPdfTemplatePage`) + `store.ts` (`createNotebook`, `addPage`, `addPagesFromTemplate`) |
 | Importar PDF como novo caderno | `Modals.tsx` (`ImportPdfNoteModal`) + `store.ts` (`importPdfNotebook`) |
 | Renderizar PDF → imagens | `src/utils/pdf.ts` |
 | Exportar PNG | `src/utils/export.ts` (`exportPageAsPng`) |
@@ -688,11 +718,15 @@ Fluxo e arquivos envolvidos:
 | Suporte a temas (Escuro/Claro/Sistema) | Configurações (**aba Aparência**) → `settings.theme`; aplicado no `App.tsx` via classes CSS e media queries. |
 | Áreas seguras do celular (status bar / notch / gestos) | `index.html` usa `viewport-fit=cover`; `src/styles.css` respeita `env(safe-area-inset-top)` na `.topbar` (altura/padding) e no botão flutuante `.ui-restore-btn.top-center`, e `env(safe-area-inset-bottom)` na `.toolbar` no modo mobile — evita que a barra superior fique coberta/inacessível em celulares com a barra de notificações oculta (edge-to-edge) |
 | Barra superior | `src/components/TopBar.tsx`. Contém os toggles de sidebar/preview à esquerda, o título do caderno ao centro, e botões de ação (Importar, Exportar, Sincronizar, Configurações, **Ocultar barras da UI**) à direita. No celular, o lado direito é rolável. |
-| Painel de camadas (lateral direita; botão "Camadas" na `TopBar` alterna `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (ações de camada) |
+| Painel de camadas (lateral direita; botão "Camadas" na `TopBar` alterna `layersOpen`) | `src/components/LayersPanel.tsx` + `src/store.ts` (ações de camada e de pastas de camadas) |
 | Árvore de pastas/cadernos | `src/components/Sidebar.tsx` (tooltip customizado `.sidebar-name-tooltip` mostra o nome completo de cadernos/pastas ao passar o mouse; `.sidebar-item` dentro das linhas usa `flex: 1 1 auto; min-width: 0` e `.row-menu` com `z-index` para manter o botão "…" clicável mesmo com nomes longos; menu "…" fecha ao clicar fora via listener global de `pointerdown`; conteúdo rolável em `.sidebar-scroll`) |
 | Reordenar pastas/cadernos por arrastar (reorder no mesmo nível + mover para dentro de pasta) | `src/components/Sidebar.tsx` (DnD custom via Pointer Events: `onItemPointerDown/Move/Up`, `computeSlot`, `updateDropPosition`, autoscroll, indicador `.sidebar-drop-indicator`, destaque `.drop-target`) + `src/store.ts` (`reorderFolder`/`reorderNotebook` recalculam `order` dos irmãos; `moveFolder`/`moveNotebook` movem para o destino) + campo `order` em `src/types.ts` |
 | Seleção múltipla de pastas/cadernos (CTRL/SHIFT no PC, toque longo no touch) | `src/components/Sidebar.tsx` (`toggleSelect`, `selectRange`; timer de ~500ms no `pointerdown` de toque dispara `toggleSelect`; barra `.selection-bar`) + `src/store.ts` (`toggleSelect`, `clearSelection`, `selectedIds`) |
 | Redimensionar a barra de cadernos | `src/components/Sidebar.tsx` (handle `.sidebar-resizer` na borda direita, arraste para aumentar/diminuir; largura salva em `settings.sidebarWidth` via `setSettings` no fim do arrasto; limite 160–min(520, 50% da janela); oculto em touch/`pointer: coarse`) |
+| Redimensionar o painel de camadas | `src/components/LayersPanel.tsx` (handle `.layers-resizer` na borda **esquerda**, espelho do resizer da barra lateral; largura = `dragWidth ?? settings.layersWidth`, limite 180–min(420, 50% da janela); salva em `settings.layersWidth` via `setSettings` ao soltar; oculto no mobile onde a largura do painel é fixa em 280px) |
+| Renomear pasta/caderno (F2) | `src/types.ts` (`DEFAULT_SHORTCUTS.rename` = `f2`), `src/hooks/useShortcuts.ts` (dispara `ink:rename`), `src/components/Sidebar.tsx` (listener de `ink:rename` → `renameNotebook`/`renameFolderName` via modal de prompt; também disponível no menu de contexto "…") |
+| Renomear camada / pasta de camadas (F2) | `src/components/LayersPanel.tsx` (listener de `ink:rename` inicia a renomeação inline da pasta selecionada — senão da camada ativa; duplo clique no nome da pasta/camada também renomeia) |
+| Renomear título do caderno atual (F2) | `src/components/TopBar.tsx` (listener de `ink:rename` abre o input inline do título quando nem a barra lateral nem o painel de camadas estão abertos; clicar no título também renomeia) |
 | Preview de páginas (tamanho fixo das miniaturas, seleção múltipla com CTRL/SHIFT e barra de seleção) | `src/components/PageList.tsx` + `src/renderer/thumbnail.ts` (`.page-thumb-wrap` com `flex-shrink: 0` para não encolher com muitas páginas) |
 | Modais (todos) | `src/components/Modals.tsx` + `src/uiStore.ts`; fecham com `Esc`/botão de voltar (evento `ink:esc` → `ModalsHost` chama `close()`; para `prompt`/`confirmDelete` resolve o resolver com `null`) |
 | Atualizações de software | `src/utils/updateCheck.ts` (checagem via API do GitHub) + `electron/main.cjs` (electron-updater) + `src/components/Modals.tsx` (`UpdateModal`); verifica automaticamente ao iniciar (`App.tsx`) e permite busca manual nas Configurações |
@@ -730,10 +764,10 @@ Fluxo e arquivos envolvidos:
   passar pela persistência).
 - **Persistência**: toda alteração de dados persiste via `db.*` (IndexedDB é o store
   primário). Dentro do editor, edições de canvas persistem via `schedulePersist()`
-  (`Editor.tsx`), **debounced (400ms)** com o notebook capturado no momento do agendamento —
-  edições de alta frequência (traços de desenho) são gravadas no máximo uma vez por janela
-  com o estado mais recente, em vez de um `persistNotebook` completo a cada release do
-  ponteiro.
+  (`Editor.tsx`), **debounced (400ms)** persistindo o caderno vivo atual no momento do
+  fire — edições de alta frequência (traços de desenho) são gravadas no máximo uma vez por
+  janela com o estado mais recente, em vez de um `persistNotebook` completo a cada release
+  do ponteiro.
 - **Comunicação UI ↔ canvas**: via `CustomEvent` (`ink:*`), nunca props profundas.
 - **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** para desacoplar o desenho dos eventos de ponteiro, garantindo uma taxa de quadros estável. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs para evitar re-renders do React. Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
 - **Canvas**: `Editor.tsx` é o dono do motor; `PageCanvas` só renderiza e faz hit tests.
@@ -796,7 +830,7 @@ Fluxo e arquivos envolvidos:
 | `src/components/Sidebar.tsx` | Menus de contexto, prompts, confirmações, títulos de seção | "Meus Cadernos", "Sem pastas", "Nova pasta", "Renomear", "Copiar para pasta...", "Mover para pasta...", "Duplicar", "Excluir", "Excluir a nota ...?", "Arraste para redimensionar", "Arraste para reordenar. Em touch, toque longo seleciona vários itens." (`sidebar.dragHint`), "Lixeira" (`sidebar.trash`) |
 | `src/components/TopBar.tsx` | Tooltips, título do app, placeholder | "Alternar barra lateral", "Mostrar/ocultar preview das páginas", "Camadas" (`topbar.toggleLayers`), "Ocultar a barra superior", "Ocultar a barra de ferramentas", "Mostrar a barra superior", "Mostrar a barra de ferramentas", "Mostrar a barra de cadernos", "Mostrar o preview de páginas", "Tela cheia (F11)", "Mamaco Notes", "Selecione ou crie um caderno" |
 | `src/components/PageList.tsx` | Título, placeholder de busca, mensagens vazias, barra de seleção múltipla de páginas | "Páginas", "Ir para a página (nº)...", "Nenhuma página encontrada", "{{count}} página(s) selecionada(s)", "Limpar seleção de páginas", "Duplicar páginas selecionadas", "Excluir {{count}} página(s) selecionada(s)?" |
-| `src/components/LayersPanel.tsx` | Título do painel, barra de ações (nova/duplicar/excluir/mesclar), slider de opacidade da camada ativa, rodapé "Fundo", tooltips de visibilidade/lock | "Camadas", "Adicionar camada", "Duplicar camada", "Excluir camada", "Mesclar camadas", "Mesclar {{count}} camadas", "Fundo", "Fundo da página", "Opacidade", "Renomear camada", "Camada {{n}}" (nomes padrão via `layers.layerN` quando o nome casa com `^Camada \d+$`), "Mostrar/ocultar camada", "Travar camada", "Destravar camada" |
+| `src/components/LayersPanel.tsx` | Título do painel, barra de ações (nova camada / nova pasta / duplicar / excluir / mesclar), slider de opacidade da camada ativa, rodapé "Fundo", tooltips de visibilidade/lock, **strings de UX das pastas** | "Camadas", "Adicionar camada", "Duplicar camada", "Excluir camada", "Mesclar camadas", "Mesclar {{count}} camadas", "Fundo", "Fundo da página", "Opacidade", "Renomear camada", "Camada {{n}}" (nomes padrão via `layers.layerN` quando o nome casa com `^Camada \d+$`), "Mostrar/ocultar camada", "Travar camada", "Destravar camada", **"Nova pasta de camadas" (`layers.newFolder`), "Renomear pasta" (`layers.renameFolder`), "Excluir pasta" (`layers.deleteFolder`), "Excluir a pasta \"{{name}}\"? As camadas dentro dela serão movidas para a raiz." (`layers.deleteFolderConfirm`), "Nome da nova pasta de camadas:" (`layers.newFolderPrompt`), "Novo nome da pasta de camadas:" (`layers.renameFolderPrompt`), "Arrastar para redimensionar" (`layers.resizePanel`), "Sem camadas" (`layers.folderEmpty`)** |
 | `src/components/Editor.tsx` | Placeholder do texto inline, tooltips de zoom | "Digite o texto...", "Diminuir zoom", "Redefinir zoom / recentralizar", "Recentralizar página" |
 | `src/utils/shortcuts.ts` | Rótulos dos atalhos exibidos em Configurações (`shortcutLabel`) | "Caneta", "Borracha", "Desfazer", "Aumentar zoom", "Adicionar página", "Excluir página", "Tela cheia", etc. |
 | `src/store.ts` | Sufixo de duplicação de itens | `t('copySuffix')` → `' (cópia)'` / `' (copy)'` |

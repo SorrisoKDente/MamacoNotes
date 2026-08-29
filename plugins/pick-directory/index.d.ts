@@ -2,7 +2,6 @@ export interface UploadStartOptions {
   sessionId: string
   url: string
   headers: Record<string, string>
-  totalLength: number
 }
 
 export interface PickDirectoryPlugin {
@@ -15,5 +14,5 @@ export interface PickDirectoryPlugin {
   getUriFileInfo: (options: { uri: string }) => Promise<{ size: number }>
   uploadStart: (options: UploadStartOptions) => Promise<void>
   uploadChunk: (options: { sessionId: string; content: string }) => Promise<void>
-  uploadEnd: (options: { sessionId: string }) => Promise<{ status: number }>
+  uploadEnd: (options: { sessionId: string }) => Promise<{ status: number; bytesWritten: number }>
 }

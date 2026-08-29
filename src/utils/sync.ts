@@ -183,6 +183,15 @@ export function buildPlan(
       continue
     }
 
+    // Prefer a clearly newer remote notebook when a previous failed upload
+    // advanced the local baseline without persisting the notebook body. This
+    // repairs stale devices that otherwise appear locally modified and push
+    // their old copy back to the cloud instead of pulling the real change.
+    if (last !== undefined && remote.updatedAt === last && remote.updatedAt > nb.updatedAt) {
+      plan.pullIds.push(nb.id)
+      continue
+    }
+
     if (last === undefined) {
       if (nb.updatedAt >= remote.updatedAt) plan.push.push(nb)
       else plan.pullIds.push(nb.id)

@@ -329,10 +329,28 @@ export async function uploadFile(
       // Stream the body chunk-by-chunk through the native plugin instead of
       // sending the whole payload across the Capacitor bridge (which crashes
       // with OutOfMemoryError for large notebooks).
-      const content =
-        bytes instanceof Blob ? await bytes.text() : new TextDecoder().decode(bytes)
+      const content = bytes instanceof Blob
+        ? new Uint8Array(await bytes.arrayBuffer())
+        : bytes
       const status = await uploadFileStreaming(url, headers, content)
-      if (status >= 200 && status < 300) return
+      if (status >= 200 && status < 300) {
+        // Some WebDAV servers acknowledge a broken chunked PUT while leaving
+        // a zero-byte object. Verify the stored size when HEAD is supported so
+        // sync never advances the manifest for an empty notebook.
+        const verify = await customFetch(url, {
+          method: 'HEAD',
+          headers: { Authorization: headers.Authorization },
+        })
+        if (verify.ok) {
+          const remoteLength = verify.headers.get('content-length')
+          if (remoteLength !== null && Number(remoteLength) !== content.byteLength) {
+            throw new Error(
+              `Remote upload size mismatch: expected ${content.byteLength} bytes, got ${remoteLength}`,
+            )
+          }
+        }
+        return
+      }
       if (status === 401 || status === 403) throw webdavAuthError(status)
       if (status === 404) {
         throw new Error(

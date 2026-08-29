@@ -98,8 +98,13 @@ export function PageList() {
   const pages = notebook?.pages ?? []
 
   const thumbTimesRef = useRef<Record<string, number>>({})
+  const previousPagesRef = useRef<typeof pages | null>(null)
 
   useEffect(() => {
+    if (previousPagesRef.current !== pages) {
+      thumbTimesRef.current = {}
+      previousPagesRef.current = pages
+    }
     for (const p of pages) {
       const lastTime = thumbTimesRef.current[p.id]
       if (thumbs[p.id] && lastTime === p.updatedAt) continue
