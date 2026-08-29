@@ -212,6 +212,11 @@ if (!gotTheLock) {
       if (win) win.webContents.send('update-available', info)
     })
 
+    autoUpdater.on('download-progress', (progressObj) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win) win.webContents.send('update-progress', progressObj.percent)
+    })
+
     autoUpdater.on('update-downloaded', (info) => {
       const win = BrowserWindow.getAllWindows()[0]
       if (win) win.webContents.send('update-downloaded', info)

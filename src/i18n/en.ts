@@ -427,6 +427,7 @@ export const enMessages: Record<string, string> = {
   'modal.updateAvailable': 'Update available',
   'modal.updateAvailableDesc': 'A new version of Mamaco Notes is available: **v{{version}}**',
   'modal.downloadUpdate': 'Download and update',
+  'modal.downloadingPercent': 'Downloading... {{percent}}%',
   'modal.later': 'Later',
   'modal.dontShowAgain': 'Don\'t show for this version',
   'modal.updateNotes': 'Release notes',

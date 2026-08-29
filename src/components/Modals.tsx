@@ -1855,6 +1855,7 @@ function UpdateModal() {
   const setSettings = useAppStore((s) => s.setSettings)
   const [downloading, setDownloading] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
+  const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const info = modalData.info as { latestVersion: string; releaseNotes: string; url: string }
@@ -1863,7 +1864,13 @@ function UpdateModal() {
   useEffect(() => {
     if (!isDesktop || !window.inkfolioDesktop) return
     const desktop = window.inkfolioDesktop
-    const unA = desktop.onUpdateAvailable(() => setDownloading(true))
+    const unA = desktop.onUpdateAvailable(() => {
+      // Don't set downloading here, wait for user click
+    })
+    const unP = desktop.onUpdateProgress((percent: number) => {
+      setDownloading(true)
+      setProgress(Math.round(percent))
+    })
     const unD = desktop.onUpdateDownloaded(() => {
       setDownloading(false)
       setDownloaded(true)
@@ -1874,6 +1881,7 @@ function UpdateModal() {
     })
     return () => {
       unA()
+      unP()
       unD()
       unE()
     }
@@ -1898,6 +1906,8 @@ function UpdateModal() {
     close()
   }
 
+  const isInstalling = downloaded && downloading // Not really possible as downloading set false on unD
+
   return (
     <>
       <h2>{t('modal.updateAvailable')}</h2>
@@ -1918,17 +1928,17 @@ function UpdateModal() {
       {error && <div className="modal-result error">{error}</div>}
 
       <div className="modal-actions">
-        <button className="btn primary" onClick={doUpdate} disabled={downloading}>
-          {downloading
-            ? t('modal.processing')
-            : downloaded
-              ? t('modal.apply')
+        <button className="btn primary" onClick={doUpdate} disabled={downloading && progress === 0 && !downloaded}>
+          {downloaded
+            ? t('modal.apply')
+            : downloading
+              ? t('modal.downloadingPercent', { percent: progress })
               : t('modal.downloadUpdate')}
         </button>
-        <button className="btn" onClick={close} disabled={downloading}>
+        <button className="btn" onClick={close}>
           {t('modal.later')}
         </button>
-        <button className="btn" onClick={ignore} disabled={downloading}>
+        <button className="btn" onClick={ignore}>
           {t('modal.dontShowAgain')}
         </button>
       </div>

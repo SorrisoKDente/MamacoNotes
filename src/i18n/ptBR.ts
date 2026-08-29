@@ -427,6 +427,7 @@ export const ptBRMessages: Record<string, string> = {
   'modal.updateAvailable': 'Atualização disponível',
   'modal.updateAvailableDesc': 'Uma nova versão do Mamaco Notes está disponível: **v{{version}}**',
   'modal.downloadUpdate': 'Baixar e atualizar',
+  'modal.downloadingPercent': 'Baixando... {{percent}}%',
   'modal.later': 'Mais tarde',
   'modal.dontShowAgain': 'Não mostrar para esta versão',
   'modal.updateNotes': 'Notas da versão',

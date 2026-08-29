@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('inkfolioDesktop', {
     ipcRenderer.on('update-downloaded', subscription)
     return () => ipcRenderer.removeListener('update-downloaded', subscription)
   },
+  onUpdateProgress: (callback) => {
+    const subscription = (_e, percent) => callback(percent)
+    ipcRenderer.on('update-progress', subscription)
+    return () => ipcRenderer.removeListener('update-progress', subscription)
+  },
   onUpdateError: (callback) => {
     const subscription = (_e, err) => callback(err)
     ipcRenderer.on('update-error', subscription)
