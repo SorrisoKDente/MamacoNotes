@@ -52,6 +52,7 @@ export class PageCanvas {
   currentPageIndex = 0
 
   private imageCache = new Map<string, HTMLImageElement>()
+  private static globalImageCache = new Map<string, HTMLImageElement>()
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
 
   constructor(props: CanvasProps) {
@@ -230,7 +231,7 @@ export class PageCanvas {
 
     this.renderBackground(ctx, page)
     if (page.pdf) {
-      this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name)
+      this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
     }
     this.renderPageContent(ctx, page, true)
 
@@ -311,7 +312,7 @@ export class PageCanvas {
 
       this.renderBackground(ctx, page)
       if (page.pdf) {
-        this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name)
+        this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
       }
       this.renderPageContent(ctx, page, i === this.currentPageIndex)
       ctx.restore()
@@ -392,19 +393,44 @@ export class PageCanvas {
   }
 
   private getImage(dataUrl: string): HTMLImageElement | null {
+    // Check local instance cache first (prioritize recently used in this session)
     const cached = this.imageCache.get(dataUrl)
-    if (cached) {
-      return cached.complete && cached.naturalWidth > 0 ? cached : null
+    if (cached && cached.complete && cached.naturalWidth > 0) {
+      return cached
     }
+
+    // Check static global cache (allows sharing between PageCanvas instances/notebooks)
+    const globalCached = PageCanvas.globalImageCache.get(dataUrl)
+    if (globalCached && globalCached.complete && globalCached.naturalWidth > 0) {
+      this.imageCache.set(dataUrl, globalCached)
+      return globalCached
+    }
+
+    // Start loading
     const img = new Image()
     this.imageCache.set(dataUrl, img)
+    PageCanvas.globalImageCache.set(dataUrl, img)
     img.onload = () => this.callbacks.onRequestRerender()
     img.src = dataUrl
+
+    // Clean up global cache if it gets too large (simple LRU-ish cleanup)
+    if (PageCanvas.globalImageCache.size > 200) {
+      const keys = PageCanvas.globalImageCache.keys()
+      for (let i = 0; i < 50; i++) {
+        const next = keys.next()
+        if (next.done) break
+        PageCanvas.globalImageCache.delete(next.value)
+      }
+    }
+
     return null
   }
 
   clearImageCache(dataUrl: string) {
-    if (dataUrl) this.imageCache.delete(dataUrl)
+    if (dataUrl) {
+      this.imageCache.delete(dataUrl)
+      PageCanvas.globalImageCache.delete(dataUrl)
+    }
   }
 
   setImageOverride(id: string, dataUrl: string, canvas: HTMLCanvasElement) {
@@ -438,21 +464,26 @@ export class PageCanvas {
     this.imageOverrides.clear()
   }
 
-  renderPdf(ctx: CanvasRenderingContext2D, dataUrl: string, _name: string) {
+  renderPdf(ctx: CanvasRenderingContext2D, dataUrl: string, _name: string, pageArg?: Page) {
     const img = this.getImage(dataUrl)
     if (!img) return
-    const { page } = this
-    const scale = Math.min(page.width / img.width, page.height / img.height)
+    const pg = pageArg ?? this.page
+    const scale = Math.min(pg.width / img.width, pg.height / img.height)
     const w = img.width * scale
     const h = img.height * scale
     ctx.save()
+
+    // Performance optimization: use low quality smoothing during active drawing/panning
+    // to keep frame rate high on Windows/Low-end devices with many PDF pages.
+    const isInteracting = this.drawing || this.eraserActive
     ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
+    ctx.imageSmoothingQuality = isInteracting ? 'low' : 'high'
+
     // Arredondamos para evitar borrões causados por sub-pixel rendering
     ctx.drawImage(
       img,
-      Math.floor((page.width - w) / 2),
-      Math.floor((page.height - h) / 2),
+      Math.floor((pg.width - w) / 2),
+      Math.floor((pg.height - h) / 2),
       Math.floor(w),
       Math.floor(h),
     )
