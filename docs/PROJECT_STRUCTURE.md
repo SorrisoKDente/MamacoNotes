@@ -131,7 +131,7 @@ Initialization flow:
 | File | Responsibility |
 |---|---|
 | `canvas.ts` | `PageCanvas` class: renders pages (continuous/separate), layers (visibility/opacity), strokes, images, texts, PDF, templates, selection; coordinate conversion; hit tests |
-| `drawUtils.ts` | Pure drawing functions reused by thumbnail/export: `drawTemplate`, `drawLayer`, `drawStroke`, `drawTextOnCanvas` |
+| `drawUtils.ts` | Pure drawing functions reused by thumbnail/export: `drawTemplate`, `drawLayer`, `drawStroke` (fully synchronized with the main canvas engine to support pressure sensitivity and quadratic curve smoothing), `drawTextOnCanvas` |
 | `thumbnail.ts` | Generates page thumbnails (used in PageList and custom templates), rendered at `devicePixelRatio` resolution (capped at 3×) with JPEG quality 0.8 — keeping the CSS size (160×207) so previews stay sharp on retina phones |
 
 #### `src/utils/` — support logic
@@ -139,14 +139,14 @@ Initialization flow:
 | File | Responsibility |
 |---|---|
 | `http.ts` | **Platform-agnostic fetch wrapper**: switches between standard `fetch` (Web/Electron) and native `CapacitorHttp` (Android) to bypass CORS and network restrictions. Exports `customFetch` (body converts `Uint8Array`/`ArrayBuffer`/`Blob` to text), `decodeCapacitorData(data, isJson?)` (decodes CapacitorHttp's `data` field: base64 string, raw string, or a JS object/array that CapacitorHttp parsed despite `responseType: 'arraybuffer'` when Content-Type is JSON), `isConnectionError(err)` and `withRetry(fn)` (**network resilience**: 3 attempts with 500ms→1s backoff, only for connection-level failures — never for HTTP 4xx/5xx or authentication), and `downloadText` (**chunked Range download** used on Android: requests `Range: bytes=…` with `responseType: 'arraybuffer'`, reassembles chunks in JS via `decodeCapacitorData` — avoids the bridge OOM for large notebook JSON). `downloadText` detects the response `Content-Type` and passes `isJson` to `decodeCapacitorData`, which then treats strings as raw text (never base64) for JSON responses — this fixes the "Bad control character in string literal in JSON" / "Unexpected end of JSON input" errors on Android caused by a Range chunk landing entirely inside a base64 image `dataUrl` in the notebook JSON and being base64-decoded into garbage. |
-| `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `readBackupFileFromUri` (chunked read via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (system document picker → chunked read), and `uploadFileStreaming` (PUT streamed via one native `OutputStream`, sending base64-encoded byte chunks with the declared UTF-8 byte length). |
+| `chunkedIo.ts` | **Bridge to the local Capacitor plugin `pick-directory`**: registers `PickDirectory` and exposes chunked primitives that never send a whole large file through the JS↔native bridge: `readBackupFileFromUri` (chunked read via `readUriChunk`/`getUriFileInfo`), `pickBackupFile` (system document picker → chunked read), `saveBackupFile` (system "Save As" picker → chunked write), and `uploadFileStreaming` (PUT streamed via one native `OutputStream`, sending base64-encoded byte chunks with the declared UTF-8 byte length). |
 | `layout.ts` | Offset/position calculation for pages in continuous mode (vertical/horizontal), `pageVisualRect`, `pageUnderPoint` |
 | `drawText.ts` | Measuring and drawing text elements (horizontal/vertical, markers, underline/strikethrough) |
 | `export.ts` | Page rendering to canvas and PNG/PDF export (generates simple PDF without external library) |
 | `pdf.ts` | Rendering PDF files to images via `pdfjs-dist` (`renderPdfPages`) |
 | `webdav.ts` | WebDAV transport (PROPFIND/MKCOL/PUT/DELETE fetch), special Koofr support, `makeTransport`. On Android the transport uses the **chunked native paths**: `downloadFile` via `http.ts` `downloadText` (Range + arraybuffer) and `uploadFile` via `chunkedIo.ts` `uploadFileStreaming` (PUT streamed through the `pick-directory` plugin's `HttpURLConnection`) — both avoid the bridge OOM. Native uploads verify the remote size with HEAD when supported, rejecting empty/truncated objects before the manifest advances. **Connection-level failures** (from `http.ts` `isConnectionError`) are re-thrown as a friendly `error.networkUnreachable` message so the user is told to check the internet connection. |
 | `sync.ts` | **Bidirectional synchronization algorithm** (merge, conflicts, tombstone, migration). A clearly newer remote notebook takes precedence over a stale local baseline left by a failed upload. Manual sync ("Sincronizar agora") runs the same algorithm as auto-sync — a notebook edited locally is **pushed**, never force-pulled over the edit. On download failure (notebook/folder), logs the error via `logger.error` (visible in the Settings → Logs tab) **before** surfacing it in the result/UI — on mobile, failures without this logging were silently invisible. `buildPlan` ignores ids under `localOnlyDeleted`/`tombstones` in the pull loop, and a notebook that reappeared locally after its remote deletion (restored from the trash, no active tombstone/baseline) is **re-pushed** instead of deleted again. |
-| `backup.ts` | Export/import full JSON backup (folders, notebooks, and settings; sanitizes settings and **removes cloud passwords** for security). On mobile the export writes to the app Documents folder via `capacitor-blob-writer` (chunked stream, avoids the Capacitor bridge OOM caused by `Filesystem.writeFile` with large content), always with a **date-stamped filename** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`); import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron `save-file`/`open-file` bridge and on web triggers a download/file input. |
+| `backup.ts` | Export/import full JSON backup (folders, notebooks, and settings; sanitizes settings and **removes cloud passwords** for security). On mobile the export opens the **system "Save As" picker** (`saveBackupFile`, chunked write via SAF) so the user can choose the destination, always with a **date-stamped filename** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`); import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron `save-file`/`open-file` bridge and on web triggers a download/file input. |
 | `imageErase.ts` | Eraser on images: offscreen canvas erasing session and re-encode at the end |
 | `colors.ts` | Color palette and HEX/RGB conversion helpers |
 | `fonts.ts` | System fonts list (Local Font Access) with fallback |
@@ -180,7 +180,7 @@ Initialization flow:
 
 | Path | Responsibility |
 |---|---|
-| `plugins/pick-directory/` | **Local Capacitor plugin** (dependency `pick-directory` via `file:plugins/pick-directory`): system document picker (`openFilePicker`/`readUriChunk`, `getUriFileInfo`) and streaming PUT upload (`uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`) — all to avoid the Android `OutOfMemoryError` of sending large content through the bridge. TS types in `index.d.ts`; the Android source lives in `android/`. |
+| `plugins/pick-directory/` | **Local Capacitor plugin** (dependency `pick-directory` via `file:plugins/pick-directory`): system document pickers (**`openFilePicker`** for reading and **`openFileCreator`** for "Save As"), chunked file read/write on `content://` URIs (`writeUriChunk`/`readUriChunk`, `getUriFileInfo`), and streaming PUT upload (`uploadStart`/`uploadChunk`/`uploadEnd` over `HttpURLConnection`) — all to avoid the Android `OutOfMemoryError` of sending large content through the bridge. TS types in `index.d.ts`; the Android source lives in `android/`. |
 | `public/` | PWA static icons (favicon, apple-touch-icon, pwa-192/512, maskable) |
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
@@ -526,8 +526,9 @@ Key points:
 - **Thumbnails/exporting** do not use `PageCanvas`; they use `renderer/drawUtils.ts` (pure
   functions) to redraw the page in another canvas — `drawLayer` applies the layer's
   `globalAlpha` and draws images→texts→strokes, respecting per-layer visibility and
-  opacity (thumbnail and export load the images from each layer to apply the correct
-  opacity).
+  opacity. The `drawStroke` function implements identical pressure sensitivity and
+  smoothing logic as the main editor, ensuring that thumbnails and PDF/PNG exports
+  match the appearance of the live notes.
 
 ---
 
@@ -695,7 +696,7 @@ Flow and files involved:
 | Types and defaults (settings, shortcuts) | `src/types.ts` |
 | CRUD for notebooks/folders/pages/templates | `src/store.ts` |
 | IndexedDB (read/write) | `src/db.ts` |
-| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). On mobile, export writes to the app **Documents folder** via `capacitor-blob-writer` (chunked — avoids the Android `OutOfMemoryError` when sending a large backup through the Capacitor bridge), always with a **date-stamped filename** (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`) so an existing backup is never overwritten; import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron save/open dialog and on web triggers a download/file input. |
+| Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). On mobile, export opens the **system "Save As" picker** (`saveBackupFile`) so the user can choose the destination, always with a **date-stamped filename** so an existing backup is never overwritten; import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron save/open dialog and on web triggers a download/file input. |
 | Logging System | `src/utils/logger.ts`. Stores system events and errors (like WebDAV failures) in memory. Logs are accessible via the **Logs tab** in Settings, allowing users to view, copy, and clear logs for debugging. |
 | Restore all (import backup) | `src/store.ts` (`replaceAllData`). Entry point in Settings (`Modals.tsx`): **Import backup** (single full JSON via `importBackup` — desktop open dialog, mobile system document picker `pickBackupFile`, web file input) |
 | Store contracts (state + actions, see §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |

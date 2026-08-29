@@ -29,7 +29,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Layer Management**: Professional-grade layer system allowing you to:
     -   Add, rename, duplicate, and merge layers.
     -   Adjust opacity and toggle visibility/locking.
-    -   Organize content (images, text, strokes) hierarchically.
+    -   Organize content (images, text, strokes) hierarchically with folders and a **resizable layers panel**.
 -   **Cloud Synchronization**: Bidirectional sync via **WebDAV**. Currently validated primarily with **Koofr**; while it supports the standard WebDAV protocol (Nextcloud, ownCloud, etc.), full compatibility with other providers is still being verified. **Network resilience**: connection failures are retried automatically (3 attempts with backoff) with a friendly message when the server is unreachable — never retries HTTP/auth errors.
   -   **Updates**: Desktop updates force-close the running app automatically, and the installer remains cancellable while files are being copied.
 -   **Local Trash**: Deleted folders and notebooks go to a local (non-synced) trash where each item can be restored individually. Items deleted "local + cloud" are restored from the local copy; items deleted "local only" with a cloud configured can be brought back with **"Restore from cloud"**. Retention is 30 days.
@@ -53,7 +53,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 -   **Security & Persistence**:
     -   Data stored locally using **IndexedDB** (saved automatically).
     -   Session restoration to automatically reopen the last notebook and page, and each notebook remembers its last viewed page (returning to it when you switch notebooks or reopen the app).
-    -   Manual full backup (JSON) import/export (**passwords excluded for security**).
+    -   Manual full backup (JSON) import/export (**passwords excluded for security**). On mobile, export uses the **system "Save As" picker** so you can choose exactly where to save your backup file.
     -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads through one native output stream), so big payloads never cross the Capacitor bridge in one call; PUT chunks preserve UTF-8 byte lengths for notes with accented or non-Latin text.
     -   **Sync bug fixes**: manual sync and auto-sync use the same algorithm — a notebook edited locally is **pushed**, never force-pulled over the edit (pulled content is applied before the sync baseline advances, so a failed apply is re-attempted on the next sync instead of being silently skipped); pending local persistence timers are discarded after a cloud replacement; deleted items never come back (tombstones are respected when pulling), stale local baselines recover the newer remote notebook, and a folder delete propagates to its subfolders/notebooks; restoring an item from the trash re-uploads it to the cloud instead of deleting it again.
 

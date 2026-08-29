@@ -57,6 +57,10 @@ export function drawTemplate(
   }
 }
 
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v))
+}
+
 export function drawStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,
@@ -73,18 +77,42 @@ export function drawStroke(
     ctx.fill()
     return
   }
+
   ctx.save()
-  if (stroke.kind === 'highlighter') ctx.globalAlpha = 0.35
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.strokeStyle = color
-  ctx.lineWidth = stroke.size * scale
-  ctx.beginPath()
-  ctx.moveTo(pts[0].x * scale, pts[0].y * scale)
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(pts[i].x * scale, pts[i].y * scale)
+
+  if (stroke.kind === 'highlighter') {
+    ctx.globalAlpha = 0.35
+    ctx.lineWidth = stroke.size * scale
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x * scale, pts[0].y * scale)
+    for (let i = 1; i < pts.length; i++) {
+      const midX = (pts[i].x + pts[i - 1].x) / 2
+      const midY = (pts[i].y + pts[i - 1].y) / 2
+      ctx.quadraticCurveTo(
+        pts[i - 1].x * scale,
+        pts[i - 1].y * scale,
+        midX * scale,
+        midY * scale,
+      )
+    }
+    ctx.lineTo(pts[pts.length - 1].x * scale, pts[pts.length - 1].y * scale)
+    ctx.stroke()
+  } else {
+    // Normal pen with pressure sensitivity
+    for (let i = 1; i < pts.length; i++) {
+      const p0 = pts[i - 1]
+      const p1 = pts[i]
+      const size = stroke.size * scale * clamp(p1.pressure, 0.15, 1)
+      ctx.lineWidth = Math.max(0.6 * scale, size)
+      ctx.beginPath()
+      ctx.moveTo(p0.x * scale, p0.y * scale)
+      ctx.lineTo(p1.x * scale, p1.y * scale)
+      ctx.stroke()
+    }
   }
-  ctx.stroke()
   ctx.restore()
 }
 
