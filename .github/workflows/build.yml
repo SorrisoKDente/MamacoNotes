@@ -72,13 +72,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "Garantindo existência do release $TAG..."
-          gh release create "$TAG" --title "$TAG" --notes "Release $TAG" || echo "Release já existe ou está sendo criado."
+          echo "Garantindo existência do rascunho de release $TAG..."
+          gh release create "$TAG" --draft --title "$TAG" --notes "Release $TAG" || echo "Rascunho já existe."
           
-          echo "Aguardando 10 segundos para estabilização do GitHub API..."
+          echo "Aguardando 10 segundos..."
           sleep 10
           
-          echo "Fazendo upload do APK..."
+          echo "Fazendo upload do APK para o rascunho..."
           gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber
 
       - name: Update Release Notes
@@ -88,8 +88,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          echo "Garantindo que o release $TAG existe..."
-          gh release create "$TAG" --title "$TAG" --notes "Draft release for $TAG" || true
+          echo "Garantindo existência do rascunho de release $TAG..."
+          gh release create "$TAG" --draft --title "$TAG" --notes "Draft release for $TAG" || true
           
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 $TAG^ 2>/dev/null || echo "")
           
