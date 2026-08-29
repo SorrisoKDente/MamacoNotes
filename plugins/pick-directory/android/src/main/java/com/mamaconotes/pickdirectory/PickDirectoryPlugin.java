@@ -122,6 +122,34 @@ public class PickDirectoryPlugin extends Plugin {
 
     @PluginMethod
     @SuppressWarnings("unused")
+    public void writeUriChunk(PluginCall call) {
+        String uriString = call.getString("uri");
+        String content = call.getString("content");
+        Boolean append = call.getBoolean("append", false);
+
+        if (uriString == null || content == null) {
+            call.reject("Missing parameters");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(uriString);
+            String mode = (append != null && append) ? "wa" : "wt";
+            try (OutputStream os = getContext().getContentResolver().openOutputStream(uri, mode)) {
+                if (os == null) {
+                    call.reject("Failed to open output stream");
+                    return;
+                }
+                os.write(content.getBytes(StandardCharsets.UTF_8));
+            }
+            call.resolve();
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    @SuppressWarnings("unused")
     public void readChunk(PluginCall call) {
         String uriString = call.getString("uri");
         String filename = call.getString("filename");
@@ -171,9 +199,21 @@ public class PickDirectoryPlugin extends Plugin {
         startActivityForResult(call, intent, "openFilePickerResult");
     }
 
+    @PluginMethod
+    @SuppressWarnings("unused")
+    public void openFileCreator(PluginCall call) {
+        String filename = call.getString("filename");
+        if (filename == null) filename = "mamaco-notes-backup.json";
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, filename);
+        startActivityForResult(call, intent, "openFilePickerResult");
+    }
+
     @ActivityCallback
     @SuppressWarnings("unused")
-    private void openFilePickerResult(PluginCall call, ActivityResult result) {
+    public void openFilePickerResult(PluginCall call, ActivityResult result) {
         if (result.getResultCode() != android.app.Activity.RESULT_OK) {
             call.reject("File selection cancelled");
             return;
@@ -227,7 +267,7 @@ public class PickDirectoryPlugin extends Plugin {
         try {
             Uri uri = Uri.parse(uriString);
             DocumentFile file = DocumentFile.fromSingleUri(getContext(), uri);
-            if (file == null) {
+            if (file == null || !file.exists()) {
                 call.reject("File not found");
                 return;
             }
@@ -384,12 +424,12 @@ public class PickDirectoryPlugin extends Plugin {
             }
             skipFully(is, offset);
             byte[] buffer = new byte[length];
-            int bytesReadTotal = 0;
-            int read;
-            while (bytesReadTotal < length && (read = is.read(buffer, bytesReadTotal, length - bytesReadTotal)) != -1) {
-                bytesReadTotal += read;
+            int totalBytesRead = 0;
+            int count;
+            while (totalBytesRead < length && (count = is.read(buffer, totalBytesRead, length - totalBytesRead)) != -1) {
+                totalBytesRead += count;
             }
-            return bytesReadTotal == 0 ? new byte[0] : Arrays.copyOf(buffer, bytesReadTotal);
+            return totalBytesRead == 0 ? new byte[0] : Arrays.copyOf(buffer, totalBytesRead);
         }
     }
 

@@ -1,8 +1,7 @@
 import { Capacitor } from '@capacitor/core'
-import { Directory } from '@capacitor/filesystem'
-import write_blob from 'capacitor-blob-writer'
 import type { AppSettings, Folder, Notebook } from '../types'
-import { pickBackupFile } from './chunkedIo'
+import { pickBackupFile, saveBackupFile } from './chunkedIo'
+import { logger } from './logger'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -67,6 +66,7 @@ export async function exportBackup(
   settings?: AppSettings | null,
 ): Promise<boolean> {
   const payload = JSON.stringify(buildBackupPayload(folders, notebooks, settings))
+  logger.info(`Exporting backup... Platform: ${Capacitor.getPlatform()}, Native: ${Capacitor.isNativePlatform()}`)
 
   if (desktop().saveFile) {
     try {
@@ -76,24 +76,10 @@ export async function exportBackup(
     }
   }
 
-  // Mobile (Android / iOS): write to the app Documents folder. The content is
-  // streamed in chunks via capacitor-blob-writer instead of sending the whole
-  // JSON through the Capacitor bridge — Filesystem.writeFile crashes with
-  // OutOfMemoryError on Android for big backups (images/PDFs stored as data URLs).
+  // Mobile (Android / iOS): open the system "Save As" picker and write the
+  // content in chunks via the native plugin to avoid the bridge OOM.
   if (Capacitor.isNativePlatform()) {
-    try {
-      const filename = buildBackupFilename()
-      await write_blob({
-        path: filename,
-        directory: Directory.Documents,
-        blob: new Blob([payload], { type: 'application/json' }),
-        recursive: true,
-      })
-      return true
-    } catch (err) {
-      console.error('Failed to export native backup:', err)
-      return false
-    }
+    return await saveBackupFile(buildBackupFilename(), payload)
   }
 
   const blob = new Blob([payload], { type: 'application/json' })

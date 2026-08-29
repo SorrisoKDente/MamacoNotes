@@ -1,5 +1,8 @@
 import { registerPlugin } from '@capacitor/core'
 
+import { alertAction } from '../components/Modals'
+import { logger } from './logger'
+
 /**
  * Custom Capacitor plugin (package `pick-directory`, see `plugins/`).
  *
@@ -9,6 +12,8 @@ import { registerPlugin } from '@capacitor/core'
  */
 export const PickDirectory = registerPlugin<{
   openFilePicker: () => Promise<{ uri: string }>
+  openFileCreator: (options: { filename: string }) => Promise<{ uri: string }>
+  writeUriChunk: (options: { uri: string; content: string; append?: boolean }) => Promise<void>
   readUriChunk: (options: { uri: string; offset: number; length: number }) => Promise<{ data: string; end: boolean }>
   getUriFileInfo: (options: { uri: string }) => Promise<{ size: number }>
   uploadStart: (options: {
@@ -100,5 +105,39 @@ export async function pickBackupFile(): Promise<string | null> {
   } catch (err) {
     console.error('Failed to pick backup file:', err)
     return null
+  }
+}
+
+/** Opens the system "Save As" picker and writes the content in chunks. */
+export async function saveBackupFile(filename: string, content: string): Promise<boolean> {
+  try {
+    logger.info(`Opening native file creator for: ${filename}`)
+    const { uri } = await PickDirectory.openFileCreator({ filename })
+    if (!uri) {
+      logger.warn('Native file creator returned no URI')
+      return false
+    }
+
+    logger.info(`Native file location chosen: ${uri}. Starting chunked write...`)
+    const blob = new Blob([content], { type: 'application/json' })
+    const size = blob.size
+    let offset = 0
+
+    while (offset < size) {
+      const chunk = blob.slice(offset, offset + CHUNK_SIZE)
+      const text = await chunk.text()
+      await PickDirectory.writeUriChunk({
+        uri,
+        content: text,
+        append: offset > 0,
+      })
+      offset += chunk.size
+    }
+    logger.info('Native backup write complete.')
+    return true
+  } catch (err) {
+    logger.error('Failed to save backup file', err)
+    void alertAction('Erro ao salvar backup', String(err))
+    return false
   }
 }
