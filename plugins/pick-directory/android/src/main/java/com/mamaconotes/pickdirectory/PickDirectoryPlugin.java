@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
+@SuppressWarnings("unused")
 @CapacitorPlugin(name = "PickDirectory")
 public class PickDirectoryPlugin extends Plugin {
 
@@ -43,12 +44,14 @@ public class PickDirectoryPlugin extends Plugin {
     private final Map<String, UploadSession> uploadSessions = new HashMap<>();
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void pick(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         startActivityForResult(call, intent, "pickResult");
     }
 
     @ActivityCallback
+    @SuppressWarnings("unused")
     private void pickResult(PluginCall call, ActivityResult result) {
         if (result.getResultCode() != android.app.Activity.RESULT_OK) {
             call.reject("Directory selection cancelled");
@@ -74,6 +77,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void writeChunk(PluginCall call) {
         String uriString = call.getString("uri");
         String filename = call.getString("filename");
@@ -93,26 +97,22 @@ public class PickDirectoryPlugin extends Plugin {
                 return;
             }
 
-            DocumentFile file = rootDir.findFile(filename);
-            if (file == null) {
-                file = rootDir.createFile("application/json", filename);
-            }
-            if (file == null) {
-                call.reject("Failed to create file");
+            DocumentFile existingFile = rootDir.findFile(filename);
+            DocumentFile fileToUse = (existingFile != null) ? existingFile : rootDir.createFile("application/json", filename);
+
+            if (fileToUse == null) {
+                call.reject("Failed to create or find file");
                 return;
             }
 
             // "wt" truncates and writes the first chunk; "wa" appends the rest.
             String mode = (append != null && append) ? "wa" : "wt";
-            OutputStream os = getContext().getContentResolver().openOutputStream(file.getUri(), mode);
-            if (os == null) {
-                call.reject("Failed to open output stream");
-                return;
-            }
-            try {
+            try (OutputStream os = getContext().getContentResolver().openOutputStream(fileToUse.getUri(), mode)) {
+                if (os == null) {
+                    call.reject("Failed to open output stream");
+                    return;
+                }
                 os.write(content.getBytes(StandardCharsets.UTF_8));
-            } finally {
-                os.close();
             }
             call.resolve();
         } catch (Exception e) {
@@ -121,11 +121,15 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void readChunk(PluginCall call) {
         String uriString = call.getString("uri");
         String filename = call.getString("filename");
-        Integer offset = call.getInt("offset", 0);
-        Integer length = call.getInt("length", 512 * 1024);
+        Integer offsetParam = call.getInt("offset");
+        Integer lengthParam = call.getInt("length");
+
+        int offset = (offsetParam != null) ? offsetParam : 0;
+        int length = (lengthParam != null) ? lengthParam : 512 * 1024;
 
         if (uriString == null || filename == null) {
             call.reject("Missing parameters");
@@ -158,6 +162,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void openFilePicker(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -167,6 +172,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @ActivityCallback
+    @SuppressWarnings("unused")
     private void openFilePickerResult(PluginCall call, ActivityResult result) {
         if (result.getResultCode() != android.app.Activity.RESULT_OK) {
             call.reject("File selection cancelled");
@@ -183,10 +189,14 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void readUriChunk(PluginCall call) {
         String uriString = call.getString("uri");
-        Integer offset = call.getInt("offset", 0);
-        Integer length = call.getInt("length", 512 * 1024);
+        Integer offsetParam = call.getInt("offset");
+        Integer lengthParam = call.getInt("length");
+
+        int offset = (offsetParam != null) ? offsetParam : 0;
+        int length = (lengthParam != null) ? lengthParam : 512 * 1024;
 
         if (uriString == null) {
             call.reject("Missing parameters");
@@ -205,6 +215,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void getUriFileInfo(PluginCall call) {
         String uriString = call.getString("uri");
 
@@ -229,6 +240,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void getFileInfo(PluginCall call) {
         String uriString = call.getString("uri");
         String filename = call.getString("filename");
@@ -261,6 +273,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void uploadStart(PluginCall call) {
         String sessionId = call.getString("sessionId");
         String url = call.getString("url");
@@ -297,6 +310,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void uploadChunk(PluginCall call) {
         String sessionId = call.getString("sessionId");
         String content = call.getString("content");
@@ -331,6 +345,7 @@ public class PickDirectoryPlugin extends Plugin {
     }
 
     @PluginMethod
+    @SuppressWarnings("unused")
     public void uploadEnd(PluginCall call) {
         String sessionId = call.getString("sessionId");
         if (sessionId == null) {
@@ -362,21 +377,19 @@ public class PickDirectoryPlugin extends Plugin {
         }
     }
 
-    private byte[] readFromUri(Uri uri, int offset, int length) throws IOException {        InputStream is = getContext().getContentResolver().openInputStream(uri);
-        if (is == null) {
-            return new byte[0];
-        }
-        try {
+    private byte[] readFromUri(Uri uri, int offset, int length) throws IOException {
+        try (InputStream is = getContext().getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                return new byte[0];
+            }
             skipFully(is, offset);
             byte[] buffer = new byte[length];
-            int total = 0;
+            int bytesReadTotal = 0;
             int read;
-            while (total < length && (read = is.read(buffer, total, length - total)) != -1) {
-                total += read;
+            while (bytesReadTotal < length && (read = is.read(buffer, bytesReadTotal, length - bytesReadTotal)) != -1) {
+                bytesReadTotal += read;
             }
-            return total == 0 ? new byte[0] : Arrays.copyOf(buffer, total);
-        } finally {
-            is.close();
+            return bytesReadTotal == 0 ? new byte[0] : Arrays.copyOf(buffer, bytesReadTotal);
         }
     }
 
