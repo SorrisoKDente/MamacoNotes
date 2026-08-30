@@ -82,9 +82,8 @@ export function Dashboard() {
   const longPressTimerRef = useRef<number | null>(null)
   const longPressFiredRef = useRef(false)
   const suppressClickRef = useRef(false)
-  const dropIntoRef = useRef<string | null>(null)
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
-  const [dropIntoFolder, setDropIntoFolder] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; type: 'into' | 'before' | 'after' } | null>(null)
 
   useEffect(() => {
     if (dragItem) {
@@ -265,12 +264,11 @@ export function Dashboard() {
     }
   }
 
-  function itemFromPoint(x: number, y: number): { type: DragItem['type']; id: string } | null {
+  function itemFromPoint(x: number, y: number): { type: 'folder' | 'notebook'; id: string; isSidebar?: boolean } | null {
     const els = document.elementsFromPoint(x, y)
     for (const el of els) {
       if (!(el instanceof HTMLElement)) continue
 
-      // Check for grid items
       const itemEl = el.closest('.dashboard-item')
       if (itemEl instanceof HTMLElement) {
         const id = itemEl.dataset.id
@@ -280,12 +278,11 @@ export function Dashboard() {
         }
       }
 
-      // Check for sidebar tree items
       const treeEl = el.closest('.tree-item-row')
       if (treeEl instanceof HTMLElement) {
         const id = (treeEl as any).dataset.id
         if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
-          return { type: 'folder', id }
+          return { type: 'folder', id, isSidebar: true }
         }
       }
     }
@@ -295,13 +292,42 @@ export function Dashboard() {
   function updateDropPosition(e: React.PointerEvent) {
     const item = dragItemRef.current
     if (!item) return
-    let into: string | null = null
+
     const target = itemFromPoint(e.clientX, e.clientY)
-    if (target && target.type === 'folder' && target.id !== item.id) {
-      into = target.id
+    if (!target) {
+      setDropTarget(null)
+      return
     }
-    dropIntoRef.current = into
-    setDropIntoFolder(into)
+
+    if (target.type === 'folder' || target.isSidebar) {
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(target.isSidebar ? '.tree-item-row' : '.dashboard-item')
+      if (el instanceof HTMLElement) {
+        const rect = el.getBoundingClientRect()
+        const relativeY = e.clientY - rect.top
+        const relativeX = e.clientX - rect.left
+
+        if (target.isSidebar) {
+          if (relativeY < rect.height * 0.25) setDropTarget({ id: target.id, type: 'before' })
+          else if (relativeY > rect.height * 0.75) setDropTarget({ id: target.id, type: 'after' })
+          else setDropTarget({ id: target.id, type: 'into' })
+        } else {
+          // In grid, middle is "into", edges are "before/after"
+          if (relativeX < rect.width * 0.2) setDropTarget({ id: target.id, type: 'before' })
+          else if (relativeX > rect.width * 0.8) setDropTarget({ id: target.id, type: 'after' })
+          else if (target.type === 'folder') setDropTarget({ id: target.id, type: 'into' })
+          else setDropTarget({ id: target.id, type: 'after' })
+        }
+      }
+    } else {
+      // It's a notebook in grid
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.dashboard-item')
+      if (el instanceof HTMLElement) {
+        const rect = el.getBoundingClientRect()
+        const relativeX = e.clientX - rect.left
+        if (relativeX < rect.width / 2) setDropTarget({ id: target.id, type: 'before' })
+        else setDropTarget({ id: target.id, type: 'after' })
+      }
+    }
   }
 
   function onItemPointerDown(e: React.PointerEvent, _type: DragItem['type'], id: string) {
@@ -342,10 +368,29 @@ export function Dashboard() {
   }
 
   function finishDrop(item: DragItem) {
-    const into = dropIntoRef.current
-    if (into) {
-      if (item.type === 'notebook') void reorderNotebook(item.id, into, null)
-      else void reorderFolder(item.id, into, null)
+    if (!dropTarget) return
+
+    const { id, type } = dropTarget
+    if (type === 'into') {
+      if (item.type === 'notebook') void reorderNotebook(item.id, id, null)
+      else void reorderFolder(item.id, id, null)
+    } else {
+      // Reordering
+      if (item.type === 'notebook') {
+        const targetNb = notebooks.find(n => n.id === id)
+        const folderId = targetNb ? targetNb.folderId : selectedFolderId
+        const siblings = notebooks.filter(n => n.folderId === folderId)
+        const idx = siblings.findIndex(n => n.id === id)
+        const finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+        void reorderNotebook(item.id, folderId, finalBeforeId)
+      } else {
+        const targetF = folders.find(f => f.id === id)
+        const parentId = targetF ? targetF.parentId : null
+        const siblings = folders.filter(f => f.parentId === parentId)
+        const idx = siblings.findIndex(f => f.id === id)
+        const finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+        void reorderFolder(item.id, parentId, finalBeforeId)
+      }
     }
     suppressClickRef.current = true
   }
@@ -363,8 +408,7 @@ export function Dashboard() {
     dragItemRef.current = null
     pressStartRef.current = null
     setDragItem(null)
-    setDropIntoFolder(null)
-    dropIntoRef.current = null
+    setDropTarget(null)
   }
 
   const toggleExpand = (id: string, e: React.MouseEvent) => {
@@ -402,12 +446,13 @@ export function Dashboard() {
           return (
             <div key={f.id} className="tree-item">
               <div
-                className={`tree-item-row ${isActive ? 'active' : ''} ${dropIntoFolder === f.id ? 'drop-target' : ''}`}
+                className={`tree-item-row ${isActive ? 'active' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''}`}
                 style={{ paddingLeft: level * 16 + 8 }}
                 data-id={f.id}
                 onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
                 onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
               >
+                {dropTarget?.id === f.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
                 <div
                   className={`tree-chevron ${isExpanded ? 'expanded' : ''}`}
                   style={{ visibility: hasChildren ? 'visible' : 'hidden' }}
@@ -420,6 +465,7 @@ export function Dashboard() {
                 </div>
                 <span className="tree-name">{f.name}</span>
                 {noteCount > 0 && <span className="tree-count">{noteCount}</span>}
+                {dropTarget?.id === f.id && dropTarget.type === 'after' && <div className="dashboard-drop-indicator horizontal" style={{ bottom: -1 }} />}
               </div>
               {isExpanded && renderFolderTree(f.id, level + 1)}
             </div>
@@ -559,11 +605,12 @@ export function Dashboard() {
           <div className={`dashboard-${viewMode} ${dragItem ? 'dashboard-dragging' : ''}`}>
             {currentFolders.map(f => {
               const noteCount = getNoteCount(f.id)
+              const isTarget = dropTarget?.id === f.id
               return (
                 <div
                   key={f.id}
                   data-id={f.id}
-                  className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${dropIntoFolder === f.id ? 'drop-target' : ''}`}
+                  className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${isTarget && dropTarget.type === 'into' ? 'drop-target' : ''}`}
                   onClick={(e) => handleItemClick(e, 'folder', f.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'folder', f.id)}
                   onPointerDown={(e) => onItemPointerDown(e, 'folder', f.id)}
@@ -572,43 +619,50 @@ export function Dashboard() {
                   onPointerCancel={onItemPointerUp}
                   onPointerLeave={onItemPointerUp}
                 >
+                  {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
                   <div className="item-icon">
                     <IconFolder />
                   </div>
                   <div className="item-info">
                     <span className="name">{f.name}</span>
-                    <span className="meta">{noteCount} {noteCount === 1 ? 'item' : 'itens'}</span>
+                    <span className="meta">{noteCount} {noteCount === 1 ? t('sidebar.itemSingular') || 'item' : t('sidebar.itemPlural') || 'itens'}</span>
                   </div>
+                  {isTarget && dropTarget.type === 'after' && <div className="dashboard-drop-indicator vertical" style={{ right: -12 }} />}
                 </div>
               )
             })}
-            {currentNotebooks.map(nb => (
-              <div
-                key={nb.id}
-                data-id={nb.id}
-                className={`dashboard-item notebook ${selectedIds.includes(nb.id) ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
-                onClick={(e) => handleItemClick(e, 'notebook', nb.id)}
-                onContextMenu={(e) => handleContextMenu(e, 'notebook', nb.id)}
-                onPointerDown={(e) => onItemPointerDown(e, 'notebook', nb.id)}
-                onPointerMove={(e) => onItemPointerMove(e, 'notebook', nb.id)}
-                onPointerUp={onItemPointerUp}
-                onPointerCancel={onItemPointerUp}
-                onPointerLeave={onItemPointerUp}
-              >
-                <div className="item-preview">
-                  {viewMode === 'grid' ? (
-                    <NoteCover notebookId={nb.id} width={180} height={230} />
-                  ) : (
-                    <IconBook />
-                  )}
-                  {nb.favorite && <span className="favorite-badge"><IconStar fill="#f1c40f" color="#f1c40f" /></span>}
+            {currentNotebooks.map(nb => {
+              const isTarget = dropTarget?.id === nb.id
+              return (
+                <div
+                  key={nb.id}
+                  data-id={nb.id}
+                  className={`dashboard-item notebook ${selectedIds.includes(nb.id) ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
+                  onClick={(e) => handleItemClick(e, 'notebook', nb.id)}
+                  onContextMenu={(e) => handleContextMenu(e, 'notebook', nb.id)}
+                  onPointerDown={(e) => onItemPointerDown(e, 'notebook', nb.id)}
+                  onPointerMove={(e) => onItemPointerMove(e, 'notebook', nb.id)}
+                  onPointerUp={onItemPointerUp}
+                  onPointerCancel={onItemPointerUp}
+                  onPointerLeave={onItemPointerUp}
+                >
+                  {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
+                  <div className="item-preview">
+                    {viewMode === 'grid' ? (
+                      <NoteCover notebookId={nb.id} width={180} height={230} />
+                    ) : (
+                      <IconBook />
+                    )}
+                    {nb.favorite && <span className="favorite-badge"><IconStar fill="#f1c40f" color="#f1c40f" /></span>}
+                  </div>
+                  <div className="item-info">
+                    <span className="name">{nb.name}</span>
+                    <span className="meta">{nb.pageCount} {nb.pageCount === 1 ? t('sidebar.pageSingular') || 'página' : t('sidebar.pagePlural') || 'páginas'}</span>
+                  </div>
+                  {isTarget && dropTarget.type === 'after' && <div className="dashboard-drop-indicator vertical" style={{ right: -12 }} />}
                 </div>
-                <div className="item-info">
-                  <span className="name">{nb.name}</span>
-                  <span className="meta">{nb.pageCount} {nb.pageCount === 1 ? 'página' : 'páginas'}</span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
             {currentFolders.length === 0 && currentNotebooks.length === 0 && (
               <div className="dashboard-empty">
                 {search ? t('sidebar.searchNoResults') : t('sidebar.noFolders')}
