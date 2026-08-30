@@ -101,6 +101,20 @@ function migrateToMetaContent(db: IDBDatabase): Promise<void> {
           updatedAt: nb.updatedAt,
           order: nb.order,
           pageCount: nb.pages.length,
+          favorite: (nb as any).favorite ?? false,
+        }
+        cur.update(summary)
+      } else if (!(nb as any).pageCount) {
+        // Fallback for unexpected state: ensure it has at least a pageCount
+        const summary: NotebookSummary = {
+          id: nb.id,
+          name: nb.name,
+          folderId: nb.folderId,
+          createdAt: nb.createdAt,
+          updatedAt: nb.updatedAt,
+          order: nb.order,
+          pageCount: 0,
+          favorite: (nb as any).favorite ?? false,
         }
         cur.update(summary)
       }
@@ -243,6 +257,7 @@ export const db = {
       updatedAt: notebook.updatedAt,
       order: notebook.order,
       pageCount: notebook.pages.length,
+      favorite: notebook.favorite,
     }
     // We must use a single transaction to ensure consistency
     const db = await openDb()

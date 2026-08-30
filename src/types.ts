@@ -114,6 +114,7 @@ export interface Notebook {
   createdAt: number
   updatedAt: number
   order?: number
+  favorite?: boolean
 }
 
 export interface NotebookSummary {
@@ -124,6 +125,7 @@ export interface NotebookSummary {
   updatedAt: number
   order?: number
   pageCount: number
+  favorite?: boolean
 }
 
 export interface PageTemplate {

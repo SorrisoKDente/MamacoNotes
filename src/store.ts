@@ -336,6 +336,7 @@ interface AppState {
   init: () => Promise<void>
   selectFolder: (id: string | null) => void
   selectNotebook: (id: string | null) => Promise<void>
+  toggleFavorite: (id: string) => Promise<void>
   selectPage: (index: number) => void
   setTool: (tool: ToolKind) => void
   setRotationOpen: (open: boolean) => void
@@ -736,6 +737,21 @@ export const useAppStore = create<AppState>((set, get) => {
         selectedPageIndices: [],
       })
     },
+    async toggleFavorite(id) {
+      const summary = get().notebooks.find(n => n.id === id)
+      if (!summary) return
+      const next = { ...summary, favorite: !summary.favorite, updatedAt: Date.now() }
+      const notebooks = get().notebooks.map(n => n.id === id ? next : n)
+      set({ notebooks, dataVersion: get().dataVersion + 1 })
+      await db.updateNotebookMeta(next as any)
+
+      // If it's the active notebook, update that too
+      if (get().activeNotebook?.id === id) {
+        set({ activeNotebook: { ...get().activeNotebook!, favorite: next.favorite, updatedAt: next.updatedAt } })
+        await db.putNotebook(get().activeNotebook!)
+      }
+    },
+
     selectPage: (index) => set({ currentPageIndex: index }),
     setTool: (tool) => set({ tool }),
     setRotationOpen: (open) => set({ rotationOpen: open }),
