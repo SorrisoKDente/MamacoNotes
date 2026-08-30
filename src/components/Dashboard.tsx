@@ -20,8 +20,8 @@ function NoteCover({ notebookId, width, height }: { notebookId: string, width: n
     return () => { cancelled = true }
   }, [notebookId, width, height])
 
-  if (!thumb) return <div className="note-cover-placeholder"><IconBook /></div>
-  return <img src={thumb} className="note-cover-img" draggable={false} alt="Capa" />
+  if (!thumb) return <div className="note-cover-placeholder" style={{ pointerEvents: 'none' }}><IconBook /></div>
+  return <img src={thumb} className="note-cover-img" draggable={false} alt="Capa" style={{ pointerEvents: 'none' }} />
 }
 
 export function Dashboard() {
@@ -85,6 +85,15 @@ export function Dashboard() {
   const dropIntoRef = useRef<string | null>(null)
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
   const [dropIntoFolder, setDropIntoFolder] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (dragItem) {
+      document.body.style.cursor = 'grabbing'
+    } else {
+      document.body.style.cursor = ''
+    }
+    return () => { document.body.style.cursor = '' }
+  }, [dragItem])
 
   const currentFolders = useMemo(() => {
     if (search.trim()) {
@@ -260,12 +269,25 @@ export function Dashboard() {
     const els = document.elementsFromPoint(x, y)
     for (const el of els) {
       if (!(el instanceof HTMLElement)) continue
+
+      // Check for grid items
       const itemEl = el.closest('.dashboard-item')
-      if (!(itemEl instanceof HTMLElement)) continue
-      const id = (itemEl as HTMLElement).dataset.id
-      if (!id) continue
-      const type = itemEl.classList.contains('folder') ? 'folder' : 'notebook'
-      return { type, id }
+      if (itemEl instanceof HTMLElement) {
+        const id = itemEl.dataset.id
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
+          const type = itemEl.classList.contains('folder') ? 'folder' : 'notebook'
+          return { type, id }
+        }
+      }
+
+      // Check for sidebar tree items
+      const treeEl = el.closest('.tree-item-row')
+      if (treeEl instanceof HTMLElement) {
+        const id = (treeEl as any).dataset.id
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
+          return { type: 'folder', id }
+        }
+      }
     }
     return null
   }
@@ -380,8 +402,9 @@ export function Dashboard() {
           return (
             <div key={f.id} className="tree-item">
               <div
-                className={`tree-item-row ${isActive ? 'active' : ''}`}
+                className={`tree-item-row ${isActive ? 'active' : ''} ${dropIntoFolder === f.id ? 'drop-target' : ''}`}
                 style={{ paddingLeft: level * 16 + 8 }}
+                data-id={f.id}
                 onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
                 onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
               >
@@ -534,25 +557,31 @@ export function Dashboard() {
           )}
 
           <div className={`dashboard-${viewMode} ${dragItem ? 'dashboard-dragging' : ''}`}>
-            {currentFolders.map(f => (
-              <div
-                key={f.id}
-                data-id={f.id}
-                className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${dropIntoFolder === f.id ? 'drop-target' : ''}`}
-                onClick={(e) => handleItemClick(e, 'folder', f.id)}
-                onContextMenu={(e) => handleContextMenu(e, 'folder', f.id)}
-                onPointerDown={(e) => onItemPointerDown(e, 'folder', f.id)}
-                onPointerMove={(e) => onItemPointerMove(e, 'folder', f.id)}
-                onPointerUp={onItemPointerUp}
-                onPointerCancel={onItemPointerUp}
-                onPointerLeave={onItemPointerUp}
-              >
-                <div className="item-icon">
-                  <IconFolder />
+            {currentFolders.map(f => {
+              const noteCount = getNoteCount(f.id)
+              return (
+                <div
+                  key={f.id}
+                  data-id={f.id}
+                  className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${dropIntoFolder === f.id ? 'drop-target' : ''}`}
+                  onClick={(e) => handleItemClick(e, 'folder', f.id)}
+                  onContextMenu={(e) => handleContextMenu(e, 'folder', f.id)}
+                  onPointerDown={(e) => onItemPointerDown(e, 'folder', f.id)}
+                  onPointerMove={(e) => onItemPointerMove(e, 'folder', f.id)}
+                  onPointerUp={onItemPointerUp}
+                  onPointerCancel={onItemPointerUp}
+                  onPointerLeave={onItemPointerUp}
+                >
+                  <div className="item-icon">
+                    <IconFolder />
+                  </div>
+                  <div className="item-info">
+                    <span className="name">{f.name}</span>
+                    <span className="meta">{noteCount} {noteCount === 1 ? 'item' : 'itens'}</span>
+                  </div>
                 </div>
-                <span className="name">{f.name}</span>
-              </div>
-            ))}
+              )
+            })}
             {currentNotebooks.map(nb => (
               <div
                 key={nb.id}
