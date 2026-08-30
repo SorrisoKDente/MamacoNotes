@@ -3651,7 +3651,7 @@ body {
   bottom: 0;
 }
 
-.icon-star:before { content: '⭐'; }
+.icon-banana:before { content: '🍌'; }
 
 @media (max-width: 768px) {
   .dashboard:not(.sidebar-collapsed) .dashboard-backdrop {
