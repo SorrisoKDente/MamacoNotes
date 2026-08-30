@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from './store'
 import { useUiStore } from './uiStore'
 import { TopBar } from './components/TopBar'
@@ -28,6 +28,7 @@ export default function App() {
   const hideTopBar = useAppStore((s) => s.settings.hideTopBar)
   const hideToolbar = useAppStore((s) => s.settings.hideToolbar)
   const hidePageList = useAppStore((s) => s.settings.hidePageList)
+  const [initError, setInitError] = useState<string | null>(null)
 
   useEffect(() => {
     const applyTheme = () => {
@@ -49,20 +50,24 @@ export default function App() {
   const leftHidden = hidePageList
 
   useEffect(() => {
-    init().then(() => {
-      const s = useAppStore.getState()
-      const cloud = s.settings.cloud
-      if (cloud.enabled && cloud.autoSync && cloud.webdavUrl) {
-        void s.syncNow()
-      }
-
-      // Check for updates
-      void checkForUpdates().then((res) => {
-        if (res && res.available && res.latestVersion !== s.settings.ignoreVersion) {
-          useUiStore.getState().open('update', { info: res })
+    init()
+      .then(() => {
+        const s = useAppStore.getState()
+        const cloud = s.settings.cloud
+        if (cloud.enabled && cloud.autoSync && cloud.webdavUrl) {
+          void s.syncNow()
         }
+
+        // Check for updates
+        void checkForUpdates().then((res) => {
+          if (res && res.available && res.latestVersion !== s.settings.ignoreVersion) {
+            useUiStore.getState().open('update', { info: res })
+          }
+        })
       })
-    })
+      .catch((err) => {
+        setInitError(String(err))
+      })
     const cleanup = initGlobalShortcuts()
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -120,6 +125,15 @@ export default function App() {
   }, [])
 
   if (!loaded) {
+    if (initError) {
+      return (
+        <div className="app-loading" style={{ flexDirection: 'column', gap: 12, padding: 20, textAlign: 'center' }}>
+          <div>Falha ao carregar o aplicativo</div>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>{initError}</div>
+          <button className="btn primary" onClick={() => window.location.reload()}>Recarregar</button>
+        </div>
+      )
+    }
     return <div className="app-loading">{t('app.loading')}</div>
   }
 

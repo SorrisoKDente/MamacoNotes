@@ -57,6 +57,7 @@ export function Dashboard() {
   const [filter, setFilter] = useState<'all' | 'favorites'>('all')
   const [search, setSearch] = useState('')
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -95,6 +96,29 @@ export function Dashboard() {
     }
     return () => { document.body.style.cursor = '' }
   }, [dragItem])
+
+  useEffect(() => {
+    const onEsc = () => {
+      if (useUiStore.getState().openModal) return
+      if (document.activeElement?.tagName === 'INPUT') {
+        (document.activeElement as HTMLElement).blur()
+        return
+      }
+
+      if (search) {
+        setSearch('')
+        return
+      }
+
+      if (selectedFolderId) {
+        const folder = folders.find(f => f.id === selectedFolderId)
+        selectFolder(folder?.parentId ?? null)
+        return
+      }
+    }
+    window.addEventListener('ink:esc', onEsc)
+    return () => window.removeEventListener('ink:esc', onEsc)
+  }, [search, selectedFolderId, folders, selectFolder])
 
   const currentFolders = useMemo(() => {
     if (search.trim()) {
@@ -491,7 +515,11 @@ export function Dashboard() {
   }
 
   return (
-    <div className="dashboard">
+    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <div
+        className="dashboard-backdrop"
+        onClick={() => setSidebarCollapsed(true)}
+      />
       <nav className="dashboard-sidebar">
         <div className="dashboard-sidebar-header">
           <div className="topbar-brand">Mamaco Notes</div>
@@ -537,29 +565,20 @@ export function Dashboard() {
       <div className="dashboard-main">
         <header className="dashboard-header">
           <div className="dashboard-header-left">
-            <div className="dashboard-breadcrumbs">
-              {breadcrumbs.map((b, i) => (
-                <span key={b.id ?? 'root'} className="breadcrumb-item">
-                  {i > 0 && <span className="breadcrumb-sep">/</span>}
-                  <button
-                    className={`btn small breadcrumb-btn ${i === breadcrumbs.length - 1 ? 'active' : ''}`}
-                    onClick={() => {
-                      setSearch('')
-                      selectFolder(b.id)
-                    }}
-                  >
-                    {b.name}
-                  </button>
-                </span>
-              ))}
-            </div>
+            <button
+              className="icon-btn sidebar-toggle"
+              title="Alternar menu"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            >
+              <IconMenu />
+            </button>
+            <button className="icon-btn mobile-search-toggle" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+              <IconSearch />
+            </button>
           </div>
 
           <div className="dashboard-header-center">
             <div className={`dashboard-search ${mobileSearchOpen ? 'mobile-open' : ''}`}>
-              <button className="mobile-search-toggle" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
-                <IconSearch />
-              </button>
               <input
                 type="text"
                 placeholder={t('sidebar.searchPlaceholder')}
@@ -603,6 +622,25 @@ export function Dashboard() {
             </button>
           </div>
         </header>
+
+        <div className="dashboard-subheader">
+          <div className="dashboard-breadcrumbs">
+            {breadcrumbs.map((b, i) => (
+              <span key={b.id ?? 'root'} className="breadcrumb-item">
+                {i > 0 && <span className="breadcrumb-sep">/</span>}
+                <button
+                  className={`btn small breadcrumb-btn ${i === breadcrumbs.length - 1 ? 'active' : ''}`}
+                  onClick={() => {
+                    setSearch('')
+                    selectFolder(b.id)
+                  }}
+                >
+                  {b.name}
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
 
         <div className="dashboard-content" onClick={(e) => {
           if (e.target === e.currentTarget) clearSelection()
@@ -854,6 +892,16 @@ function IconSettings() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function IconMenu() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="18" x2="21" y2="18" />
     </svg>
   )
 }

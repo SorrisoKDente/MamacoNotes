@@ -629,76 +629,77 @@ export const useAppStore = create<AppState>((set, get) => {
     canRedo: false,
 
     async init() {
-      const [rawFolders, rawSummaries, settings, templates, trashItems] = await Promise.all([
-        db.getFolders(),
-        db.getNotebookSummaries(),
-        db.getSettings(),
-        db.getTemplates(),
-        db.getTrash(),
-      ])
-      const rawSettings: AppSettings =
-        (settings as { lastSelectMode?: unknown }).lastSelectMode === 'image'
-          ? { ...settings, lastSelectMode: 'click' as const }
-          : settings
-      const safeSettings: AppSettings = {
-        ...DEFAULT_SETTINGS,
-        ...rawSettings,
-        cloud: { ...DEFAULT_SETTINGS.cloud, ...(rawSettings.cloud ?? {}) },
-        shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...(rawSettings.shortcuts ?? {}) },
-      }
-      let selectedNotebookId: string | null = null
-      let currentPageIndex = 0
-      if (rawSummaries.length === 0) {
-        const initial = makeNotebook('Eu vim ver o macaco', null)
-        initial.order = 0
-        initial.pages.push(makePage('blank'))
-        await db.putNotebook(initial)
-        rawSummaries.push({
-          id: initial.id,
-          name: initial.name,
-          folderId: initial.folderId,
-          createdAt: initial.createdAt,
-          updatedAt: initial.updatedAt,
-          order: initial.order,
-          pageCount: 1,
-        })
-        selectedNotebookId = initial.id
-      }
-      const { notebooks: orderedSummaries } = fillNotebookOrder(rawSummaries as any)
-      const { folders: orderedFolders } = fillFolderOrder(rawFolders)
-      if (selectedNotebookId === null) {
-        const last = readLastSession()
-        const nb = last?.notebookId
-          ? orderedSummaries.find((n) => n.id === last.notebookId)
-          : undefined
-        if (nb) {
-          selectedNotebookId = nb.id
-          if (last?.pageId) {
-            // We'll fix this later, since we don't have pages here yet
-            // For now, assume page 0 or load the notebook if it's the last session
+      try {
+        const [rawFolders, rawSummaries, settings, templates, trashItems] = await Promise.all([
+          db.getFolders(),
+          db.getNotebookSummaries(),
+          db.getSettings(),
+          db.getTemplates(),
+          db.getTrash(),
+        ])
+        const rawSettings: AppSettings =
+          (settings as { lastSelectMode?: unknown }).lastSelectMode === 'image'
+            ? { ...settings, lastSelectMode: 'click' as const }
+            : settings
+        const safeSettings: AppSettings = {
+          ...DEFAULT_SETTINGS,
+          ...rawSettings,
+          cloud: { ...DEFAULT_SETTINGS.cloud, ...(rawSettings.cloud ?? {}) },
+          shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...(rawSettings.shortcuts ?? {}) },
+        }
+        let selectedNotebookId: string | null = null
+        let currentPageIndex = 0
+        if (rawSummaries.length === 0) {
+          const initial = makeNotebook('Eu vim ver o macaco', null)
+          initial.order = 0
+          initial.pages.push(makePage('blank'))
+          await db.putNotebook(initial)
+          rawSummaries.push({
+            id: initial.id,
+            name: initial.name,
+            folderId: initial.folderId,
+            createdAt: initial.createdAt,
+            updatedAt: initial.updatedAt,
+            order: initial.order,
+            pageCount: 1,
+          })
+          selectedNotebookId = initial.id
+        }
+        const { notebooks: orderedSummaries } = fillNotebookOrder(rawSummaries as any)
+        const { folders: orderedFolders } = fillFolderOrder(rawFolders)
+        if (selectedNotebookId === null) {
+          const last = readLastSession()
+          const nb = last?.notebookId
+            ? orderedSummaries.find((n) => n.id === last.notebookId)
+            : undefined
+          if (nb) {
+            selectedNotebookId = nb.id
           }
         }
-      }
 
-      set({
-        folders: orderedFolders,
-        notebooks: orderedSummaries as any,
-        templates,
-        trash: trashItems,
-        settings: safeSettings,
-        selectedNotebookId,
-        currentPageIndex,
-        loaded: true,
-      })
+        set({
+          folders: orderedFolders,
+          notebooks: orderedSummaries as any,
+          templates,
+          trash: trashItems,
+          settings: safeSettings,
+          selectedNotebookId,
+          currentPageIndex,
+          loaded: true,
+        })
 
-      if (selectedNotebookId) {
-        await get().selectNotebook(selectedNotebookId)
+        if (selectedNotebookId) {
+          await get().selectNotebook(selectedNotebookId)
+        }
+        setLanguage(settings.language === 'en' ? 'en' : 'pt-BR')
+        if (settings.language === 'pt-BR' && detectLanguage() === 'en') {
+          void get().setSettings({ language: 'en' })
+        }
+        void get().runTrashPurge()
+      } catch (e) {
+        console.error('App store init failed', e)
+        throw e
       }
-      setLanguage(settings.language === 'en' ? 'en' : 'pt-BR')
-      if (settings.language === 'pt-BR' && detectLanguage() === 'en') {
-        void get().setSettings({ language: 'en' })
-      }
-      void get().runTrashPurge()
     },
 
     selectFolder: (id) =>

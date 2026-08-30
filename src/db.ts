@@ -70,8 +70,10 @@ function migrateLayers(db: IDBDatabase): Promise<void> {
       const cur = cursor.result
       if (!cur) return
       const nb = cur.value as Notebook
-      const pages = nb.pages.map((p) => normalizePage(p))
-      cur.update({ ...nb, pages })
+      if (nb.pages && Array.isArray(nb.pages)) {
+        const pages = nb.pages.map((p) => normalizePage(p))
+        cur.update({ ...nb, pages })
+      }
       cur.continue()
     }
     tx.oncomplete = () => resolve()
@@ -132,8 +134,11 @@ function openDb(): Promise<IDBDatabase> {
     let needsOrderMigration = false
     let needsLayersMigration = false
     let needsMetaContentMigration = false
-    req.onupgradeneeded = () => {
+
+    req.onupgradeneeded = (e) => {
       const db = req.result
+      const oldVersion = e.oldVersion
+
       if (!db.objectStoreNames.contains('folders')) {
         db.createObjectStore('folders', { keyPath: 'id' })
       }
@@ -155,36 +160,32 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('notebooksContent')) {
         db.createObjectStore('notebooksContent', { keyPath: 'id' })
       }
-      needsOrderMigration = true
-      needsLayersMigration = true
-      needsMetaContentMigration = true
+
+      if (oldVersion < 4) needsOrderMigration = true
+      if (oldVersion < 5) needsLayersMigration = true
+      if (oldVersion < 8) needsMetaContentMigration = true
     }
+
     req.onsuccess = async () => {
       const db = req.result
-      if (needsMetaContentMigration) {
-        try {
-          await migrateToMetaContent(db)
-        } catch (e) {
-          reject(e)
-          return
-        }
-      }
-      if (needsOrderMigration) {
-        try {
+
+      // Run migrations in chronological order
+      try {
+        if (needsOrderMigration) {
           await migrateOrders(db)
-        } catch (e) {
-          reject(e)
-          return
         }
-      }
-      if (needsLayersMigration) {
-        try {
+        if (needsLayersMigration) {
           await migrateLayers(db)
-        } catch (e) {
-          reject(e)
-          return
         }
+        if (needsMetaContentMigration) {
+          await migrateToMetaContent(db)
+        }
+      } catch (e) {
+        console.error('Database migration failed', e)
+        reject(e)
+        return
       }
+
       resolve(db)
     }
     req.onerror = () => reject(req.error)
