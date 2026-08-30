@@ -7,17 +7,19 @@ import { renderThumbnail } from '../renderer/thumbnail'
 import { db } from '../db'
 import type { Page } from '../types'
 
-function NoteCover({ page, width, height }: { page?: Page, width: number, height: number }) {
+function NoteCover({ notebookId, width, height }: { notebookId: string, width: number, height: number }) {
   const [thumb, setThumb] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!page) return
     let cancelled = false
-    void renderThumbnail(page, width, height).then(data => {
+    void (async () => {
+      const page = await db.getFirstPage(notebookId)
+      if (cancelled || !page) return
+      const data = await renderThumbnail(page, width, height)
       if (!cancelled) setThumb(data)
-    })
+    })()
     return () => { cancelled = true }
-  }, [page, width, height])
+  }, [notebookId, width, height])
 
   if (!thumb) return <div className="note-cover-placeholder"><IconBook /></div>
   return <img src={thumb} className="note-cover-img" draggable={false} alt="Capa" />
@@ -256,15 +258,13 @@ export function Dashboard() {
     suppressClickRef.current = false
     longPressFiredRef.current = false
     pressStartRef.current = { x: e.clientX, y: e.clientY }
-    if (e.pointerType === 'touch') {
-      cancelLongPress()
-      longPressTimerRef.current = window.setTimeout(() => {
-        longPressTimerRef.current = null
-        longPressFiredRef.current = true
-        suppressClickRef.current = true
-        toggleSelect(id)
-      }, 600)
-    }
+    cancelLongPress()
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null
+      longPressFiredRef.current = true
+      suppressClickRef.current = true
+      toggleSelect(id)
+    }, 600)
   }
 
   function onItemPointerMove(e: React.PointerEvent, type: DragItem['type'], id: string) {
@@ -273,7 +273,7 @@ export function Dashboard() {
     if (!start) return
     const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y)
     if (!dragItemRef.current) {
-      if (e.pointerType === 'touch' && dist > 8) cancelLongPress()
+      if (dist > 8) cancelLongPress()
       const threshold = e.pointerType === 'mouse' ? 6 : 12
       if (dist > threshold) {
         cancelLongPress()
@@ -319,6 +319,9 @@ export function Dashboard() {
   return (
     <div className="dashboard">
       <nav className="dashboard-sidebar">
+        <div className="dashboard-sidebar-header">
+          <div className="topbar-brand">Mamaco Notes</div>
+        </div>
         <button
           className={`sidebar-btn ${filter === 'all' ? 'active' : ''}`}
           onClick={() => { setFilter('all'); selectFolder(null); setSearch('') }}
@@ -422,7 +425,7 @@ export function Dashboard() {
         }}>
           {selectedIds.length > 0 && (
             <div className="dashboard-selection-bar">
-              <span>{t('sidebar.itemsSelected', { count: selectedIds.length })}</span>
+              <span>{selectedIds.length} {t('sidebar.itemsSelectedName', { count: selectedIds.length })}</span>
               <div className="bar-actions">
                 <button onClick={copySelected}>{t('tool.copy')}</button>
                 <button onClick={cutSelected}>{t('tool.cut')}</button>
@@ -445,6 +448,7 @@ export function Dashboard() {
                 onPointerMove={(e) => onItemPointerMove(e, 'folder', f.id)}
                 onPointerUp={onItemPointerUp}
                 onPointerCancel={onItemPointerUp}
+                onPointerLeave={onItemPointerUp}
               >
                 <div className="item-icon">
                   <IconFolder />
@@ -463,10 +467,11 @@ export function Dashboard() {
                 onPointerMove={(e) => onItemPointerMove(e, 'notebook', nb.id)}
                 onPointerUp={onItemPointerUp}
                 onPointerCancel={onItemPointerUp}
+                onPointerLeave={onItemPointerUp}
               >
                 <div className="item-preview">
                   {viewMode === 'grid' ? (
-                    <NoteCover page={(nb as any).pages?.[0]} width={180} height={230} />
+                    <NoteCover notebookId={nb.id} width={180} height={230} />
                   ) : (
                     <IconBook />
                   )}
@@ -474,7 +479,7 @@ export function Dashboard() {
                 </div>
                 <div className="item-info">
                   <span className="name">{nb.name}</span>
-                  <span className="meta">{t('pageList.pagesSelected', { count: (nb as any).pageCount || (nb as any).pages?.length || 0 })}</span>
+                  <span className="meta">{nb.pageCount} {nb.pageCount === 1 ? 'página' : 'páginas'}</span>
                 </div>
               </div>
             ))}

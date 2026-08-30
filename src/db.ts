@@ -242,11 +242,23 @@ export const db = {
   async getNotebook(id: string): Promise<Notebook | undefined> {
     const meta = await tx<NotebookSummary | undefined>('notebooks', 'readonly', (s) => s.get(id))
     if (!meta) return undefined
-    const content = await tx<{ id: string; pages: Page[] } | undefined>('notebooksContent', 'readonly', (s) => s.get(id))
+    const content = await tx<{ id: string; pages: Page[] } | undefined>(
+      'notebooksContent',
+      'readonly',
+      (s) => s.get(id),
+    )
     return {
       ...meta,
       pages: content?.pages ?? [],
     }
+  },
+  async getFirstPage(id: string): Promise<Page | undefined> {
+    const content = await tx<{ id: string; pages: Page[] } | undefined>(
+      'notebooksContent',
+      'readonly',
+      (s) => s.get(id),
+    )
+    return content?.pages?.[0]
   },
   async putNotebook(notebook: Notebook): Promise<void> {
     const summary: NotebookSummary = {
