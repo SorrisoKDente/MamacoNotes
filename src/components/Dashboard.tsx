@@ -4,6 +4,7 @@ import { useUiStore } from '../uiStore'
 import { useI18n } from '../i18n'
 import { confirmDeleteScope, promptName } from './Modals'
 import { renderThumbnail } from '../renderer/thumbnail'
+import { db } from '../db'
 import type { Page } from '../types'
 
 function NoteCover({ page, width, height }: { page?: Page, width: number, height: number }) {
@@ -176,7 +177,7 @@ export function Dashboard() {
       const name = await promptName(t('sidebar.renameNotePrompt'), nb.name)
       if (name && name.trim()) {
         const store = useAppStore.getState()
-        const full = store.activeNotebook?.id === id ? store.activeNotebook : await (import('../db').then(m => m.db.getNotebook(id)))
+        const full = store.activeNotebook?.id === id ? store.activeNotebook : await db.getNotebook(id)
         if (full) {
           updateNotebook({ ...full, name: name.trim() })
         }
