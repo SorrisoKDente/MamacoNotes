@@ -84,8 +84,6 @@ export function Dashboard() {
   type DragItem = { type: 'folder' | 'notebook'; id: string }
   const dragItemRef = useRef<DragItem | null>(null)
   const pressStartRef = useRef<{ x: number; y: number } | null>(null)
-  const longPressTimerRef = useRef<number | null>(null)
-  const longPressFiredRef = useRef(false)
   const suppressClickRef = useRef(false)
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: string; type: 'into' | 'before' | 'after' } | null>(null)
@@ -269,6 +267,14 @@ export function Dashboard() {
   function handleToggleFavorite(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     void toggleFavorite(id)
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.blur()
+    }
+  }
+
+  function handleToggleSelect(id: string, e: React.MouseEvent | React.PointerEvent) {
+    e.stopPropagation()
+    toggleSelect(id)
   }
 
   async function handleDelete(type: 'folder' | 'notebook', id: string) {
@@ -295,13 +301,6 @@ export function Dashboard() {
     const name = await promptName(t('sidebar.newFolderPrompt'))
     if (name && name.trim()) {
       void addFolder(name.trim(), selectedFolderId)
-    }
-  }
-
-  function cancelLongPress() {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current)
-      longPressTimerRef.current = null
     }
   }
 
@@ -372,30 +371,19 @@ export function Dashboard() {
     }
   }
 
-  function onItemPointerDown(e: React.PointerEvent, _type: DragItem['type'], id: string) {
+  function onItemPointerDown(e: React.PointerEvent, _type: DragItem['type'], _id: string) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     suppressClickRef.current = false
-    longPressFiredRef.current = false
     pressStartRef.current = { x: e.clientX, y: e.clientY }
-    cancelLongPress()
-    longPressTimerRef.current = window.setTimeout(() => {
-      longPressTimerRef.current = null
-      longPressFiredRef.current = true
-      suppressClickRef.current = true
-      toggleSelect(id)
-    }, 600)
   }
 
   function onItemPointerMove(e: React.PointerEvent, type: DragItem['type'], id: string) {
-    if (longPressFiredRef.current) return
     const start = pressStartRef.current
     if (!start) return
     const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y)
     if (!dragItemRef.current) {
-      if (dist > 8) cancelLongPress()
       const threshold = e.pointerType === 'mouse' ? 6 : 12
       if (dist > threshold) {
-        cancelLongPress()
         try {
           e.currentTarget.setPointerCapture(e.pointerId)
         } catch { /* noop */ }
@@ -446,7 +434,6 @@ export function Dashboard() {
   }
 
   function onItemPointerUp(e: React.PointerEvent) {
-    cancelLongPress()
     if (dragItemRef.current) finishDrop(dragItemRef.current)
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)
@@ -538,7 +525,7 @@ export function Dashboard() {
             <div
               key={nb.id}
               className={`tree-item-row notebook ${isSelected ? 'selected' : ''}`}
-              style={{ paddingLeft: level * 16 + 28 }}
+              style={{ paddingLeft: level * 16 + 8 }}
               data-id={nb.id}
               onClick={(e) => handleItemClick(e as any, 'notebook', nb.id)}
               onContextMenu={(e) => handleContextMenu(e as any, 'notebook', nb.id)}
@@ -549,6 +536,7 @@ export function Dashboard() {
               onPointerLeave={onItemPointerUp}
             >
               {dropTarget?.id === nb.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
+              <div className="tree-chevron-placeholder" />
               <div className="tree-icon">
                 <IconBook />
               </div>
@@ -735,6 +723,13 @@ export function Dashboard() {
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
                   <button
+                    className={`item-selection-btn ${selectedIds.includes(f.id) ? 'selected' : ''}`}
+                    onClick={(e) => handleToggleSelect(f.id, e)}
+                    title={t('tool.select')}
+                  >
+                    <IconCheckCircle />
+                  </button>
+                  <button
                     className={`item-favorite-btn ${f.favorite ? 'favorited' : ''}`}
                     onClick={(e) => handleToggleFavorite(f.id, e)}
                     title={t('tool.favorite')}
@@ -768,6 +763,13 @@ export function Dashboard() {
                   onPointerLeave={onItemPointerUp}
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
+                  <button
+                    className={`item-selection-btn ${selectedIds.includes(nb.id) ? 'selected' : ''}`}
+                    onClick={(e) => handleToggleSelect(nb.id, e)}
+                    title={t('tool.select')}
+                  >
+                    <IconCheckCircle />
+                  </button>
                   <button
                     className={`item-favorite-btn ${nb.favorite ? 'favorited' : ''}`}
                     onClick={(e) => handleToggleFavorite(nb.id, e)}
@@ -967,6 +969,15 @@ function IconChevronRight() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+function IconCheckCircle() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="16 10 11 14 8 11" className="check-mark" />
     </svg>
   )
 }
