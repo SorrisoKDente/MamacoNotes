@@ -507,6 +507,7 @@ export const useAppStore = create<AppState>((set, get) => {
         updatedAt: norm.updatedAt,
         order: norm.order,
         pageCount: norm.pages.length,
+        favorite: nb.favorite,
       }
       if (idx >= 0) notebooks[idx] = summary
       else notebooks.push(summary)
@@ -534,6 +535,7 @@ export const useAppStore = create<AppState>((set, get) => {
         updatedAt: added.updatedAt,
         order: added.order,
         pageCount: added.pages.length,
+        favorite: added.favorite,
       }
       notebooks.push(summary)
       await db.putNotebook(added)
@@ -593,6 +595,7 @@ export const useAppStore = create<AppState>((set, get) => {
       updatedAt: notebook.updatedAt,
       order: notebook.order,
       pageCount: notebook.pages.length,
+      favorite: notebook.favorite,
     }
     const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? summary : n))
     set({ notebooks, activeNotebook: notebook, dataVersion: get().dataVersion + 1 })
@@ -2218,6 +2221,7 @@ export const useAppStore = create<AppState>((set, get) => {
         updatedAt: nb.updatedAt,
         order: nb.order,
         pageCount: nb.pages.length,
+        favorite: nb.favorite,
       }))
       set({
         folders: outFolders,

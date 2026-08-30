@@ -200,6 +200,8 @@ export const ptBRMessages: Record<string, string> = {
   'sidebar.renameFolderPrompt': 'Novo nome da pasta:',
   'sidebar.deleteNotebookConfirm': 'Excluir a nota "{{name}}"?',
   'sidebar.deleteFolderConfirm': 'Excluir a pasta "{{name}}" e todo o conteúdo dela?',
+  'sidebar.addFavorite': 'Adicionar aos favoritos',
+  'sidebar.removeFavorite': 'Remover dos favoritos',
   'sidebar.deleteItemsConfirm': 'Excluir {{count}} item(ns) selecionado(s)?',
   'sidebar.itemsSelected': '{{count}} selecionado(s)',
   'sidebar.itemsSelectedName': '{{count}} itens selecionados',

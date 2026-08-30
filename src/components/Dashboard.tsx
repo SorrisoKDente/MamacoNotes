@@ -123,20 +123,27 @@ export function Dashboard() {
   }, [search, selectedFolderId, folders, selectFolder])
 
   const currentFolders = useMemo(() => {
+    let list = folders
     if (search.trim()) {
-      return folders.filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
+      list = list.filter(f => f.name.toLowerCase().includes(search.toLowerCase()))
+    } else if (filter !== 'favorites') {
+      list = list.filter(f => f.parentId === selectedFolderId)
     }
-    if (filter === 'favorites') return []
-    return folders.filter(f => f.parentId === selectedFolderId)
+
+    if (filter === 'favorites') {
+      list = list.filter(f => f.favorite)
+    }
+    return list
   }, [folders, selectedFolderId, search, filter])
 
   const currentNotebooks = useMemo(() => {
     let list = notebooks
     if (search.trim()) {
       list = list.filter(nb => nb.name.toLowerCase().includes(search.toLowerCase()))
-    } else {
+    } else if (filter !== 'favorites') {
       list = list.filter(nb => nb.folderId === selectedFolderId)
     }
+
     if (filter === 'favorites') {
       list = list.filter(nb => nb.favorite)
     }
@@ -229,6 +236,7 @@ export function Dashboard() {
     } else {
       if (type === 'folder') {
         setSearch('')
+        setFilter('all')
         clearSelection()
         selectFolder(id)
       } else {
@@ -798,11 +806,12 @@ export function Dashboard() {
           style={{ top: menuPos?.top, left: menuPos?.left }}
         >
           <button onClick={() => handleRename(menuOpen.type, menuOpen.id)}>{t('sidebar.rename')}</button>
-          {menuOpen.type === 'notebook' && (
-            <button onClick={() => { toggleFavorite(menuOpen.id); setMenuOpen(null) }}>
-              {notebooks.find(n => n.id === menuOpen.id)?.favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
-            </button>
-          )}
+          <button onClick={() => { toggleFavorite(menuOpen.id); setMenuOpen(null) }}>
+            {menuOpen.type === 'notebook'
+              ? (notebooks.find(n => n.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
+              : (folders.find(f => f.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
+            }
+          </button>
           <button onClick={() => {
             if (menuOpen.type === 'notebook') open('copyNotebook', { id: menuOpen.id })
             setMenuOpen(null)

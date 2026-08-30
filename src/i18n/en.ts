@@ -200,6 +200,8 @@ export const enMessages: Record<string, string> = {
   'sidebar.renameFolderPrompt': 'New folder name:',
   'sidebar.deleteNotebookConfirm': 'Delete notebook "{{name}}"?',
   'sidebar.deleteFolderConfirm': 'Delete folder "{{name}}" and all its contents?',
+  'sidebar.addFavorite': 'Add to favorites',
+  'sidebar.removeFavorite': 'Remove from favorites',
   'sidebar.deleteItemsConfirm': 'Delete {{count}} selected item(s)?',
   'sidebar.itemsSelected': '{{count}} selected',
   'sidebar.itemsSelectedName': '{{count}} items selected',
