@@ -5,7 +5,6 @@ import { useI18n } from '../i18n'
 import { confirmDeleteScope, promptName } from './Modals'
 import { renderThumbnail } from '../renderer/thumbnail'
 import { db } from '../db'
-import type { Page } from '../types'
 
 function NoteCover({ notebookId, width, height }: { notebookId: string, width: number, height: number }) {
   const [thumb, setThumb] = useState<string | null>(null)
@@ -56,6 +55,23 @@ export function Dashboard() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [filter, setFilter] = useState<'all' | 'favorites'>('all')
   const [search, setSearch] = useState('')
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!selectedFolderId) return
+    const toExpand = new Set(expandedFolders)
+    let curId: string | null = selectedFolderId
+    while (curId) {
+      const current: string = curId
+      const f = folders.find(x => x.id === current)
+      if (!f) break
+      if (f.parentId) toExpand.add(f.parentId)
+      curId = f.parentId
+    }
+    if (toExpand.size !== expandedFolders.size) {
+      setExpandedFolders(toExpand)
+    }
+  }, [selectedFolderId, folders])
   const [menuOpen, setMenuOpen] = useState<{ type: 'folder' | 'notebook'; id: string } | null>(null)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -150,8 +166,21 @@ export function Dashboard() {
       if (!(e.ctrlKey || e.metaKey)) clearSelection()
       toggleSelect(id)
     }
+
+    const menuWidth = 180
+    const menuHeight = 240
+    let left = e.clientX
+    let top = e.clientY
+
+    if (left + menuWidth > window.innerWidth) {
+      left = window.innerWidth - menuWidth - 10
+    }
+    if (top + menuHeight > window.innerHeight) {
+      top = window.innerHeight - menuHeight - 10
+    }
+
     setMenuOpen({ type, id })
-    setMenuPos({ top: e.clientY, left: e.clientX })
+    setMenuPos({ top, left })
   }
 
   function handleItemClick(e: React.MouseEvent, type: 'folder' | 'notebook', id: string) {
@@ -316,34 +345,105 @@ export function Dashboard() {
     dropIntoRef.current = null
   }
 
+  const toggleExpand = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const next = new Set(expandedFolders)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setExpandedFolders(next)
+  }
+
+  const getNoteCount = (folderId: string | null): number => {
+    let count = notebooks.filter(n => n.folderId === folderId).length
+    const subfolders = folders.filter(f => f.parentId === folderId)
+    for (const f of subfolders) {
+      count += getNoteCount(f.id)
+    }
+    return count
+  }
+
+  const renderFolderTree = (parentId: string | null = null, level = 0) => {
+    const subs = folders
+      .filter(f => f.parentId === parentId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+    if (subs.length === 0 && parentId !== null) return null
+
+    return (
+      <div className="tree-children">
+        {subs.map(f => {
+          const isExpanded = expandedFolders.has(f.id)
+          const hasChildren = folders.some(child => child.parentId === f.id)
+          const noteCount = getNoteCount(f.id)
+          const isActive = selectedFolderId === f.id
+
+          return (
+            <div key={f.id} className="tree-item">
+              <div
+                className={`tree-item-row ${isActive ? 'active' : ''}`}
+                style={{ paddingLeft: level * 16 + 8 }}
+                onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
+                onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
+              >
+                <div
+                  className={`tree-chevron ${isExpanded ? 'expanded' : ''}`}
+                  style={{ visibility: hasChildren ? 'visible' : 'hidden' }}
+                  onClick={(e) => toggleExpand(f.id, e as any)}
+                >
+                  <IconChevronRight />
+                </div>
+                <div className="tree-icon">
+                  <IconFolder />
+                </div>
+                <span className="tree-name">{f.name}</span>
+                {noteCount > 0 && <span className="tree-count">{noteCount}</span>}
+              </div>
+              {isExpanded && renderFolderTree(f.id, level + 1)}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className="dashboard">
       <nav className="dashboard-sidebar">
         <div className="dashboard-sidebar-header">
           <div className="topbar-brand">Mamaco Notes</div>
         </div>
-        <button
-          className={`sidebar-btn ${filter === 'all' ? 'active' : ''}`}
-          onClick={() => { setFilter('all'); selectFolder(null); setSearch('') }}
-        >
-          <IconAll />
-          <span>{t('sidebar.allNotebooks')}</span>
-        </button>
-        <button
-          className={`sidebar-btn ${filter === 'favorites' ? 'active' : ''}`}
-          onClick={() => { setFilter('favorites'); selectFolder(null); setSearch('') }}
-        >
-          <IconStar fill={filter === 'favorites' ? 'currentColor' : 'none'} />
-          <span>Favoritos</span>
-        </button>
-        <button
-          className="sidebar-btn"
-          onClick={() => open('trash')}
-        >
-          <IconTrash />
-          <span>{t('sidebar.trash')}</span>
-        </button>
-        <div className="sidebar-spacer" />
+
+        <div className="sidebar-scroll">
+          <button
+            className={`sidebar-btn ${filter === 'all' && !selectedFolderId ? 'active' : ''}`}
+            onClick={() => { setFilter('all'); selectFolder(null); setSearch('') }}
+          >
+            <IconAll />
+            <span>{t('sidebar.allNotebooks')}</span>
+          </button>
+          <button
+            className={`sidebar-btn ${filter === 'favorites' ? 'active' : ''}`}
+            onClick={() => { setFilter('favorites'); selectFolder(null); setSearch('') }}
+          >
+            <IconStar fill={filter === 'favorites' ? 'currentColor' : 'none'} />
+            <span>Favoritos</span>
+          </button>
+          <button
+            className="sidebar-btn"
+            onClick={() => open('trash')}
+          >
+            <IconTrash />
+            <span>{t('sidebar.trash')}</span>
+          </button>
+
+          <div className="sidebar-spacer" />
+
+          <div className="sidebar-section-title">Pastas</div>
+          <div className="sidebar-tree">
+            {renderFolderTree(null)}
+          </div>
+        </div>
+
         <button className="sidebar-btn" onClick={() => open('settings')}>
           <IconSettings />
           <span>{t('topbar.settings')}</span>
@@ -358,7 +458,7 @@ export function Dashboard() {
                 <span key={b.id ?? 'root'} className="breadcrumb-item">
                   {i > 0 && <span className="breadcrumb-sep">/</span>}
                   <button
-                    className={`breadcrumb-btn ${i === breadcrumbs.length - 1 ? 'active' : ''}`}
+                    className={`btn small breadcrumb-btn ${i === breadcrumbs.length - 1 ? 'active' : ''}`}
                     onClick={() => {
                       setSearch('')
                       selectFolder(b.id)
@@ -394,9 +494,6 @@ export function Dashboard() {
               <button className="icon-btn" title={t('sidebar.addPdfNote')} onClick={() => open('importPdfNote')}>
                 <IconPdfNote />
               </button>
-              <button className="icon-btn" title={t('sidebar.trash')} onClick={() => open('trash')}>
-                <IconTrash />
-              </button>
             </div>
             <div className="view-mode-toggle">
               <button
@@ -425,12 +522,12 @@ export function Dashboard() {
         }}>
           {selectedIds.length > 0 && (
             <div className="dashboard-selection-bar">
-              <span>{selectedIds.length} {t('sidebar.itemsSelectedName', { count: selectedIds.length })}</span>
+              <span>{t('sidebar.itemsSelectedName', { count: selectedIds.length })}</span>
               <div className="bar-actions">
-                <button onClick={copySelected}>{t('tool.copy')}</button>
-                <button onClick={cutSelected}>{t('tool.cut')}</button>
-                <button onClick={() => void duplicateSelected()}>{t('sidebar.duplicate')}</button>
-                <button className="danger" onClick={handleDeleteSelected}>{t('tool.delete')}</button>
+                <button className="btn small" onClick={copySelected}>{t('tool.copy')}</button>
+                <button className="btn small" onClick={cutSelected}>{t('tool.cut')}</button>
+                <button className="btn small" onClick={() => void duplicateSelected()}>{t('sidebar.duplicate')}</button>
+                <button className="btn small danger" onClick={handleDeleteSelected}>{t('tool.delete')}</button>
                 <button className="close" onClick={clearSelection}>×</button>
               </div>
             </div>
@@ -641,6 +738,14 @@ function IconSettings() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function IconChevronRight() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   )
 }
