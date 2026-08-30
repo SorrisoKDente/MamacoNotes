@@ -56,6 +56,7 @@ export function Dashboard() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [filter, setFilter] = useState<'all' | 'favorites'>('all')
   const [search, setSearch] = useState('')
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -555,13 +556,16 @@ export function Dashboard() {
           </div>
 
           <div className="dashboard-header-center">
-            <div className="dashboard-search">
-              <IconSearch />
+            <div className={`dashboard-search ${mobileSearchOpen ? 'mobile-open' : ''}`}>
+              <button className="mobile-search-toggle" onClick={() => setMobileSearchOpen(!mobileSearchOpen)}>
+                <IconSearch />
+              </button>
               <input
                 type="text"
                 placeholder={t('sidebar.searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                autoFocus={mobileSearchOpen}
               />
               {search && (
                 <button className="search-clear" onClick={() => setSearch('')}>×</button>
