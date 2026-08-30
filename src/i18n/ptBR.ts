@@ -99,6 +99,7 @@ export const ptBRMessages: Record<string, string> = {
   'tool.freeRotateTextHint': 'Para girar livremente, arraste o círculo laranja exibido acima do texto na página.',
   'tool.textHint': 'Clique em qualquer ponto da página para abrir o campo de digitação ali mesmo. Clique em um texto já inserido para editá-lo diretamente no lugar.',
   'tool.deleteSelected': 'Excluir selecionado',
+  'tool.favorite': 'Favoritar',
 
   // ===== Barra superior (TopBar.tsx) =====
   'topbar.backToDashboard': 'Voltar ao início',

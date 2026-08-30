@@ -99,6 +99,7 @@ export const enMessages: Record<string, string> = {
   'tool.freeRotateTextHint': 'To rotate freely, drag the orange circle shown above the text on the page.',
   'tool.textHint': 'Click anywhere on the page to open the typing field right there. Click an inserted text to edit it directly in place.',
   'tool.deleteSelected': 'Delete selected',
+  'tool.favorite': 'Favorite',
 
   // ===== TopBar (TopBar.tsx) =====
   'topbar.backToDashboard': 'Back to home',

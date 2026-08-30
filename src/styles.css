@@ -3374,6 +3374,37 @@ body {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+.item-favorite-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(4px);
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  color: var(--fg-muted);
+  transition: all 0.2s;
+  opacity: 0;
+}
+
+.dashboard-item:hover .item-favorite-btn,
+.item-favorite-btn.favorited {
+  opacity: 1;
+}
+
+.item-favorite-btn:hover {
+  background: rgba(0, 0, 0, 0.4);
+  transform: scale(1.1);
+  color: #f1c40f;
+}
+
 .item-preview {
   width: 100%;
   aspect-ratio: 4/5.2;

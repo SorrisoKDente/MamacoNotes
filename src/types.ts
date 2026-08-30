@@ -141,6 +141,7 @@ export interface Folder {
   parentId: string | null
   createdAt: number
   order?: number
+  favorite?: boolean
 }
 
 export type AppTheme = 'light' | 'dark' | 'system'

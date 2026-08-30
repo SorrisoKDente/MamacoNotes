@@ -353,6 +353,8 @@ interface AppState {
   copySelected: () => void
   cutSelected: () => void
   pasteClipboard: () => Promise<void>
+  favoriteSelected: () => Promise<void>
+  moveSelected: (targetFolderId: string | null) => Promise<void>
   duplicateSelected: () => Promise<void>
   deleteSelected: (scope?: DeleteScope) => Promise<void>
 
@@ -738,17 +740,25 @@ export const useAppStore = create<AppState>((set, get) => {
       })
     },
     async toggleFavorite(id) {
-      const summary = get().notebooks.find(n => n.id === id)
-      if (!summary) return
-      const next = { ...summary, favorite: !summary.favorite, updatedAt: Date.now() }
-      const notebooks = get().notebooks.map(n => n.id === id ? next : n)
-      set({ notebooks, dataVersion: get().dataVersion + 1 })
-      await db.updateNotebookMeta(next as any)
+      const nb = get().notebooks.find(n => n.id === id)
+      if (nb) {
+        const next = { ...nb, favorite: !nb.favorite, updatedAt: Date.now() }
+        const notebooks = get().notebooks.map(n => n.id === id ? next : n)
+        set({ notebooks, dataVersion: get().dataVersion + 1 })
+        await db.updateNotebookMeta(next as any)
+        if (get().activeNotebook?.id === id) {
+          set({ activeNotebook: { ...get().activeNotebook!, favorite: next.favorite, updatedAt: next.updatedAt } })
+          await db.putNotebook(get().activeNotebook!)
+        }
+        return
+      }
 
-      // If it's the active notebook, update that too
-      if (get().activeNotebook?.id === id) {
-        set({ activeNotebook: { ...get().activeNotebook!, favorite: next.favorite, updatedAt: next.updatedAt } })
-        await db.putNotebook(get().activeNotebook!)
+      const f = get().folders.find(x => x.id === id)
+      if (f) {
+        const next = { ...f, favorite: !f.favorite }
+        const folders = get().folders.map(x => x.id === id ? next : x)
+        set({ folders, dataVersion: get().dataVersion + 1 })
+        await db.putFolder(next)
       }
     },
 
@@ -889,6 +899,27 @@ export const useAppStore = create<AppState>((set, get) => {
         }
       }
       set({ clipboard: null, selectedIds: [] })
+    },
+
+    async favoriteSelected() {
+      const ids = get().selectedIds
+      if (ids.length === 0) return
+      for (const id of ids) {
+        await get().toggleFavorite(id)
+      }
+    },
+
+    async moveSelected(targetFolderId) {
+      const ids = get().selectedIds
+      if (ids.length === 0) return
+      for (const id of ids) {
+        if (get().notebooks.some(n => n.id === id)) {
+          await get().moveNotebook(id, targetFolderId)
+        } else if (get().folders.some(f => f.id === id)) {
+          await get().moveFolder(id, targetFolderId)
+        }
+      }
+      set({ selectedIds: [] })
     },
 
     async duplicateSelected() {

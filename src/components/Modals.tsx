@@ -448,6 +448,7 @@ export function ModalsHost() {
         {openModal === 'cloudSync' && <CloudSyncModal />}
         {openModal === 'moveNotebook' && <MoveModal />}
         {openModal === 'moveFolder' && <MoveModal />}
+        {openModal === 'moveSelected' && <MoveModal />}
         {openModal === 'copyNotebook' && <MoveModal />}
         {openModal === 'backgroundColor' && <BackgroundColorModal />}
         {openModal === 'syncConflict' && <SyncConflictModal />}
@@ -1778,25 +1779,32 @@ function MoveModal() {
   const moveNotebook = useAppStore((s) => s.moveNotebook)
   const copyNotebook = useAppStore((s) => s.copyNotebook)
   const moveFolder = useAppStore((s) => s.moveFolder)
+  const moveSelected = useAppStore((s) => s.moveSelected)
   const notebooks = useAppStore((s) => s.notebooks)
   const [folderId, setFolderId] = useState<string | null>(null)
 
   const id = modalData.id as string | undefined
+  const ids = modalData.ids as string[] | undefined
   const isFolder = openModal === 'moveFolder'
   const isCopy = openModal === 'copyNotebook'
 
-  const itemName = isFolder
+  const itemName = ids
+    ? t('sidebar.itemsSelectedName', { count: ids.length })
+    : isFolder
     ? folders.find((f) => f.id === id)?.name
     : notebooks.find((n) => n.id === id)?.name
 
   async function submit() {
-    if (!id) return
-    if (isFolder) {
-      await moveFolder(id, folderId)
-    } else if (isCopy) {
-      await copyNotebook(id, folderId)
-    } else {
-      await moveNotebook(id, folderId)
+    if (ids) {
+      await moveSelected(folderId)
+    } else if (id) {
+      if (isFolder) {
+        await moveFolder(id, folderId)
+      } else if (isCopy) {
+        await copyNotebook(id, folderId)
+      } else {
+        await moveNotebook(id, folderId)
+      }
     }
     close()
   }

@@ -12,6 +12,7 @@ export type ModalName =
   | 'cloudSync'
   | 'moveNotebook'
   | 'moveFolder'
+  | 'moveSelected'
   | 'copyNotebook'
   | 'backgroundColor'
   | 'syncConflict'

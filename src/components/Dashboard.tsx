@@ -46,6 +46,7 @@ export function Dashboard() {
   const copySelected = useAppStore((s) => s.copySelected)
   const cutSelected = useAppStore((s) => s.cutSelected)
   const pasteClipboard = useAppStore((s) => s.pasteClipboard)
+  const favoriteSelected = useAppStore((s) => s.favoriteSelected)
   const duplicateSelected = useAppStore((s) => s.duplicateSelected)
   const deleteSelected = useAppStore((s) => s.deleteSelected)
   const clipboard = useAppStore((s) => s.clipboard)
@@ -230,6 +231,11 @@ export function Dashboard() {
     setMenuOpen(null)
   }
 
+  function handleToggleFavorite(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    void toggleFavorite(id)
+  }
+
   async function handleDelete(type: 'folder' | 'notebook', id: string) {
     const item = type === 'notebook' ? notebooks.find(n => n.id === id) : folders.find(f => f.id === id)
     if (!item) return
@@ -381,14 +387,22 @@ export function Dashboard() {
         const folderId = targetNb ? targetNb.folderId : selectedFolderId
         const siblings = notebooks.filter(n => n.folderId === folderId)
         const idx = siblings.findIndex(n => n.id === id)
-        const finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+
+        let finalBeforeId: string | null = null
+        if (idx !== -1) {
+          finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+        }
         void reorderNotebook(item.id, folderId, finalBeforeId)
       } else {
         const targetF = folders.find(f => f.id === id)
         const parentId = targetF ? targetF.parentId : null
         const siblings = folders.filter(f => f.parentId === parentId)
         const idx = siblings.findIndex(f => f.id === id)
-        const finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+
+        let finalBeforeId: string | null = null
+        if (idx !== -1) {
+          finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
+        }
         void reorderFolder(item.id, parentId, finalBeforeId)
       }
     }
@@ -593,6 +607,8 @@ export function Dashboard() {
             <div className="dashboard-selection-bar">
               <span>{t('sidebar.itemsSelectedName', { count: selectedIds.length })}</span>
               <div className="bar-actions">
+                <button className="btn small" onClick={() => void favoriteSelected()}>{t('tool.favorite') || 'Favoritar'}</button>
+                <button className="btn small" onClick={() => open('moveSelected', { ids: selectedIds })}>{t('sidebar.moveToFolder')}</button>
                 <button className="btn small" onClick={copySelected}>{t('tool.copy')}</button>
                 <button className="btn small" onClick={cutSelected}>{t('tool.cut')}</button>
                 <button className="btn small" onClick={() => void duplicateSelected()}>{t('sidebar.duplicate')}</button>
@@ -620,6 +636,13 @@ export function Dashboard() {
                   onPointerLeave={onItemPointerUp}
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
+                  <button
+                    className={`item-favorite-btn ${f.favorite ? 'favorited' : ''}`}
+                    onClick={(e) => handleToggleFavorite(f.id, e)}
+                    title={t('tool.favorite')}
+                  >
+                    <IconStar fill={f.favorite ? '#f1c40f' : 'none'} color={f.favorite ? '#f1c40f' : 'currentColor'} />
+                  </button>
                   <div className="item-icon">
                     <IconFolder />
                   </div>
@@ -647,13 +670,19 @@ export function Dashboard() {
                   onPointerLeave={onItemPointerUp}
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
+                  <button
+                    className={`item-favorite-btn ${nb.favorite ? 'favorited' : ''}`}
+                    onClick={(e) => handleToggleFavorite(nb.id, e)}
+                    title={t('tool.favorite')}
+                  >
+                    <IconStar fill={nb.favorite ? '#f1c40f' : 'none'} color={nb.favorite ? '#f1c40f' : 'currentColor'} />
+                  </button>
                   <div className="item-preview">
                     {viewMode === 'grid' ? (
                       <NoteCover notebookId={nb.id} width={180} height={230} />
                     ) : (
                       <IconBook />
                     )}
-                    {nb.favorite && <span className="favorite-badge"><IconStar fill="#f1c40f" color="#f1c40f" /></span>}
                   </div>
                   <div className="item-info">
                     <span className="name">{nb.name}</span>
