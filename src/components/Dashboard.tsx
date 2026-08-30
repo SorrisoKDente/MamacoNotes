@@ -2,6 +2,8 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
 import { useI18n } from '../i18n'
+import { toggleFullscreen } from '../utils/fullscreen'
+import { shouldShowFullscreen } from '../utils/platform'
 import { confirmDeleteScope, promptName } from './Modals'
 import { renderThumbnail } from '../renderer/thumbnail'
 import { db } from '../db'
@@ -657,6 +659,15 @@ export function Dashboard() {
             <button className="btn btn-primary" onClick={() => open('newNotebook', { folderId: selectedFolderId })}>
               <IconPlus /> {t('sidebar.createNote')}
             </button>
+            {shouldShowFullscreen() && (
+              <button
+                className="icon-btn topbar-fullscreen"
+                title={t('topbar.fullscreen')}
+                onClick={toggleFullscreen}
+              >
+                <span className="icon icon-fullscreen" style={{ width: 20, height: 20, fontSize: 18 }} />
+              </button>
+            )}
           </div>
         </header>
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
 import { toggleFullscreen } from '../utils/fullscreen'
+import { shouldShowFullscreen } from '../utils/platform'
 import { useI18n } from '../i18n'
 
 export function TopBar() {
@@ -163,9 +164,11 @@ export function TopBar() {
         >
           <span className="icon icon-hide-toolbar" />
         </button>
-        <button className="icon-btn topbar-fullscreen" title={t('topbar.fullscreen')} onClick={toggleFullscreen}>
-          <span className="icon icon-fullscreen" />
-        </button>
+        {shouldShowFullscreen() && (
+          <button className="icon-btn topbar-fullscreen" title={t('topbar.fullscreen')} onClick={toggleFullscreen}>
+            <span className="icon icon-fullscreen" style={{ width: 20, height: 20, fontSize: 18 }} />
+          </button>
+        )}
       </div>
     </header>
   )
