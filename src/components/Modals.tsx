@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { useUiStore } from '../uiStore'
+import { db } from '../db'
 import { logger } from '../utils/logger'
 import type {
   AppTheme,
   ConflictChoice,
   DeleteScope,
+  Notebook,
   Page,
   PageTemplate,
   ShortcutActionId,
@@ -870,8 +872,10 @@ function BackgroundColorModal() {
 
   async function applyToAll() {
     if (!notebook) return
-    const nb = { ...notebook }
-    nb.pages = nb.pages.map((p) => ({ ...p, backgroundColor: color, updatedAt: Date.now() }))
+    const fullNb = useAppStore.getState().activeNotebook
+    if (!fullNb) return
+    const nb = { ...fullNb }
+    nb.pages = nb.pages.map((p: Page) => ({ ...p, backgroundColor: color, updatedAt: Date.now() }))
     nb.updatedAt = Date.now()
     await persistNotebook(nb)
     close()
@@ -1020,14 +1024,12 @@ function ImportPdfNoteModal() {
 function ExportModal() {
   const { t } = useI18n()
   const close = useUiStore((s) => s.close)
-  const notebooks = useAppStore((s) => s.notebooks)
-  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const [scope, setScope] = useState<'all' | 'single'>('single')
   const [format, setFormat] = useState<'png' | 'pdf'>('png')
   const [busy, setBusy] = useState(false)
 
-  const notebook = notebooks.find((n) => n.id === selectedNotebookId)
+  const notebook = useAppStore((s) => s.activeNotebook)
 
   async function submit() {
     if (!notebook) return
@@ -1165,9 +1167,13 @@ function SettingsModal() {
     setBackupBusy(true)
     setBackupMsg(null)
     try {
+      const fullNotebooks = await Promise.all(
+        notebooks.map((n) => db.getNotebook(n.id)),
+      )
+      const validNotebooks = fullNotebooks.filter((n): n is Notebook => !!n)
       const ok = await exportBackup(
         folders,
-        notebooks,
+        validNotebooks,
         useAppStore.getState().settings,
       )
       if (ok) {
@@ -1318,17 +1324,6 @@ function SettingsModal() {
                 {t('modal.hideToolbar')}
               </label>
               <span className="modal-hint">{t('modal.hideToolbarHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideSidebar}
-                  onChange={(e) => setSettings({ hideSidebar: e.target.checked })}
-                />
-                {t('modal.hideSidebar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideSidebarHint')}</span>
             </div>
             <div className="settings-check">
               <label>

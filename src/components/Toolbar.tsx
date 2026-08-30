@@ -386,8 +386,6 @@ function SelectPanel() {
   const { t } = useI18n()
   const settings = useAppStore((s) => s.settings)
   const setSettings = useAppStore((s) => s.setSettings)
-  const notebooks = useAppStore((s) => s.notebooks)
-  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const mode: SelectMode = settings.lastSelectMode
 
@@ -400,7 +398,7 @@ function SelectPanel() {
   const suppressSelBlurRef = useRef(false)
   const suppressImgBlurRef = useRef(false)
 
-  const notebook = notebooks.find((n) => n.id === selectedNotebookId)
+  const notebook = useAppStore((s) => s.activeNotebook)
   const page = notebook?.pages[currentPageIndex]
   const selectedImage = page ? getActiveLayer(page).images.find((i) => i.id === imageId) : undefined
 
@@ -445,7 +443,7 @@ function SelectPanel() {
   function liveImageRotation(): number {
     if (!imageId) return 0
     const st = useAppStore.getState()
-    const nb = st.notebooks.find((n) => n.id === st.selectedNotebookId)
+    const nb = st.activeNotebook
     const pg = nb?.pages[st.currentPageIndex]
     const img = pg ? getActiveLayer(pg).images.find((i) => i.id === imageId) : undefined
     return img ? (((img.rotation % 360) + 360) % 360) : 0
@@ -685,14 +683,12 @@ function PanPanel() {
 
 function RotationPanel() {
   const { t } = useI18n()
-  const notebooks = useAppStore((s) => s.notebooks)
-  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const rotatePageBy = useAppStore((s) => s.rotatePageBy)
   const updatePage = useAppStore((s) => s.updatePage)
   const settings = useAppStore((s) => s.settings)
-  const setSettings = useAppStore((s) => s.setSettings)
-  const page = notebooks.find((n) => n.id === selectedNotebookId)?.pages[currentPageIndex]
+  const notebook = useAppStore((s) => s.activeNotebook)
+  const page = notebook?.pages[currentPageIndex]
   const rotation = (((page?.rotation ?? 0) % 360) + 360) % 360
   const [degDraft, setDegDraft] = useState(String(Math.round(rotation)))
 
@@ -753,7 +749,7 @@ function RotationPanel() {
         <input
           type="checkbox"
           checked={settings.freeRotate}
-          onChange={(e) => setSettings({ freeRotate: e.target.checked })}
+          onChange={(e) => useAppStore.getState().setSettings({ freeRotate: e.target.checked })}
         />
         <span>
           {t('tool.freeRotate')}

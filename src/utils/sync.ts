@@ -3,6 +3,7 @@ import type {
   ConflictChoice,
   Folder,
   Notebook,
+  NotebookSummary,
   SyncConflictItem,
   SyncManifest,
   SyncManifestNotebook,
@@ -110,9 +111,10 @@ function cloneNotebookAsCopy(nb: Notebook, suffix: string): Notebook {
 export interface SyncInput {
   basePath: string
   folders: Folder[]
-  notebooks: Notebook[]
+  notebooks: NotebookSummary[]
   state: CloudSyncState
   transport: Transport
+  getNotebook: (id: string) => Promise<Notebook | undefined>
 }
 
 export interface SyncOutput {
@@ -126,7 +128,7 @@ export interface SyncOutput {
 }
 
 export interface MergePlan {
-  push: Notebook[]
+  pushIds: string[]
   pullIds: string[]
   deleteRemoteIds: string[]
   deleteLocalIds: string[]
@@ -136,7 +138,7 @@ export interface MergePlan {
 }
 
 export function buildPlan(
-  notebooks: Notebook[],
+  notebooks: NotebookSummary[],
   folders: Folder[],
   state: CloudSyncState,
   manifest: SyncManifest,
@@ -144,7 +146,7 @@ export function buildPlan(
   const localById = new Map(notebooks.map((n) => [n.id, n]))
   const remoteById = new Map(manifest.notebooks.map((n) => [n.id, n]))
   const plan: MergePlan = {
-    push: [],
+    pushIds: [],
     pullIds: [],
     deleteRemoteIds: [],
     deleteLocalIds: [],
@@ -158,7 +160,7 @@ export function buildPlan(
     const last = state.notebooks[nb.id]
 
     if (!remote) {
-      plan.push.push(nb)
+      plan.pushIds.push(nb.id)
       continue
     }
     if (remote.deleted) {
@@ -167,7 +169,7 @@ export function buildPlan(
         // locally AFTER its deletion was confirmed on the server (e.g. restored
         // from the trash). Re-upload it so the remote copy comes back, instead
         // of deleting it locally again.
-        plan.push.push(nb)
+        plan.pushIds.push(nb.id)
       } else if (last === undefined || nb.updatedAt === last) {
         plan.deleteLocalIds.push(nb.id)
       } else {
@@ -193,7 +195,7 @@ export function buildPlan(
     }
 
     if (last === undefined) {
-      if (nb.updatedAt >= remote.updatedAt) plan.push.push(nb)
+      if (nb.updatedAt >= remote.updatedAt) plan.pushIds.push(nb.id)
       else plan.pullIds.push(nb.id)
       continue
     }
@@ -204,7 +206,7 @@ export function buildPlan(
       continue
     }
     if (localChanged && !remoteChanged) {
-      plan.push.push(nb)
+      plan.pushIds.push(nb.id)
     } else if (!localChanged && remoteChanged) {
       plan.pullIds.push(nb.id)
     } else {
@@ -282,7 +284,7 @@ interface LegacyMigrationResult {
 async function migrateLegacy(
   basePath: string,
   folders: Folder[],
-  notebooks: Notebook[],
+  notebooks: NotebookSummary[],
   transport: Transport,
 ): Promise<LegacyMigrationResult> {
   const remoteNotebooks = new Map<string, Notebook>()
@@ -503,8 +505,12 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   const removedLocalNotebookIds: string[] = []
   const localById = new Map(notebooks.map((n) => [n.id, n]))
 
-  for (const nb of plan.push) {
+  for (const id of plan.pushIds) {
+    const summary = localById.get(id)
+    if (!summary) continue
     try {
+      const nb = await input.getNotebook(id)
+      if (!nb) throw new Error(t('error.invalidNotebook'))
       const path = notebookPath(basePath, nb.id)
       await transport.uploadFile(
         path,
@@ -521,7 +527,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       manifestChanged = true
       result.pushed.push(nb.name)
     } catch (e) {
-      result.errors.push(t('error.syncUploadNotebookFailed', { name: nb.name, message: e instanceof Error ? e.message : String(e) }))
+      result.errors.push(t('error.syncUploadNotebookFailed', { name: summary.name, message: e instanceof Error ? e.message : String(e) }))
     }
   }
 
@@ -540,30 +546,32 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         // (e.g. an interrupted upload or a stale manifest). Self-heal instead of
         // erroring forever: restore the local copy if it exists, otherwise prune
         // the phantom manifest entry.
-        const local = localById.get(id)
-        if (local) {
+        const summary = localById.get(id)
+        if (summary) {
           try {
+            const nb = await input.getNotebook(id)
+            if (!nb) throw new Error(t('error.invalidNotebook'))
             const path = notebookPath(basePath, id)
             await transport.uploadFile(
               path,
               new TextEncoder().encode(
-                JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: local }),
+                JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
               ),
               'application/json',
             )
             manifest = upsertManifestNotebook(manifest, {
               id,
-              name: local.name,
-              updatedAt: local.updatedAt,
+              name: nb.name,
+              updatedAt: nb.updatedAt,
               deleted: false,
             })
-            state.notebooks[id] = local.updatedAt
+            state.notebooks[id] = nb.updatedAt
             manifestChanged = true
-            result.pushed.push(local.name)
+            result.pushed.push(nb.name)
           } catch (e2) {
             result.errors.push(
               t('error.syncUploadNotebookFailed', {
-                name: local.name,
+                name: summary.name,
                 message: e2 instanceof Error ? e2.message : String(e2),
               }),
             )
@@ -742,10 +750,11 @@ export interface ConflictResolutionInput {
   basePath: string
   transport: Transport
   choices: Record<string, ConflictChoice>
-  localNotebooks: Notebook[]
+  localNotebooks: NotebookSummary[]
   folders: Folder[] | null
   state: CloudSyncState
   manifest: SyncManifest
+  getNotebook: (id: string) => Promise<Notebook | undefined>
 }
 
 export interface ConflictResolutionOutput {
@@ -813,8 +822,8 @@ export async function applyConflictChoices(
       continue
     }
 
+
     const entry = manifest.notebooks.find((n) => n.id === id)
-    const local = localById.get(id)
 
     if (choice === 'confirmDelete') {
       if (entry && !entry.deleted) {
@@ -842,23 +851,26 @@ export async function applyConflictChoices(
     }
 
     if (choice === 'keepLocal') {
-      if (local) {
+      const summary = localById.get(id)
+      if (summary) {
         try {
+          const nb = await input.getNotebook(id)
+          if (!nb) throw new Error(t('error.invalidNotebook'))
           const path = notebookPath(basePath, id)
           await transport.uploadFile(
             path,
             new TextEncoder().encode(
-              JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: local }),
+              JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
             ),
             'application/json',
           )
           manifest = upsertManifestNotebook(manifest, {
             id,
-            name: local.name,
-            updatedAt: local.updatedAt,
+            name: nb.name,
+            updatedAt: nb.updatedAt,
             deleted: false,
           })
-          state.notebooks[id] = local.updatedAt
+          state.notebooks[id] = nb.updatedAt
           delete state.tombstones[id]
           manifestChanged = true
         } catch {
@@ -888,8 +900,11 @@ export async function applyConflictChoices(
     }
 
     if (choice === 'keepBoth') {
-      if (local && entry) {
+      const summary = localById.get(id)
+      if (summary && entry) {
         try {
+          const nb = await input.getNotebook(id)
+          if (!nb) throw new Error(t('error.invalidNotebook'))
           const remote = await loadRemote(id)
           const copy = cloneNotebookAsCopy(remote, t('copySuffix'))
           newNotebooks.push(copy)
@@ -902,8 +917,8 @@ export async function applyConflictChoices(
           )
           manifest = upsertManifestNotebook(manifest, {
             id,
-            name: local.name,
-            updatedAt: local.updatedAt,
+            name: nb.name,
+            updatedAt: nb.updatedAt,
             deleted: false,
           })
           manifest = upsertManifestNotebook(manifest, {
@@ -912,7 +927,7 @@ export async function applyConflictChoices(
             updatedAt: copy.updatedAt,
             deleted: false,
           })
-          state.notebooks[id] = local.updatedAt
+          state.notebooks[id] = nb.updatedAt
           state.notebooks[copy.id] = copy.updatedAt
           manifestChanged = true
         } catch {

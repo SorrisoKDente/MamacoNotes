@@ -101,6 +101,7 @@ export const enMessages: Record<string, string> = {
   'tool.deleteSelected': 'Delete selected',
 
   // ===== TopBar (TopBar.tsx) =====
+  'topbar.backToDashboard': 'Back to home',
   'topbar.toggleSidebar': 'Toggle sidebar',
   'topbar.togglePageList': 'Show/hide page preview',
   'topbar.hideTopBar': 'Hide the top bar',

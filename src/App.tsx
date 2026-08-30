@@ -1,12 +1,12 @@
 import { useEffect } from 'react'
 import { useAppStore } from './store'
 import { useUiStore } from './uiStore'
-import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { Editor } from './components/Editor'
 import { Toolbar } from './components/Toolbar'
 import { PageList } from './components/PageList'
 import { LayersPanel } from './components/LayersPanel'
+import { Dashboard } from './components/Dashboard'
 import { ModalsHost } from './components/Modals'
 import { initGlobalShortcuts } from './hooks/useShortcuts'
 import { useIsMobile } from './hooks/useIsMobile'
@@ -17,10 +17,9 @@ export default function App() {
   const { t } = useI18n()
   const loaded = useAppStore((s) => s.loaded)
   const init = useAppStore((s) => s.init)
-  const sidebarOpen = useAppStore((s) => s.sidebarOpen)
+  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
   const pageListOpen = useAppStore((s) => s.pageListOpen)
   const layersOpen = useAppStore((s) => s.layersOpen)
-  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const setPageListOpen = useAppStore((s) => s.setPageListOpen)
   const setLayersOpen = useAppStore((s) => s.setLayersOpen)
   const setSettings = useAppStore((s) => s.setSettings)
@@ -28,7 +27,6 @@ export default function App() {
   const theme = useAppStore((s) => s.settings.theme)
   const hideTopBar = useAppStore((s) => s.settings.hideTopBar)
   const hideToolbar = useAppStore((s) => s.settings.hideToolbar)
-  const hideSidebar = useAppStore((s) => s.settings.hideSidebar)
   const hidePageList = useAppStore((s) => s.settings.hidePageList)
 
   useEffect(() => {
@@ -47,8 +45,8 @@ export default function App() {
     }
   }, [theme])
 
-  const anyBarHidden = hideTopBar || hideToolbar || hideSidebar || hidePageList
-  const bothLeftHidden = hideSidebar && hidePageList
+  const anyBarHidden = hideTopBar || hideToolbar || hidePageList
+  const leftHidden = hidePageList
 
   useEffect(() => {
     init().then(() => {
@@ -73,7 +71,7 @@ export default function App() {
     }
     const onSave = () => {
       const s = useAppStore.getState()
-      const nb = s.notebooks.find((n) => n.id === s.selectedNotebookId)
+      const nb = s.activeNotebook
       if (nb) void s.persistNotebook(nb)
     }
     const onRequestAddPage = () => {
@@ -127,23 +125,27 @@ export default function App() {
 
   return (
     <div className="app">
-      {!hideTopBar && <TopBar />}
-      <div className="app-body">
-        {!hideSidebar && sidebarOpen && <Sidebar />}
-        <div className="workspace">
-          {!hidePageList && pageListOpen && <PageList />}
-          <div className="editor-area">
-            <Editor />
+      {!selectedNotebookId ? (
+        <Dashboard />
+      ) : (
+        <>
+          {!hideTopBar && <TopBar />}
+          <div className="app-body">
+            <div className="workspace">
+              {!hidePageList && pageListOpen && <PageList />}
+              <div className="editor-area">
+                <Editor />
+              </div>
+              {layersOpen && <LayersPanel />}
+              {!hideToolbar && <Toolbar />}
+            </div>
           </div>
-          {layersOpen && <LayersPanel />}
-          {!hideToolbar && <Toolbar />}
-        </div>
-      </div>
-      {isMobile && (sidebarOpen || pageListOpen || layersOpen) && (
+        </>
+      )}
+      {isMobile && (pageListOpen || layersOpen) && (
         <div
           className="drawer-backdrop"
           onClick={() => {
-            if (sidebarOpen) setSidebarOpen(false)
             if (pageListOpen) setPageListOpen(false)
             if (layersOpen) setLayersOpen(false)
           }}
@@ -169,18 +171,9 @@ export default function App() {
               <span className="icon icon-hide-toolbar" />
             </button>
           )}
-          {hideSidebar && (
-            <button
-              className={`ui-restore-btn ${bothLeftHidden ? 'left-center-top' : 'left-center'}`}
-              title={t('topbar.restoreSidebar')}
-              onClick={() => setSettings({ hideSidebar: false })}
-            >
-              <span className="icon icon-panel" />
-            </button>
-          )}
           {hidePageList && (
             <button
-              className={`ui-restore-btn ${bothLeftHidden ? 'left-center-bottom' : 'left-center'}`}
+              className={`ui-restore-btn ${leftHidden ? 'left-center' : ''}`}
               title={t('topbar.restorePageList')}
               onClick={() => setSettings({ hidePageList: false })}
             >

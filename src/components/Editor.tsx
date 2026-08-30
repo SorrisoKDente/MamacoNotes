@@ -73,9 +73,7 @@ export function Editor() {
   const dragInterruptedByTouchRef = useRef(false)
   const multiTouchDownAtRef = useRef(0)
 
-  const notebook = useAppStore((s) =>
-    s.notebooks.find((n) => n.id === s.selectedNotebookId),
-  )
+  const notebook = useAppStore((s) => s.activeNotebook)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const tool = useAppStore((s) => s.tool)
   const setTool = useAppStore((s) => s.setTool)
@@ -208,8 +206,8 @@ export function Editor() {
       // the store keeps the same object reference and the canvas engine is not
       // torn down (losing its image cache) after every stroke, which caused a
       // screen flicker on release.
-      if (current !== source) return
-      void persistNotebook(current)
+      if (current?.id !== source.id) return
+      void persistNotebook(source)
     }, 400)
   }
 
@@ -2363,7 +2361,7 @@ export function Editor() {
       // stroke freezes the UI right after each pointer release. The stroke is
       // already in the in-memory store (rendered immediately); the debounced
       // write captures the latest state of the notebook.
-      schedulePersist(notebookRef.current)
+      schedulePersist(notebookRef.current ?? undefined)
     }
     if (activePointersRef.current.size === 0 && twoFingerDownAtRef.current !== null) {
       const downAt = twoFingerDownAtRef.current

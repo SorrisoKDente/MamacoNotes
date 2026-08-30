@@ -93,9 +93,6 @@ export function initGlobalShortcuts(): () => void {
       case 'exportPdf':
         void handleExportPdf()
         break
-      case 'toggleSidebar':
-        s.toggleSidebar()
-        break
       case 'togglePageList':
         s.togglePageList()
         break
@@ -144,7 +141,7 @@ export function initGlobalShortcuts(): () => void {
 
 async function handleExportPng() {
   const s = useAppStore.getState()
-  const notebook = s.notebooks.find((n) => n.id === s.selectedNotebookId)
+  const notebook = s.activeNotebook
   const page = notebook?.pages[s.currentPageIndex]
   if (!page) return
   await exportPageAsPng(page)
@@ -174,7 +171,7 @@ function adjustActiveSize(delta: number) {
 
 async function handleExportPdf() {
   const s = useAppStore.getState()
-  const notebook = s.notebooks.find((n) => n.id === s.selectedNotebookId)
+  const notebook = s.activeNotebook
   if (!notebook || notebook.pages.length === 0) return
   await exportPagesAsPdf(notebook.pages)
 }

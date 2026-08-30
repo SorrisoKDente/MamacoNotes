@@ -10,9 +10,7 @@ import { confirmAction } from './Modals'
 
 export function PageList() {
   const { t } = useI18n()
-  const notebook = useAppStore((s) =>
-    s.notebooks.find((n) => n.id === s.selectedNotebookId),
-  )
+  const notebook = useAppStore((s) => s.activeNotebook)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const selectPage = useAppStore((s) => s.selectPage)
   const movePage = useAppStore((s) => s.movePage)
@@ -180,7 +178,7 @@ export function PageList() {
 
   function handleExportSelectedPdf() {
     const st = useAppStore.getState()
-    const nb = st.notebooks.find((n) => n.id === st.selectedNotebookId)
+    const nb = st.activeNotebook
     const selected = st.selectedPageIndices
       .filter((i) => i >= 0 && i < (nb?.pages.length ?? 0))
       .sort((a, b) => a - b)

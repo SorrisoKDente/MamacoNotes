@@ -101,6 +101,7 @@ export const ptBRMessages: Record<string, string> = {
   'tool.deleteSelected': 'Excluir selecionado',
 
   // ===== Barra superior (TopBar.tsx) =====
+  'topbar.backToDashboard': 'Voltar ao início',
   'topbar.toggleSidebar': 'Alternar barra lateral',
   'topbar.togglePageList': 'Mostrar/ocultar preview das páginas',
   'topbar.hideTopBar': 'Ocultar a barra superior',

@@ -10,6 +10,7 @@ import type {
   Layer,
   LayerFolder,
   Notebook,
+  NotebookSummary,
   Page,
   PageTemplate,
   Stroke,
@@ -115,7 +116,7 @@ export function cloneTemplatePages(pages: Page[]): Page[] {
   }))
 }
 
-export function sortNotebooksByOrder(notebooks: Notebook[]): Notebook[] {
+export function sortNotebooksByOrder<T extends { order?: number; updatedAt: number }>(notebooks: T[]): T[] {
   return notebooks.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
@@ -312,7 +313,8 @@ export type LastClickedTarget =
 interface AppState {
   loaded: boolean
   folders: Folder[]
-  notebooks: Notebook[]
+  notebooks: NotebookSummary[]
+  activeNotebook: Notebook | null
   templates: PageTemplate[]
   trash: TrashItem[]
   settings: AppSettings
@@ -326,7 +328,6 @@ interface AppState {
   lastClicked: LastClickedTarget
   currentPageIndex: number
   tool: ToolKind
-  sidebarOpen: boolean
   pageListOpen: boolean
   layersOpen: boolean
   searchOpen: boolean
@@ -334,14 +335,12 @@ interface AppState {
 
   init: () => Promise<void>
   selectFolder: (id: string | null) => void
-  selectNotebook: (id: string | null) => void
+  selectNotebook: (id: string | null) => Promise<void>
   selectPage: (index: number) => void
   setTool: (tool: ToolKind) => void
   setRotationOpen: (open: boolean) => void
-  toggleSidebar: () => void
   togglePageList: () => void
   toggleLayers: () => void
-  setSidebarOpen: (open: boolean) => void
   setPageListOpen: (open: boolean) => void
   setLayersOpen: (open: boolean) => void
   toggleSearch: () => void
@@ -497,8 +496,17 @@ export const useAppStore = create<AppState>((set, get) => {
             .map((n) => n.order),
         )
       }
-      if (idx >= 0) notebooks[idx] = norm
-      else notebooks.push(norm)
+      const summary: NotebookSummary = {
+        id: norm.id,
+        name: norm.name,
+        folderId: norm.folderId,
+        createdAt: norm.createdAt,
+        updatedAt: norm.updatedAt,
+        order: norm.order,
+        pageCount: norm.pages.length,
+      }
+      if (idx >= 0) notebooks[idx] = summary
+      else notebooks.push(summary)
       await db.putNotebook(norm)
     }
     for (const nb of changes.newNotebooks) {
@@ -515,7 +523,16 @@ export const useAppStore = create<AppState>((set, get) => {
                   .map((n) => n.order),
               ),
             }
-      notebooks.push(added)
+      const summary: NotebookSummary = {
+        id: added.id,
+        name: added.name,
+        folderId: added.folderId,
+        createdAt: added.createdAt,
+        updatedAt: added.updatedAt,
+        order: added.order,
+        pageCount: added.pages.length,
+      }
+      notebooks.push(summary)
       await db.putNotebook(added)
     }
     for (const id of changes.removedLocalNotebookIds) {
@@ -565,8 +582,17 @@ export const useAppStore = create<AppState>((set, get) => {
 
   async function updateNotebookStorage(notebook: Notebook) {
     notebook.updatedAt = Date.now()
-    const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? notebook : n))
-    set({ notebooks, dataVersion: get().dataVersion + 1 })
+    const summary: NotebookSummary = {
+      id: notebook.id,
+      name: notebook.name,
+      folderId: notebook.folderId,
+      createdAt: notebook.createdAt,
+      updatedAt: notebook.updatedAt,
+      order: notebook.order,
+      pageCount: notebook.pages.length,
+    }
+    const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? summary : n))
+    set({ notebooks, activeNotebook: notebook, dataVersion: get().dataVersion + 1 })
     await db.putNotebook(notebook)
   }
 
@@ -579,6 +605,7 @@ export const useAppStore = create<AppState>((set, get) => {
     loaded: false,
     folders: [],
     notebooks: [],
+    activeNotebook: null,
     templates: [],
     trash: [],
     settings: DEFAULT_SETTINGS,
@@ -591,7 +618,6 @@ export const useAppStore = create<AppState>((set, get) => {
     lastClicked: null,
     currentPageIndex: 0,
     tool: 'pen',
-    sidebarOpen: !isMobileNow(),
     pageListOpen: !isMobileNow(),
     searchOpen: false,
     rotationOpen: false,
@@ -600,19 +626,13 @@ export const useAppStore = create<AppState>((set, get) => {
     canRedo: false,
 
     async init() {
-      const [rawFolders, rawNotebooks, settings, templates, trashItems] = await Promise.all([
+      const [rawFolders, rawSummaries, settings, templates, trashItems] = await Promise.all([
         db.getFolders(),
-        db.getNotebooks(),
+        db.getNotebookSummaries(),
         db.getSettings(),
         db.getTemplates(),
         db.getTrash(),
       ])
-      const folderIds = new Set(rawFolders.map((f) => f.id))
-      const notebooks = rawNotebooks.map((nb) => ({
-        ...nb,
-        folderId: normalizeNotebookFolder(nb, folderIds),
-        pages: nb.pages.map((p) => normalizePage(p)),
-      }))
       const rawSettings: AppSettings =
         (settings as { lastSelectMode?: unknown }).lastSelectMode === 'image'
           ? { ...settings, lastSelectMode: 'click' as const }
@@ -625,32 +645,41 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       let selectedNotebookId: string | null = null
       let currentPageIndex = 0
-      if (notebooks.length === 0) {
+      if (rawSummaries.length === 0) {
         const initial = makeNotebook('Eu vim ver o macaco', null)
         initial.order = 0
         initial.pages.push(makePage('blank'))
-        notebooks.push(initial)
         await db.putNotebook(initial)
+        rawSummaries.push({
+          id: initial.id,
+          name: initial.name,
+          folderId: initial.folderId,
+          createdAt: initial.createdAt,
+          updatedAt: initial.updatedAt,
+          order: initial.order,
+          pageCount: 1,
+        })
         selectedNotebookId = initial.id
       }
-      const { notebooks: orderedNotebooks } = fillNotebookOrder(notebooks)
+      const { notebooks: orderedSummaries } = fillNotebookOrder(rawSummaries as any)
       const { folders: orderedFolders } = fillFolderOrder(rawFolders)
       if (selectedNotebookId === null) {
         const last = readLastSession()
         const nb = last?.notebookId
-          ? orderedNotebooks.find((n) => n.id === last.notebookId)
+          ? orderedSummaries.find((n) => n.id === last.notebookId)
           : undefined
         if (nb) {
           selectedNotebookId = nb.id
           if (last?.pageId) {
-            const idx = nb.pages.findIndex((p) => p.id === last.pageId)
-            if (idx >= 0) currentPageIndex = idx
+            // We'll fix this later, since we don't have pages here yet
+            // For now, assume page 0 or load the notebook if it's the last session
           }
         }
       }
+
       set({
         folders: orderedFolders,
-        notebooks: orderedNotebooks,
+        notebooks: orderedSummaries as any,
         templates,
         trash: trashItems,
         settings: safeSettings,
@@ -658,6 +687,10 @@ export const useAppStore = create<AppState>((set, get) => {
         currentPageIndex,
         loaded: true,
       })
+
+      if (selectedNotebookId) {
+        await get().selectNotebook(selectedNotebookId)
+      }
       setLanguage(settings.language === 'en' ? 'en' : 'pt-BR')
       if (settings.language === 'pt-BR' && detectLanguage() === 'en') {
         void get().setSettings({ language: 'en' })
@@ -673,21 +706,30 @@ export const useAppStore = create<AppState>((set, get) => {
         selectedIds: [],
         selectedPageIndices: [],
       }),
-    selectNotebook: (id) => {
+    async selectNotebook(id) {
       let currentPageIndex = 0
       let folderId: string | null = null
+      let activeNotebook: Notebook | null = null
+
       if (id) {
-        const nb = get().notebooks.find((n) => n.id === id)
-        folderId = nb?.folderId ?? null
-        const pages = nb?.pages ?? []
+        const summary = get().notebooks.find((n) => n.id === id)
+        if (!summary) return
+
+        activeNotebook = (await db.getNotebook(id)) ?? null
+        if (!activeNotebook) return
+
+        folderId = activeNotebook.folderId
+        const pages = activeNotebook.pages
         const pageId = readLastPageMap()[id]
         if (pageId) {
           const idx = pages.findIndex((p) => p.id === pageId)
           if (idx >= 0) currentPageIndex = idx
         }
       }
+
       set({
         selectedNotebookId: id,
+        activeNotebook,
         selectedFolderId: folderId,
         currentPageIndex,
         selectedIds: [],
@@ -697,10 +739,8 @@ export const useAppStore = create<AppState>((set, get) => {
     selectPage: (index) => set({ currentPageIndex: index }),
     setTool: (tool) => set({ tool }),
     setRotationOpen: (open) => set({ rotationOpen: open }),
-    toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     togglePageList: () => set((s) => ({ pageListOpen: !s.pageListOpen })),
     toggleLayers: () => set((s) => ({ layersOpen: !s.layersOpen })),
-    setSidebarOpen: (open) => set({ sidebarOpen: open }),
     setPageListOpen: (open) => set({ pageListOpen: open }),
     setLayersOpen: (open) => set({ layersOpen: open }),
     toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
@@ -734,9 +774,7 @@ export const useAppStore = create<AppState>((set, get) => {
     clearPageSelection: () => set({ selectedPageIndices: [] }),
 
     async duplicateSelectedPages() {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const selected = [...get().selectedPageIndices]
         .filter((i) => i >= 0 && i < notebook.pages.length)
@@ -748,7 +786,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const clone: Page = {
           ...src,
           id: uid(),
-          layers: src.layers.map((l) => cloneLayerWithNewIds(l)),
+          layers: src.layers.map((l: Layer) => cloneLayerWithNewIds(l)),
           activeLayerId: src.activeLayerId,
         }
         notebook.pages.splice(i + 1, 0, clone)
@@ -761,9 +799,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteSelectedPages() {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook || notebook.pages.length <= 1) return
       const toDelete = [...get().selectedPageIndices]
         .filter((i) => i >= 0 && i < notebook.pages.length)
@@ -790,9 +826,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async rotateSelectedPagesBy(delta) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const selected = [...get().selectedPageIndices].filter(
         (i) => i >= 0 && i < notebook.pages.length,
@@ -944,7 +978,7 @@ export const useAppStore = create<AppState>((set, get) => {
           kind: 'notebook',
           name: nb.name,
           parentId: nb.folderId,
-          data: cloudKeepsCopy ? null : { ...nb },
+          data: cloudKeepsCopy ? null : { ...nb } as any,
           deletedAt,
           cloudKeepsCopy,
         })
@@ -1034,9 +1068,17 @@ export const useAppStore = create<AppState>((set, get) => {
           collect(child.id, newFolder.id)
         }
         for (const nb of get().notebooks.filter((x) => x.folderId === fid)) {
-          const clone = cloneNotebookForCopy(nb, newFolder.id)
+          const clone = cloneNotebookForCopy(nb as any, newFolder.id)
           clone.name = nb.name + t('copySuffix')
-          get().notebooks.push(clone)
+          get().notebooks.push({
+            id: clone.id,
+            name: clone.name,
+            folderId: clone.folderId,
+            createdAt: clone.createdAt,
+            updatedAt: clone.updatedAt,
+            order: clone.order,
+            pageCount: clone.pages.length,
+          })
           void db.putNotebook(clone)
         }
       }
@@ -1066,9 +1108,17 @@ export const useAppStore = create<AppState>((set, get) => {
           collect(child.id, newFolder.id)
         }
         for (const nb of get().notebooks.filter((x) => x.folderId === fid)) {
-          const clone = cloneNotebookForCopy(nb, newFolder.id)
+          const clone = cloneNotebookForCopy(nb as any, newFolder.id)
           clone.name = nb.name + t('copySuffix')
-          get().notebooks.push(clone)
+          get().notebooks.push({
+            id: clone.id,
+            name: clone.name,
+            folderId: clone.folderId,
+            createdAt: clone.createdAt,
+            updatedAt: clone.updatedAt,
+            order: clone.order,
+            pageCount: clone.pages.length,
+          })
           void db.putNotebook(clone)
         }
         return newFolder.id
@@ -1087,8 +1137,17 @@ export const useAppStore = create<AppState>((set, get) => {
       const notebook = makeNotebook(name, folderId)
       notebook.order = 0
       notebook.pages.push(makePage(template))
-      const notebooks = sortNotebooksByOrder([notebook, ...get().notebooks])
-      set({ notebooks, selectedNotebookId: notebook.id, currentPageIndex: 0 })
+      const summary: NotebookSummary = {
+        id: notebook.id,
+        name: notebook.name,
+        folderId: notebook.folderId,
+        createdAt: notebook.createdAt,
+        updatedAt: notebook.updatedAt,
+        order: notebook.order,
+        pageCount: notebook.pages.length,
+      }
+      const notebooks = sortNotebooksByOrder([summary, ...get().notebooks])
+      set({ notebooks, selectedNotebookId: notebook.id, activeNotebook: notebook, currentPageIndex: 0 })
       await db.putNotebook(notebook)
       return notebook
     },
@@ -1099,8 +1158,17 @@ export const useAppStore = create<AppState>((set, get) => {
       notebook.pages = cloneTemplatePages(template.pages)
       if (notebook.pages.length === 0) notebook.pages.push(makePage('blank'))
       notebook.updatedAt = Date.now()
-      const notebooks = sortNotebooksByOrder([notebook, ...get().notebooks])
-      set({ notebooks, selectedNotebookId: notebook.id, currentPageIndex: 0 })
+      const summary: NotebookSummary = {
+        id: notebook.id,
+        name: notebook.name,
+        folderId: notebook.folderId,
+        createdAt: notebook.createdAt,
+        updatedAt: notebook.updatedAt,
+        order: notebook.order,
+        pageCount: notebook.pages.length,
+      }
+      const notebooks = sortNotebooksByOrder([summary, ...get().notebooks])
+      set({ notebooks, selectedNotebookId: notebook.id, activeNotebook: notebook, currentPageIndex: 0 })
       await db.putNotebook(notebook)
       return notebook
     },
@@ -1125,9 +1193,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addPagesFromTemplate(template) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const ref = notebook.pages[0]
       const pages = cloneTemplatePages(template.pages).map((p) => ({
@@ -1142,9 +1208,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async applyTemplateToPage(index, template) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const ref = notebook.pages[Math.max(0, Math.min(index, notebook.pages.length - 1))]
       if (!ref) return
@@ -1175,7 +1239,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         await db.putCloudSyncState(state)
       }
-      const nb = get().notebooks.find((n) => n.id === id)
+      const summary = get().notebooks.find((n) => n.id === id)
       const notebooks = get().notebooks.filter((n) => n.id !== id)
       const selectedIds = get().selectedIds.filter((sid) => sid !== id)
       const lastClicked = get().lastClicked
@@ -1184,15 +1248,16 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       set({ notebooks, selectedIds })
       if (get().selectedNotebookId === id) {
-        set({ selectedNotebookId: null, currentPageIndex: 0 })
+        set({ selectedNotebookId: null, activeNotebook: null, currentPageIndex: 0 })
       }
-      if (nb) {
+      if (summary) {
+        const fullNb = get().activeNotebook?.id === id ? get().activeNotebook : await db.getNotebook(id)
         const item: TrashItem = {
           id,
           kind: 'notebook',
-          name: nb.name,
-          parentId: nb.folderId,
-          data: cloudKeepsCopy ? null : { ...nb },
+          name: summary.name,
+          parentId: summary.folderId,
+          data: cloudKeepsCopy ? null : (fullNb as any),
           deletedAt: Date.now(),
           cloudKeepsCopy,
         }
@@ -1213,7 +1278,7 @@ export const useAppStore = create<AppState>((set, get) => {
         get().notebooks.filter((n) => (n.folderId ?? null) === (folderId ?? null) && n.id !== id),
       )
       const dragged = { ...nb, folderId }
-      const list: Notebook[] = []
+      const list: NotebookSummary[] = []
       if (beforeId) {
         const idx = siblings.findIndex((s) => s.id === beforeId)
         if (idx >= 0) list.push(...siblings.slice(0, idx), dragged, ...siblings.slice(idx))
@@ -1225,18 +1290,18 @@ export const useAppStore = create<AppState>((set, get) => {
       list.forEach((s, i) => {
         if (s.id === id) {
           if (s.folderId !== folderId || s.order !== i) {
-            changed.set(s.id, { ...s, folderId, order: i, updatedAt: now })
+            changed.set(s.id, { ...s, folderId, order: i, updatedAt: now } as any)
           }
         } else if (s.order !== i) {
-          changed.set(s.id, { ...s, order: i, updatedAt: now })
+          changed.set(s.id, { ...s, order: i, updatedAt: now } as any)
         }
       })
       if (changed.size === 0) return
       const notebooks = sortNotebooksByOrder(
-        get().notebooks.map((n) => changed.get(n.id) ?? n),
+        get().notebooks.map((n) => (changed.get(n.id) as any ?? n)),
       )
       set({ notebooks, dataVersion: get().dataVersion + 1 })
-      for (const c of changed.values()) await db.putNotebook(c)
+      for (const c of changed.values()) await db.updateNotebookMeta(c as any)
     },
 
     async moveNotebook(id, folderId) {
@@ -1244,25 +1309,47 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async copyNotebook(id, folderId) {
-      const src = get().notebooks.find((n) => n.id === id)
+      const summary = get().notebooks.find((n) => n.id === id)
+      if (!summary) return null
+      const src = get().activeNotebook?.id === id ? get().activeNotebook : await db.getNotebook(id)
       if (!src) return null
       const clone = cloneNotebookForCopy(src, folderId)
       clone.name = src.name + t('copySuffix')
       clone.order = 0
-      const notebooks = sortNotebooksByOrder([clone, ...get().notebooks])
+      const newSummary: NotebookSummary = {
+        id: clone.id,
+        name: clone.name,
+        folderId: clone.folderId,
+        createdAt: clone.createdAt,
+        updatedAt: clone.updatedAt,
+        order: clone.order,
+        pageCount: clone.pages.length,
+      }
+      const notebooks = sortNotebooksByOrder([newSummary, ...get().notebooks])
       set({ notebooks })
       await db.putNotebook(clone)
       return clone
     },
 
     async duplicateNotebook(id) {
-      const src = get().notebooks.find((n) => n.id === id)
+      const summary = get().notebooks.find((n) => n.id === id)
+      if (!summary) return null
+      const src = get().activeNotebook?.id === id ? get().activeNotebook : await db.getNotebook(id)
       if (!src) return null
       const clone = cloneNotebookForCopy(src, src.folderId)
       clone.name = src.name + t('copySuffix')
+      const newSummary: NotebookSummary = {
+        id: clone.id,
+        name: clone.name,
+        folderId: clone.folderId,
+        createdAt: clone.createdAt,
+        updatedAt: clone.updatedAt,
+        order: clone.order,
+        pageCount: clone.pages.length,
+      }
       const notebooks = sortNotebooksByOrder([...get().notebooks])
       const idx = notebooks.findIndex((n) => n.id === id)
-      notebooks.splice(idx + 1, 0, clone)
+      notebooks.splice(idx + 1, 0, newSummary)
       set({ notebooks: sortNotebooksByOrder(notebooks) })
       await db.putNotebook(clone)
       return clone
@@ -1273,9 +1360,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addPage(template) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = makePage(template, {
         width: notebook.pages[0]?.width,
@@ -1288,9 +1373,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addPageAfter(index, template) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const ref = notebook.pages[Math.max(0, Math.min(index, notebook.pages.length - 1))]
       const page = makePage(template, {
@@ -1306,16 +1389,14 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async duplicatePage(index) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const src = notebook.pages[index]
       if (!src) return
       const clone: Page = {
         ...src,
         id: uid(),
-        layers: src.layers.map((l) => cloneLayerWithNewIds(l)),
+        layers: src.layers.map((l: Layer) => cloneLayerWithNewIds(l)),
         activeLayerId: src.activeLayerId,
       }
       notebook.pages.splice(index + 1, 0, clone)
@@ -1329,9 +1410,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deletePage(index) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       if (notebook.pages.length <= 1) return
       notebook.pages.splice(index, 1)
@@ -1347,9 +1426,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async movePage(from, to) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const [page] = notebook.pages.splice(from, 1)
       notebook.pages.splice(to, 0, page)
@@ -1367,11 +1444,10 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async rotatePageBy(index, delta) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[index]
+      if (!page) return
       page.rotation = (((page.rotation + delta) % 360) + 360) % 360
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
@@ -1379,20 +1455,17 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async updatePage(index, patch) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[index]
+      if (!page) return
       Object.assign(page, patch, { updatedAt: Date.now() })
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
     },
 
     async addLayer(folderId) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page || page.layers.length === 0) return
@@ -1409,7 +1482,7 @@ export const useAppStore = create<AppState>((set, get) => {
         layer.folderId = targetFolder
         insertAt = topOfGroupInsertIndex(page.layers, targetFolder)
       } else {
-        const activeIdx = page.layers.findIndex((l) => l.id === page.activeLayerId)
+        const activeIdx = page.layers.findIndex((l: Layer) => l.id === page.activeLayerId)
         insertAt = activeIdx >= 0 ? activeIdx + 1 : page.layers.length
       }
       page.layers.splice(insertAt, 0, layer)
@@ -1420,9 +1493,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameLayer(index, name) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1438,9 +1509,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async duplicateLayer(index) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1456,9 +1525,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteLayer(index) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page || page.layers.length <= 1) return
@@ -1482,9 +1549,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async moveLayer(from, to) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page || page.layers.length === 0) return
@@ -1501,19 +1566,17 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async moveLayerToFolder(from, folderId, beforeId) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page || page.layers.length === 0) return
       const layer = page.layers[from]
       if (!layer) return
       const target = folderId ?? null
-      const rest = page.layers.filter((_, i) => i !== from)
+      const rest = page.layers.filter((_: any, i: number) => i !== from)
       let insertAt: number
       if (beforeId !== null) {
-        const idx = rest.findIndex((l) => l.id === beforeId)
+        const idx = rest.findIndex((l: Layer) => l.id === beforeId)
         insertAt = idx >= 0 ? idx : rest.length
       } else {
         let hi = -1
@@ -1533,9 +1596,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addLayerFolder(name) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1546,7 +1607,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const folder: LayerFolder = {
         id: newId(),
         name: trimmed,
-        order: nextOrder(folders.map((f) => f.order)),
+        order: nextOrder(folders.map((f: LayerFolder) => f.order)),
       }
       folders.push(folder)
       page.layerFolders = folders
@@ -1556,13 +1617,11 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameLayerFolder(id, name) {
-      const nb = get().selectedNotebookId
-      if (!nb) return
-      const notebook = get().notebooks.find((n) => n.id === nb)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
-      const folder = (page.layerFolders ?? []).find((f) => f.id === id)
+      const folder = (page.layerFolders ?? []).find((f: LayerFolder) => f.id === id)
       if (!folder) return
       const trimmed = name.trim()
       if (trimmed === folder.name) return
@@ -1574,16 +1633,14 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteLayerFolder(id) {
-      const nb = get().selectedNotebookId
-      if (!nb) return
-      const notebook = get().notebooks.find((n) => n.id === nb)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
       const folders = page.layerFolders ?? []
-      if (!folders.some((f) => f.id === id)) return
+      if (!folders.some((f: LayerFolder) => f.id === id)) return
       get().pushUndo()
-      page.layerFolders = folders.filter((f) => f.id !== id)
+      page.layerFolders = folders.filter((f: LayerFolder) => f.id !== id)
       const lastClicked = get().lastClicked
       if (lastClicked && lastClicked.type === 'layerFolder' && lastClicked.id === id) {
         set({ lastClicked: null })
@@ -1597,19 +1654,17 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async reorderLayerFolder(id, beforeId) {
-      const nb = get().selectedNotebookId
-      if (!nb) return
-      const notebook = get().notebooks.find((n) => n.id === nb)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
       const folders = page.layerFolders ?? []
-      const folder = folders.find((f) => f.id === id)
+      const folder = folders.find((f: LayerFolder) => f.id === id)
       if (!folder) return
-      const siblings = folders.filter((f) => f.id !== id)
+      const siblings = folders.filter((f: LayerFolder) => f.id !== id)
       const list: LayerFolder[] = []
       if (beforeId) {
-        const idx = siblings.findIndex((s) => s.id === beforeId)
+        const idx = siblings.findIndex((s: LayerFolder) => s.id === beforeId)
         if (idx >= 0) list.push(...siblings.slice(0, idx), folder, ...siblings.slice(idx))
         else list.push(...siblings, folder)
       } else {
@@ -1625,9 +1680,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerVisible(index, visible) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1641,9 +1694,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerOpacity(index, opacity) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1659,9 +1710,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerLocked(index, locked) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1675,13 +1724,11 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setActiveLayer(layerId) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page || page.layers.length === 0) return
-      if (!page.layers.some((l) => l.id === layerId)) return
+      if (!page.layers.some((l: Layer) => l.id === layerId)) return
       if (page.activeLayerId === layerId) return
       page.activeLayerId = layerId
       page.updatedAt = Date.now()
@@ -1690,9 +1737,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async mergeSelectedLayers(indices) {
-      const id = get().selectedNotebookId
-      if (!id) return
-      const notebook = get().notebooks.find((n) => n.id === id)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1764,6 +1809,7 @@ export const useAppStore = create<AppState>((set, get) => {
             notebooks: get().notebooks,
             state,
             transport,
+            getNotebook: (id) => db.getNotebook(id),
           })
           // Apply the pulled/new content BEFORE committing the advanced baseline
           // (`db.putCloudSyncState`). If the content application fails (e.g. an
@@ -1830,6 +1876,7 @@ export const useAppStore = create<AppState>((set, get) => {
           folders: get().folders,
           state: resume.state,
           manifest: resume.manifest,
+          getNotebook: (id) => db.getNotebook(id),
         })
         await db.putCloudSyncState(out.nextState)
         await applySyncChanges({
@@ -1849,10 +1896,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     pushUndo() {
-      const notebookId = get().selectedNotebookId
-      if (!notebookId) return
-      const notebook = get().notebooks.find((n) => n.id === notebookId)
+      const notebook = get().activeNotebook
       if (!notebook) return
+      const notebookId = notebook.id
       const pageIndex = get().currentPageIndex
       const page = notebook.pages[pageIndex]
       if (!page) return
@@ -1865,8 +1911,8 @@ export const useAppStore = create<AppState>((set, get) => {
     async undo() {
       const entry = undoStack.pop()
       if (!entry) return
-      const notebook = get().notebooks.find((n) => n.id === entry.notebookId)
-      if (!notebook) return
+      const notebook = get().activeNotebook
+      if (!notebook || notebook.id !== entry.notebookId) return
       const current = notebook.pages[entry.pageIndex]
       if (current) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
       notebook.pages[entry.pageIndex] = entry.pageSnapshot
@@ -1878,8 +1924,8 @@ export const useAppStore = create<AppState>((set, get) => {
     async redo() {
       const entry = redoStack.pop()
       if (!entry) return
-      const notebook = get().notebooks.find((n) => n.id === entry.notebookId)
-      if (!notebook) return
+      const notebook = get().activeNotebook
+      if (!notebook || notebook.id !== entry.notebookId) return
       const current = notebook.pages[entry.pageIndex]
       if (current) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
       notebook.pages[entry.pageIndex] = entry.pageSnapshot
@@ -1889,9 +1935,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addImageToPage(dataUrl, name, center) {
-      const notebookId = get().selectedNotebookId
-      if (!notebookId) return
-      const notebook = get().notebooks.find((n) => n.id === notebookId)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1928,9 +1972,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addPdfToPage(dataUrl, name) {
-      const notebookId = get().selectedNotebookId
-      if (!notebookId) return
-      const notebook = get().notebooks.find((n) => n.id === notebookId)
+      const notebook = get().activeNotebook
       if (!notebook) return
       const page = notebook.pages[get().currentPageIndex]
       if (!page) return
@@ -1961,8 +2003,17 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       if (notebook.pages.length === 0) notebook.pages.push(makePage('blank'))
       notebook.updatedAt = Date.now()
-      const notebooks = sortNotebooksByOrder([notebook, ...get().notebooks])
-      set({ notebooks, selectedNotebookId: notebook.id, currentPageIndex: 0 })
+      const summary: NotebookSummary = {
+        id: notebook.id,
+        name: notebook.name,
+        folderId: notebook.folderId,
+        createdAt: notebook.createdAt,
+        updatedAt: notebook.updatedAt,
+        order: notebook.order,
+        pageCount: notebook.pages.length,
+      }
+      const notebooks = sortNotebooksByOrder([summary, ...get().notebooks])
+      set({ notebooks, selectedNotebookId: notebook.id, activeNotebook: notebook, currentPageIndex: 0 })
       await db.putNotebook(notebook)
       return notebook
     },
@@ -1981,7 +2032,16 @@ export const useAppStore = create<AppState>((set, get) => {
         const nb = item.data as Notebook
         if (!get().notebooks.some((n) => n.id === id)) {
           const norm = normalizeRestoredNotebook(nb)
-          const notebooks = sortNotebooksByOrder([...get().notebooks, norm])
+          const summary: NotebookSummary = {
+            id: norm.id,
+            name: norm.name,
+            folderId: norm.folderId,
+            createdAt: norm.createdAt,
+            updatedAt: norm.updatedAt,
+            order: norm.order,
+            pageCount: norm.pages.length,
+          }
+          const notebooks = sortNotebooksByOrder([...get().notebooks, summary])
           set({ notebooks, dataVersion: get().dataVersion + 1 })
           await db.putNotebook(norm)
         }
@@ -2031,10 +2091,19 @@ export const useAppStore = create<AppState>((set, get) => {
         const nb = data.notebook
         if (nb) {
           const norm = normalizeRestoredNotebook(nb)
+          const summary: NotebookSummary = {
+            id: norm.id,
+            name: norm.name,
+            folderId: norm.folderId,
+            createdAt: norm.createdAt,
+            updatedAt: norm.updatedAt,
+            order: norm.order,
+            pageCount: norm.pages.length,
+          }
           const existingIndex = get().notebooks.findIndex((n) => n.id === id)
           const notebooks = [...get().notebooks]
-          if (existingIndex >= 0) notebooks[existingIndex] = norm
-          else notebooks.push(norm)
+          if (existingIndex >= 0) notebooks[existingIndex] = summary
+          else notebooks.push(summary)
           set({ notebooks: sortNotebooksByOrder(notebooks), dataVersion: get().dataVersion + 1 })
           await db.putNotebook(norm)
           restored = true
@@ -2093,12 +2162,22 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const { folders: outFolders } = fillFolderOrder(folders)
       const { notebooks: outNotebooks } = fillNotebookOrder(next)
+      const outSummaries: NotebookSummary[] = outNotebooks.map((nb) => ({
+        id: nb.id,
+        name: nb.name,
+        folderId: nb.folderId,
+        createdAt: nb.createdAt,
+        updatedAt: nb.updatedAt,
+        order: nb.order,
+        pageCount: nb.pages.length,
+      }))
       set({
         folders: outFolders,
-        notebooks: outNotebooks,
+        notebooks: outSummaries,
         settings: nextSettings,
         selectedFolderId: null,
         selectedNotebookId: outNotebooks[0]?.id ?? null,
+        activeNotebook: outNotebooks[0] ?? null,
         currentPageIndex: 0,
         lastClicked: null,
       })
@@ -2142,7 +2221,7 @@ useAppStore.subscribe((state, prev) => {
     return
   }
   if (!state.selectedNotebookId) return
-  const pages = state.notebooks.find((n) => n.id === state.selectedNotebookId)?.pages ?? []
+  const pages = (state.activeNotebook?.id === state.selectedNotebookId) ? state.activeNotebook.pages : []
   const pageId = pages[state.currentPageIndex]?.id ?? null
   saveLastSession(state.selectedNotebookId, pageId)
   saveLastPage(state.selectedNotebookId, pageId)

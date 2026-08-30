@@ -20,7 +20,7 @@ import {
   emptyManifest,
   MANIFEST_PATH,
 } from '../src/utils/sync'
-import type { CloudSyncState, Folder, Notebook, SyncManifest } from '../src/types'
+import type { CloudSyncState, Folder, Notebook, NotebookSummary, SyncManifest } from '../src/types'
 import type { Transport } from '../src/utils/webdav'
 import { RemoteFileNotFoundError } from '../src/utils/webdav'
 
@@ -39,6 +39,17 @@ function assert(cond: boolean, label: string): void {
 
 function makeNotebook(id: string, name: string, updatedAt: number): Notebook {
   return { id, name, folderId: null, pages: [], createdAt: updatedAt, updatedAt }
+}
+
+function makeSummary(nb: Notebook): NotebookSummary {
+  return {
+    id: nb.id,
+    name: nb.name,
+    folderId: nb.folderId,
+    createdAt: nb.createdAt,
+    updatedAt: nb.updatedAt,
+    pageCount: nb.pages.length,
+  }
 }
 
 function makeState(overrides: Partial<CloudSyncState> = {}): CloudSyncState {
@@ -104,8 +115,8 @@ console.log('== buildPlan ==')
 
 {
   const nb = makeNotebook('nb-new', 'New', 1000)
-  const plan = buildPlan([nb], [], makeState(), emptyManifest())
-  assert(plan.push.length === 1 && plan.push[0].id === nb.id, 'new local notebook -> push')
+  const plan = buildPlan([makeSummary(nb)], [], makeState(), emptyManifest())
+  assert(plan.pushIds.length === 1 && plan.pushIds[0] === nb.id, 'new local notebook -> push')
 }
 
 {
@@ -117,9 +128,9 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 1000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
-    plan.push.length === 0 && plan.pullIds.length === 0 && plan.conflicts.length === 0,
+    plan.pushIds.length === 0 && plan.pullIds.length === 0 && plan.conflicts.length === 0,
     'unchanged notebook -> no action',
   )
 }
@@ -133,8 +144,8 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 1000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
-  assert(plan.push.length === 1 && plan.pullIds.length === 0, 'local changed -> push')
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
+  assert(plan.pushIds.length === 1 && plan.pullIds.length === 0, 'local changed -> push')
 }
 
 {
@@ -149,9 +160,9 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: 'Updated remote', updatedAt: 2000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 2000 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
-    plan.pullIds.length === 1 && plan.push.length === 0,
+    plan.pullIds.length === 1 && plan.pushIds.length === 0,
     'newer remote notebook wins over stale local baseline',
   )
 }
@@ -165,8 +176,8 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
-  assert(plan.pullIds.length === 1 && plan.push.length === 0, 'remote changed -> pull')
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
+  assert(plan.pullIds.length === 1 && plan.pushIds.length === 0, 'remote changed -> pull')
 }
 
 {
@@ -182,9 +193,9 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 1000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
-    plan.push.length === 1 && plan.push[0].id === nb.id && plan.pullIds.length === 0,
+    plan.pushIds.length === 1 && plan.pushIds[0] === nb.id && plan.pullIds.length === 0,
     'manual sync with local edits pushes, never pulls over the edit',
   )
 }
@@ -198,7 +209,7 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
     plan.conflicts.length === 1 && plan.conflicts[0].conflictType === 'bothModified',
     'both changed -> conflict (bothModified)',
@@ -214,7 +225,7 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 2000, deleted: true }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(plan.deleteLocalIds.length === 1, 'remote tombstone + local unchanged -> delete local')
 }
 
@@ -227,7 +238,7 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: false }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1000 }, tombstones: { [nb.id]: 1500 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
     plan.conflicts.length === 1 &&
       plan.conflicts[0].conflictType === 'deletedLocalModifiedRemote',
@@ -320,12 +331,14 @@ console.log('== buildPlan ==')
     'base/folders/folders.json',
     JSON.stringify({ version: 2, exportedAt: Date.now(), folders }),
   )
+  const notebooks: Notebook[] = []
   const out = await runSync({
     basePath: 'base',
     folders: [],
     notebooks: [],
     state: makeState({ foldersHash: '', foldersUpdatedAt: 0 }),
     transport: t,
+    getNotebook: async (id) => notebooks.find((n) => n.id === id),
   })
   assert(out.result.errors.length === 0, 'fresh device runSync: no errors')
   assert(out.result.conflicts.length === 0, 'fresh device runSync: no conflicts')
@@ -365,9 +378,9 @@ console.log('== buildPlan ==')
     folders: { updatedAt: 0 },
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: true }],
   }
-  const plan = buildPlan([nb], [], makeState(), manifest)
+  const plan = buildPlan([makeSummary(nb)], [], makeState(), manifest)
   assert(
-    plan.push.length === 1 && plan.push[0].id === nb.id,
+    plan.pushIds.length === 1 && plan.pushIds[0] === nb.id,
     'remote tombstone + local copy + no baseline -> push (restore from trash)',
   )
   assert(
@@ -387,9 +400,9 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: true }],
   }
   const state = makeState({ tombstones: { [nb.id]: 1500 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
-    plan.deleteLocalIds.length === 1 && plan.push.length === 0,
+    plan.deleteLocalIds.length === 1 && plan.pushIds.length === 0,
     'remote tombstone + active local tombstone -> delete local',
   )
 }
@@ -405,7 +418,7 @@ console.log('== buildPlan ==')
     notebooks: [{ id: nb.id, name: nb.name, updatedAt: 3000, deleted: true }],
   }
   const state = makeState({ notebooks: { [nb.id]: 1500 } })
-  const plan = buildPlan([nb], [], state, manifest)
+  const plan = buildPlan([makeSummary(nb)], [], state, manifest)
   assert(
     plan.conflicts.length === 1 &&
       plan.conflicts[0].conflictType === 'deletedRemoteModifiedLocal',
@@ -432,9 +445,10 @@ console.log('== runSync ==')
   const out = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length === 0, 'happy path: no errors')
   assert(out.nextState.notebooks[nb.id] === 2000, 'happy path: baseline advanced')
@@ -459,9 +473,10 @@ console.log('== runSync ==')
   const out = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length > 0, 'manifest write fail: errors reported')
   assert(out.nextState.notebooks[nb.id] === 1000, 'manifest write fail: baseline ROLLED BACK')
@@ -482,18 +497,20 @@ console.log('== runSync ==')
   const first = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   const rolledBackState = first.nextState
   t.failManifestWrite = false
   const second = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state: rolledBackState,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(
     second.result.pushed.length === 1 && second.result.pushed[0] === nb.name,
@@ -519,9 +536,10 @@ console.log('== runSync ==')
   const out = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length === 0, '404 pull with local copy: no errors reported')
   assert(
@@ -561,6 +579,7 @@ console.log('== runSync ==')
     notebooks: [],
     state: makeState(),
     transport: t,
+    getNotebook: async () => undefined,
   })
   assert(out.result.errors.length === 0, '404 pull without local copy: no errors reported')
   const prunedManifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
@@ -578,9 +597,10 @@ console.log('== runSync ==')
   const out = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length > 0, 'auth fail: errors reported')
   assert(
@@ -616,6 +636,7 @@ console.log('== runSync ==')
     notebooks: [],
     state,
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length === 0, 'Bug A runSync: no errors')
   assert(out.result.pulled.length === 0, 'Bug A runSync: NOT pulled back')
@@ -646,9 +667,10 @@ console.log('== runSync ==')
   const out = await runSync({
     basePath: 'base',
     folders: [],
-    notebooks: [nb],
+    notebooks: [makeSummary(nb)],
     state: makeState(),
     transport: t,
+    getNotebook: async (id) => [nb].find((n) => n.id === id),
   })
   assert(out.result.errors.length === 0, 'restored-from-trash runSync: no errors')
   assert(out.result.pushed.includes(nb.name), 'restored-from-trash runSync: re-uploaded (push)')

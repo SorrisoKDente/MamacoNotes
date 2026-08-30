@@ -1,9 +1,9 @@
-import type { Folder, Notebook, AppSettings, CloudSyncState, PageTemplate, TrashItem } from './types'
+import type { Folder, Notebook, AppSettings, CloudSyncState, PageTemplate, TrashItem, NotebookSummary, Page } from './types'
 import { DEFAULT_SETTINGS, normalizePage } from './types'
 import { hashFolders } from './utils/sync'
 
 const DB_NAME = 'mamaco-notes'
-const DB_VERSION = 7
+const DB_VERSION = 8
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -79,12 +79,45 @@ function migrateLayers(db: IDBDatabase): Promise<void> {
   })
 }
 
+function migrateToMetaContent(db: IDBDatabase): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['notebooks', 'notebooksContent'], 'readwrite')
+    const nbStore = tx.objectStore('notebooks')
+    const contentStore = tx.objectStore('notebooksContent')
+    const cursor = nbStore.openCursor()
+    cursor.onsuccess = () => {
+      const cur = cursor.result
+      if (!cur) return
+      const nb = cur.value as Notebook
+      if (nb.pages) {
+        // Save pages to content store
+        contentStore.put({ id: nb.id, pages: nb.pages })
+        // Save summary back to notebooks store
+        const summary: NotebookSummary = {
+          id: nb.id,
+          name: nb.name,
+          folderId: nb.folderId,
+          createdAt: nb.createdAt,
+          updatedAt: nb.updatedAt,
+          order: nb.order,
+          pageCount: nb.pages.length,
+        }
+        cur.update(summary)
+      }
+      cur.continue()
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     let needsOrderMigration = false
     let needsLayersMigration = false
+    let needsMetaContentMigration = false
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains('folders')) {
@@ -105,11 +138,23 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('trash')) {
         db.createObjectStore('trash', { keyPath: 'id' })
       }
+      if (!db.objectStoreNames.contains('notebooksContent')) {
+        db.createObjectStore('notebooksContent', { keyPath: 'id' })
+      }
       needsOrderMigration = true
       needsLayersMigration = true
+      needsMetaContentMigration = true
     }
     req.onsuccess = async () => {
       const db = req.result
+      if (needsMetaContentMigration) {
+        try {
+          await migrateToMetaContent(db)
+        } catch (e) {
+          reject(e)
+          return
+        }
+      }
       if (needsOrderMigration) {
         try {
           await migrateOrders(db)
@@ -176,18 +221,51 @@ export const db = {
   async deleteFolder(id: string): Promise<void> {
     await txAll('folders', 'readwrite', (s) => s.delete(id))
   },
-  async getNotebooks(): Promise<Notebook[]> {
+  async getNotebookSummaries(): Promise<NotebookSummary[]> {
     const all = await tx('notebooks', 'readonly', (s) => s.getAll())
     return all.sort((a, b) => b.updatedAt - a.updatedAt)
   },
   async getNotebook(id: string): Promise<Notebook | undefined> {
-    return tx('notebooks', 'readonly', (s) => s.get(id))
+    const meta = await tx<NotebookSummary | undefined>('notebooks', 'readonly', (s) => s.get(id))
+    if (!meta) return undefined
+    const content = await tx<{ id: string; pages: Page[] } | undefined>('notebooksContent', 'readonly', (s) => s.get(id))
+    return {
+      ...meta,
+      pages: content?.pages ?? [],
+    }
   },
   async putNotebook(notebook: Notebook): Promise<void> {
-    await txAll('notebooks', 'readwrite', (s) => s.put(notebook))
+    const summary: NotebookSummary = {
+      id: notebook.id,
+      name: notebook.name,
+      folderId: notebook.folderId,
+      createdAt: notebook.createdAt,
+      updatedAt: notebook.updatedAt,
+      order: notebook.order,
+      pageCount: notebook.pages.length,
+    }
+    // We must use a single transaction to ensure consistency
+    const db = await openDb()
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(['notebooks', 'notebooksContent'], 'readwrite')
+      t.objectStore('notebooks').put(summary)
+      t.objectStore('notebooksContent').put({ id: notebook.id, pages: notebook.pages })
+      t.oncomplete = () => resolve()
+      t.onerror = () => reject(t.error)
+    })
   },
   async deleteNotebook(id: string): Promise<void> {
-    await txAll('notebooks', 'readwrite', (s) => s.delete(id))
+    const db = await openDb()
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(['notebooks', 'notebooksContent'], 'readwrite')
+      t.objectStore('notebooks').delete(id)
+      t.objectStore('notebooksContent').delete(id)
+      t.oncomplete = () => resolve()
+      t.onerror = () => reject(t.error)
+    })
+  },
+  async updateNotebookMeta(summary: NotebookSummary): Promise<void> {
+    await txAll('notebooks', 'readwrite', (s) => s.put(summary))
   },
   async getSettings(): Promise<AppSettings> {
     const stored = await tx<AppSettings | undefined>('settings', 'readonly', (s) =>

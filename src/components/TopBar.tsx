@@ -6,12 +6,7 @@ import { useI18n } from '../i18n'
 
 export function TopBar() {
   const { t } = useI18n()
-  const notebooks = useAppStore((s) => s.notebooks)
-  const selectedNotebookId = useAppStore((s) => s.selectedNotebookId)
   const folders = useAppStore((s) => s.folders)
-  const sidebarOpen = useAppStore((s) => s.sidebarOpen)
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar)
-  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const pageListOpen = useAppStore((s) => s.pageListOpen)
   const togglePageList = useAppStore((s) => s.togglePageList)
   const setPageListOpen = useAppStore((s) => s.setPageListOpen)
@@ -21,12 +16,11 @@ export function TopBar() {
   const setLastClicked = useAppStore((s) => s.setLastClicked)
   const hideTopBar = useAppStore((s) => s.settings.hideTopBar)
   const hideToolbar = useAppStore((s) => s.settings.hideToolbar)
-  const hideSidebar = useAppStore((s) => s.settings.hideSidebar)
   const hidePageList = useAppStore((s) => s.settings.hidePageList)
   const setSettings = useAppStore((s) => s.setSettings)
   const { open } = useUiStore()
 
-  const notebook = notebooks.find((n) => n.id === selectedNotebookId)
+  const notebook = useAppStore((s) => s.activeNotebook)
   const [editingName, setEditingName] = useState<string | null>(null)
 
   const folder = notebook?.folderId ? folders.find((f) => f.id === notebook.folderId) : null
@@ -51,7 +45,7 @@ export function TopBar() {
         }
         return
       }
-      if (s.sidebarOpen || s.layersOpen) return
+      if (s.layersOpen) return
       const nb = s.notebooks.find((n) => n.id === s.selectedNotebookId)
       if (nb) setEditingName(nb.name)
     }
@@ -64,17 +58,12 @@ export function TopBar() {
       <div className="topbar-left">
         <button
           className="icon-btn"
-          title={t('topbar.toggleSidebar')}
+          title={t('topbar.backToDashboard') || 'Voltar'}
           onClick={() => {
-            if (hideSidebar) {
-              setSettings({ hideSidebar: false })
-              setSidebarOpen(true)
-              return
-            }
-            toggleSidebar()
+            useAppStore.getState().selectNotebook(null)
           }}
         >
-          <span className={sidebarOpen ? 'icon icon-panel-open' : 'icon icon-panel'} />
+          <span className="icon icon-back" />
         </button>
         <button
           className="icon-btn"

@@ -116,6 +116,16 @@ export interface Notebook {
   order?: number
 }
 
+export interface NotebookSummary {
+  id: string
+  name: string
+  folderId: string | null
+  createdAt: number
+  updatedAt: number
+  order?: number
+  pageCount: number
+}
+
 export interface PageTemplate {
   id: string
   name: string
@@ -149,11 +159,9 @@ export interface AppSettings {
   freeRotate: boolean
   hideTopBar: boolean
   hideToolbar: boolean
-  hideSidebar: boolean
   hidePageList: boolean
   hidePageCount: boolean
   hideToolCursor: boolean
-  sidebarWidth: number
   layersWidth: number
   pageViewMode: PageViewMode
   lastTextFontFamily: string
@@ -273,7 +281,6 @@ export type ShortcutActionId =
   | 'save'
   | 'exportPng'
   | 'exportPdf'
-  | 'toggleSidebar'
   | 'togglePageList'
   | 'searchPages'
   | 'sizeIncrease'
@@ -310,7 +317,6 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
   save: 'ctrl+s',
   exportPng: 'ctrl+shift+e',
   exportPdf: 'ctrl+shift+p',
-  toggleSidebar: 'ctrl+b',
   togglePageList: 'ctrl+shift+l',
   searchPages: 'ctrl+f',
   sizeIncrease: ']',
@@ -345,11 +351,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   freeRotate: false,
   hideTopBar: false,
   hideToolbar: false,
-  hideSidebar: false,
   hidePageList: false,
   hidePageCount: false,
   hideToolCursor: false,
-  sidebarWidth: 260,
   layersWidth: 260,
   pageViewMode: 'vertical',
   lastTextFontFamily: 'Segoe UI, system-ui, sans-serif',

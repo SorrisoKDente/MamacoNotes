@@ -9,9 +9,7 @@ const DEFAULT_NAME_RE = /^Camada (\d+)$/
 
 export function LayersPanel() {
   const { t } = useI18n()
-  const notebook = useAppStore((s) =>
-    s.notebooks.find((n) => n.id === s.selectedNotebookId),
-  )
+  const notebook = useAppStore((s) => s.activeNotebook)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const dataVersion = useAppStore((s) => s.dataVersion)
   const layersWidth = useAppStore((s) => s.settings.layersWidth)
@@ -36,7 +34,7 @@ export function LayersPanel() {
   const layers = page?.layers ?? []
   const folders = page?.layerFolders ?? []
   const activeLayer = page ? getActiveLayer(page) : null
-  const activeIndex = activeLayer ? layers.findIndex((l) => l.id === activeLayer.id) : -1
+  const activeIndex = activeLayer ? layers.findIndex((l: Layer) => l.id === activeLayer.id) : -1
   const sortedFolders = [...folders].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -72,7 +70,7 @@ export function LayersPanel() {
   const [dropIntoFolder, setDropIntoFolder] = useState<string | null>(null)
   const [dropRootActive, setDropRootActive] = useState(false)
   selectedFolderIdRef.current = selectedFolderId
-  const selectedFolder = folders.find((f) => f.id === selectedFolderId) ?? null
+  const selectedFolder = folders.find((f: LayerFolder) => f.id === selectedFolderId) ?? null
 
   useEffect(() => {
     setSelectedIds([])
@@ -89,11 +87,11 @@ export function LayersPanel() {
       const s = useAppStore.getState()
       if (!s.layersOpen) return
       const last = s.lastClicked
-      const nb = s.notebooks.find((n) => n.id === s.selectedNotebookId)
+      const nb = s.activeNotebook
       const page = nb?.pages[s.currentPageIndex]
       if (last) {
         if (last.type === 'layerFolder') {
-          const folder = (page?.layerFolders ?? []).find((f) => f.id === last.id)
+          const folder = (page?.layerFolders ?? []).find((f: LayerFolder) => f.id === last.id)
           if (folder) {
             setRenamingFolderId(folder.id)
             setFolderRenameValue(folder.name)
@@ -101,7 +99,7 @@ export function LayersPanel() {
           return
         }
         if (last.type === 'layer') {
-          const layer = page?.layers.find((l) => l.id === last.id)
+          const layer = page?.layers.find((l: Layer) => l.id === last.id)
           if (layer) {
             setRenamingId(layer.id)
             setRenameValue(layer.name)
@@ -111,15 +109,14 @@ export function LayersPanel() {
         return
       }
       if (
-        s.sidebarOpen &&
-        (s.selectedIds.length > 0 || s.selectedFolderId || s.selectedNotebookId)
+        s.selectedIds.length > 0 || s.selectedFolderId || s.selectedNotebookId
       ) {
         return
       }
       if (!page) return
       const folderId = selectedFolderIdRef.current
       if (folderId) {
-        const folder = (page.layerFolders ?? []).find((f) => f.id === folderId)
+        const folder = (page.layerFolders ?? []).find((f: LayerFolder) => f.id === folderId)
         if (folder) {
           setRenamingFolderId(folder.id)
           setFolderRenameValue(folder.name)
@@ -488,12 +485,12 @@ export function LayersPanel() {
   function finishLayerDrop(draggedId: string) {
     const before = dropBeforeRef.current
     const intoFolder = dropIntoFolderRef.current
-    const from = layers.findIndex((l) => l.id === draggedId)
+    const from = layers.findIndex((l: Layer) => l.id === draggedId)
     if (from === -1) return
     if (intoFolder !== null) {
       void moveLayerToFolder(from, intoFolder, null)
     } else {
-      const beforeLayer = before ? layers.find((l) => l.id === before) : undefined
+      const beforeLayer = before ? layers.find((l: Layer) => l.id === before) : undefined
       const targetFolder = beforeLayer ? (beforeLayer.folderId ?? null) : null
       void moveLayerToFolder(from, targetFolder, before)
     }
@@ -538,7 +535,7 @@ export function LayersPanel() {
     const id = renamingId
     setRenamingId(null)
     if (id === null) return
-    const idx = layers.findIndex((l) => l.id === id)
+    const idx = layers.findIndex((l: Layer) => l.id === id)
     if (idx === -1) return
     const name = renameValue.trim()
     if (!name) return
@@ -630,7 +627,7 @@ export function LayersPanel() {
   async function handleMerge() {
     if (selectedIds.length < 2) return
     const indices = selectedIds
-      .map((id) => layers.findIndex((l) => l.id === id))
+      .map((id) => layers.findIndex((l: Layer) => l.id === id))
       .filter((i) => i >= 0)
     if (indices.length < 2) return
     await mergeSelectedLayers(indices)
@@ -642,7 +639,7 @@ export function LayersPanel() {
   const mergeDisabled = selectedIds.length < 2
   const selectedCount = selectedIds.length
   const hasLayers = layers.length > 0
-  const rootLayers = layers.filter((l) => (l.folderId ?? null) === null)
+  const rootLayers = layers.filter((l: Layer) => (l.folderId ?? null) === null)
   const addTarget = selectedFolder ? selectedFolder.id : undefined
 
   function renderLayerRow(layer: Layer) {
@@ -666,7 +663,7 @@ export function LayersPanel() {
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            const idx = layers.findIndex((l) => l.id === layer.id)
+            const idx = layers.findIndex((l: Layer) => l.id === layer.id)
             if (idx >= 0) void setLayerVisible(idx, !layer.visible)
           }}
         >
@@ -678,7 +675,7 @@ export function LayersPanel() {
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            const idx = layers.findIndex((l) => l.id === layer.id)
+            const idx = layers.findIndex((l: Layer) => l.id === layer.id)
             if (idx >= 0) void setLayerLocked(idx, !layer.locked)
           }}
         >
@@ -720,9 +717,9 @@ export function LayersPanel() {
     const isDragging = dragFolderId === folder.id
     const isDropTarget = dropIntoFolder === folder.id
     const folderLayerRows = layers
-      .filter((l) => (l.folderId ?? null) === folder.id)
+      .filter((l: Layer) => (l.folderId ?? null) === folder.id)
       .reverse()
-      .map((layer) => renderLayerRow(layer))
+      .map((layer: Layer) => renderLayerRow(layer))
     return (
       <Fragment key={folder.id}>
         <div
@@ -894,7 +891,7 @@ export function LayersPanel() {
           rootLayers
             .slice()
             .reverse()
-            .map((layer) => renderLayerRow(layer))}
+            .map((layer: Layer) => renderLayerRow(layer))}
         {dragLayerId !== null && (
           <div className={`layer-root-zone ${dropRootActive ? 'drop-target' : ''}`} data-root-zone>
             <span className="layer-root-zone-line" />
