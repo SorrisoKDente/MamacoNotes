@@ -313,7 +313,8 @@ export function Dashboard() {
       if (treeEl instanceof HTMLElement) {
         const id = (treeEl as any).dataset.id
         if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
-          return { type: 'folder', id, isSidebar: true }
+          const type = treeEl.classList.contains('folder') ? 'folder' : 'notebook'
+          return { type, id, isSidebar: true }
         }
       }
     }
@@ -472,24 +473,34 @@ export function Dashboard() {
       .filter(f => f.parentId === parentId)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
-    if (subs.length === 0 && parentId !== null) return null
+    const childNotebooks = notebooks
+      .filter(nb => nb.folderId === parentId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+    if (subs.length === 0 && childNotebooks.length === 0 && parentId !== null) return null
 
     return (
       <div className="tree-children">
         {subs.map(f => {
           const isExpanded = expandedFolders.has(f.id)
-          const hasChildren = folders.some(child => child.parentId === f.id)
+          const hasChildren = folders.some(child => child.parentId === f.id) || notebooks.some(nb => nb.folderId === f.id)
           const noteCount = getNoteCount(f.id)
           const isActive = selectedFolderId === f.id
+          const isSelected = selectedIds.includes(f.id)
 
           return (
             <div key={f.id} className="tree-item">
               <div
-                className={`tree-item-row ${isActive ? 'active' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''}`}
+                className={`tree-item-row folder ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''}`}
                 style={{ paddingLeft: level * 16 + 8 }}
                 data-id={f.id}
                 onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
                 onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
+                onPointerDown={(e) => onItemPointerDown(e as any, 'folder', f.id)}
+                onPointerMove={(e) => onItemPointerMove(e as any, 'folder', f.id)}
+                onPointerUp={onItemPointerUp}
+                onPointerCancel={onItemPointerUp}
+                onPointerLeave={onItemPointerUp}
               >
                 {dropTarget?.id === f.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
                 <div
@@ -507,6 +518,32 @@ export function Dashboard() {
                 {dropTarget?.id === f.id && dropTarget.type === 'after' && <div className="dashboard-drop-indicator horizontal" style={{ bottom: -1 }} />}
               </div>
               {isExpanded && renderFolderTree(f.id, level + 1)}
+            </div>
+          )
+        })}
+
+        {childNotebooks.map(nb => {
+          const isSelected = selectedIds.includes(nb.id)
+          return (
+            <div
+              key={nb.id}
+              className={`tree-item-row notebook ${isSelected ? 'selected' : ''}`}
+              style={{ paddingLeft: level * 16 + 28 }}
+              data-id={nb.id}
+              onClick={(e) => handleItemClick(e as any, 'notebook', nb.id)}
+              onContextMenu={(e) => handleContextMenu(e as any, 'notebook', nb.id)}
+              onPointerDown={(e) => onItemPointerDown(e as any, 'notebook', nb.id)}
+              onPointerMove={(e) => onItemPointerMove(e as any, 'notebook', nb.id)}
+              onPointerUp={onItemPointerUp}
+              onPointerCancel={onItemPointerUp}
+              onPointerLeave={onItemPointerUp}
+            >
+              {dropTarget?.id === nb.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
+              <div className="tree-icon">
+                <IconBook />
+              </div>
+              <span className="tree-name">{nb.name}</span>
+              {dropTarget?.id === nb.id && dropTarget.type === 'after' && <div className="dashboard-drop-indicator horizontal" style={{ bottom: -1 }} />}
             </div>
           )
         })}
@@ -550,7 +587,7 @@ export function Dashboard() {
 
           <div className="sidebar-spacer" />
 
-          <div className="sidebar-section-title">Pastas</div>
+          <div className="sidebar-section-title">{t('sidebar.files')}</div>
           <div className="sidebar-tree">
             {renderFolderTree(null)}
           </div>
