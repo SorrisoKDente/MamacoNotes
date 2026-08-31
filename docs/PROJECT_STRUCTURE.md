@@ -124,7 +124,7 @@ Initialization flow:
 | `src/main.tsx` | React Bootstrap + PWA registration |
 | `src/App.tsx` | Root component; screen composition (Dashboard or TopBar + PageList + Editor + Toolbar + LayersPanel + Modals); init + auto-sync; Escape key → `ink:esc`; Android back button (Capacitor `@capacitor/app`) → `ink:esc` |
 | `src/types.ts` | **All domain data types** + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) + **`APP_VERSION`** (version constant) |
-| `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`); version migration fills missing `order` field in old folders/notebooks and converts old pages (flat arrays) to the layer model (`migrateLayers`) |
+| `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`, `notebooksContent`, `pdfImages`); version migration fills missing `order` field in old folders/notebooks, converts old pages (flat arrays) to the layer model (`migrateLayers`), splits page content into `notebooksContent` (`migrateToMetaContent`, v7 → v8) and extracts PDF background images into `pdfImages` (`migratePdfImages`, v8 → v9) |
 | `src/store.ts` | **Main store (Zustand)**: all CRUD for notebooks/folders/pages/templates, layer actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge), undo/redo, clipboard, **local trash** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, persistence |
 | `src/uiStore.ts` | Modal store (`openModal`, `modalData`, `open`, `close`) |
 | `src/textStore.ts` | Text editing state (draft, selection, rotation) |
@@ -240,12 +240,14 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 
 ### 5.2 Persistence (IndexedDB) — `src/db.ts`
 
-Database `mamaco-notes`, version **7**, with object stores:
+Database `mamaco-notes`, version **9**, with object stores:
 
 | Store | Content | Key |
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
-| `notebooks` | `Notebook[]` (Full JSON, includes pages and drawings) | `id` |
+| `notebooks` | `NotebookSummary[]` (light metadata: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
+| `notebooksContent` | `{ id, pages: Page[] }` — full page drawings; PDF backgrounds are stored **light** (`pdf` without `dataUrl`) | `id` |
+| `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — immutable PDF page background images (written only when new) | `pageId` (+ index `byNotebook` on `notebookId`) |
 | `settings` | 1 record `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 record `CloudSyncState` | `id` |
 | `templates` | `PageTemplate[]` (custom templates) | `id` |
@@ -277,6 +279,23 @@ All data writes in the app go through `store.ts`, which calls `db.*`.
 > `layerFolders: []` and `folderId: null` to pages/layers without them. Data arriving from
 > sync/backup is also normalized on read in `store.ts` (`init`, `applySyncChanges`,
 > `replaceAllData`), so no sync version change is needed.
+>
+> **Migration 7 → 8 (page content split)**: `migrateToMetaContent()` moves the heavy `pages`
+> array out of the `notebooks` store into the new `notebooksContent` store (keyPath `id`) and
+> rewrites each `notebooks` record as a lightweight `NotebookSummary`. Page list / thumbnails
+> load summaries from `notebooks` and full pages from `notebooksContent`.
+>
+> **Migration 8 → 9 (PDF images)**: `migratePdfImages()` extracts the heavy, immutable
+> `page.pdf.dataUrl` background blobs out of `notebooksContent` into the new `pdfImages`
+> store (keyPath `pageId`, index `byNotebook` on `notebookId`) and rewrites the content
+> record to "light" pages (`pdf` without `dataUrl`). `putNotebook` then writes only the
+> light pages to `notebooksContent` and upserts blobs into `pdfImages` only when new —
+> tracked via an in-memory cache of `pageId → dataUrl length` — so a per-stroke commit never
+> re-serializes the large PDF images (the root cause of the UI freeze on stroke release for
+> PDF-heavy notebooks). `getNotebook`/`getFirstPage` rehydrate the `dataUrl` from
+> `pdfImages`, so in-memory pages/canvas/thumbnails behave exactly as before;
+> `deleteNotebook` also removes that notebook's blobs (no leaks). Sync/backup are unchanged
+> because they read fully rehydrated notebooks.
 
 ### 5.3 Stores (Zustand)
 

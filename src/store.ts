@@ -144,6 +144,16 @@ export function normalizeNotebookFolder(
   return folderIds.has(fid) ? fid : null
 }
 
+function normalizeSummariesFolder(
+  summaries: NotebookSummary[],
+  folderIds: ReadonlySet<string>,
+): NotebookSummary[] {
+  return summaries.map((s) => ({
+    ...s,
+    folderId: normalizeNotebookFolder(s, folderIds),
+  }))
+}
+
 function nextOrder(orders: Array<number | undefined>): number {
   let max = -1
   for (const o of orders) {
@@ -668,7 +678,9 @@ export const useAppStore = create<AppState>((set, get) => {
           })
           selectedNotebookId = initial.id
         }
-        const { notebooks: orderedSummaries } = fillNotebookOrder(rawSummaries as any)
+        const { notebooks: orderedSummaries } = fillNotebookOrder(
+          normalizeSummariesFolder(rawSummaries as any, new Set(rawFolders.map((f) => f.id))) as any,
+        )
         const { folders: orderedFolders } = fillFolderOrder(rawFolders)
         if (selectedNotebookId === null) {
           const last = readLastSession()

@@ -6,7 +6,7 @@ import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import type { PageViewMode } from '../types'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { useI18n } from '../i18n'
-import { confirmAction } from './Modals'
+import { confirmAction } from '../utils/dialogs'
 
 export function PageList() {
   const { t } = useI18n()

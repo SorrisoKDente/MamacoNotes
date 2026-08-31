@@ -3,7 +3,7 @@ import { useAppStore } from '../store'
 import { getActiveLayer } from '../types'
 import type { Layer, LayerFolder } from '../types'
 import { useI18n } from '../i18n'
-import { confirmAction, promptName } from './Modals'
+import { confirmAction, promptName } from '../utils/dialogs'
 
 const DEFAULT_NAME_RE = /^Camada (\d+)$/
 

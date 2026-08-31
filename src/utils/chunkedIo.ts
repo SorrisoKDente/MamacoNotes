@@ -1,6 +1,6 @@
 import { registerPlugin } from '@capacitor/core'
 
-import { alertAction } from '../components/Modals'
+import { alertAction } from './dialogs'
 import { logger } from './logger'
 
 /**

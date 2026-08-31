@@ -27,6 +27,18 @@ import { exportBackup, importBackup } from '../utils/backup'
 import { useI18n } from '../i18n'
 import { SUPPORTED_LANGUAGES } from '../i18n/languages'
 import { checkForUpdates } from '../utils/updateCheck'
+import {
+  alertAction,
+  chooseTemplateImageMode,
+  clearDialogResolvers,
+  confirmAction,
+  resolveAlert,
+  resolveConfirm,
+  resolveDeleteScope,
+  resolveImageMode,
+  resolvePrompt,
+} from '../utils/dialogs'
+import type { TemplateImageMode } from '../utils/dialogs'
 
 function templateOptions(t: (key: string, params?: Record<string, string | number>) => string): { id: TemplateId; label: string; hint: string }[] {
   return [
@@ -35,58 +47,6 @@ function templateOptions(t: (key: string, params?: Record<string, string | numbe
     { id: 'grid', label: t('modal.templateGrid'), hint: t('modal.templateGridHint') },
     { id: 'dot', label: t('modal.templateDot'), hint: t('modal.templateDotHint') },
   ]
-}
-
-let promptResolver: ((value: string | null) => void) | null = null
-
-export function promptName(title: string, defaultValue = ''): Promise<string | null> {
-  return new Promise((resolve) => {
-    promptResolver = resolve
-    useUiStore.getState().open('prompt', { title, defaultValue })
-  })
-}
-
-let genericConfirmResolver: ((value: boolean) => void) | null = null
-
-export function confirmAction(title: string, description?: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    genericConfirmResolver = resolve
-    useUiStore.getState().open('confirm', { title, description })
-  })
-}
-
-let alertResolver: (() => void) | null = null
-
-export function alertAction(title: string, description?: string): Promise<void> {
-  return new Promise((resolve) => {
-    alertResolver = resolve
-    useUiStore.getState().open('alert', { title, description })
-  })
-}
-
-let deleteResolver: ((scope: DeleteScope | null) => void) | null = null
-
-export function confirmDeleteScope(opts: {
-  kind: 'notebook' | 'folder' | 'multi'
-  name: string
-  title?: string
-  description?: string
-}): Promise<DeleteScope | null> {
-  return new Promise((resolve) => {
-    deleteResolver = resolve
-    useUiStore.getState().open('confirmDelete', { ...opts })
-  })
-}
-
-export type TemplateImageMode = 'keep' | 'cover'
-
-let imageModeResolver: ((mode: TemplateImageMode | null) => void) | null = null
-
-export function chooseTemplateImageMode(): Promise<TemplateImageMode | null> {
-  return new Promise((resolve) => {
-    imageModeResolver = resolve
-    useUiStore.getState().open('imageSizeChoice', {})
-  })
 }
 
 function PromptModal() {
@@ -104,10 +64,7 @@ function PromptModal() {
   }, [])
 
   function finish(result: string | null) {
-    if (promptResolver) {
-      promptResolver(result)
-      promptResolver = null
-    }
+    resolvePrompt(result)
     close()
   }
 
@@ -143,10 +100,7 @@ function AlertModal() {
   const description = (modalData.description as string) ?? ''
 
   function finish() {
-    if (alertResolver) {
-      alertResolver()
-      alertResolver = null
-    }
+    resolveAlert()
     close()
   }
 
@@ -169,10 +123,7 @@ function GenericConfirmModal() {
   const description = (modalData.description as string) ?? ''
 
   function finish(result: boolean) {
-    if (genericConfirmResolver) {
-      genericConfirmResolver(result)
-      genericConfirmResolver = null
-    }
+    resolveConfirm(result)
     close()
   }
 
@@ -198,10 +149,7 @@ function ConfirmDeleteModal() {
   const cloudConfigured = !!cloud.webdavUrl
 
   function finish(scope: DeleteScope | null) {
-    if (deleteResolver) {
-      deleteResolver(scope)
-      deleteResolver = null
-    }
+    resolveDeleteScope(scope)
     close()
   }
 
@@ -373,10 +321,7 @@ function ImageSizeChoiceModal() {
   const close = useUiStore((s) => s.close)
 
   function finish(mode: TemplateImageMode | null) {
-    if (imageModeResolver) {
-      imageModeResolver(mode)
-      imageModeResolver = null
-    }
+    resolveImageMode(mode)
     close()
   }
 
@@ -407,26 +352,7 @@ export function ModalsHost() {
 
   useEffect(() => {
     const onEsc = () => {
-      if (promptResolver) {
-        promptResolver(null)
-        promptResolver = null
-      }
-      if (genericConfirmResolver) {
-        genericConfirmResolver(false)
-        genericConfirmResolver = null
-      }
-      if (alertResolver) {
-        alertResolver()
-        alertResolver = null
-      }
-      if (deleteResolver) {
-        deleteResolver(null)
-        deleteResolver = null
-      }
-      if (imageModeResolver) {
-        imageModeResolver(null)
-        imageModeResolver = null
-      }
+      clearDialogResolvers()
       close()
     }
     window.addEventListener('ink:esc', onEsc)

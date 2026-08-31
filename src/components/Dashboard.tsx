@@ -4,7 +4,7 @@ import { useUiStore } from '../uiStore'
 import { useI18n } from '../i18n'
 import { toggleFullscreen } from '../utils/fullscreen'
 import { shouldShowFullscreen } from '../utils/platform'
-import { confirmDeleteScope, promptName } from './Modals'
+import { confirmDeleteScope, promptName } from '../utils/dialogs'
 import { renderThumbnail } from '../renderer/thumbnail'
 import { db } from '../db'
 

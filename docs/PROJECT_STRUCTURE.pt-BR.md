@@ -122,7 +122,7 @@ Fluxo de inicialização:
 | `src/main.tsx` | Bootstrap React + registro PWA |
 | `src/App.tsx` | Componente raiz; composição da tela (TopBar, Sidebar, PageList, Editor, Toolbar, Modals); init + auto-sync; tecla Escape → `ink:esc`; botão de voltar do Android (Capacitor `@capacitor/app`) → `ink:esc` |
 | `src/types.ts` | **Todos os tipos de dados** do domínio + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + helpers de camadas (`normalizePage`, `getActiveLayer`) + `TrashItem` (entrada da lixeira local) + **`APP_VERSION`** (constante de versão) |
-| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos e converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`) |
+| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`, `notebooksContent`, `pdfImages`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos, converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`), separa o conteúdo das páginas em `notebooksContent` (`migrateToMetaContent`, v7 → v8) e extrai as imagens de fundo de PDF para `pdfImages` (`migratePdfImages`, v8 → v9) |
 | `src/store.ts` | **Store principal (Zustand)**: todo CRUD de cadernos/pastas/páginas/modelos, ações de camadas (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge), undo/redo, clipboard, **lixeira local** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, persistência |
 | `src/uiStore.ts` | Store de modais (`openModal`, `modalData`, `open`, `close`) |
 | `src/textStore.ts` | Estado de edição de texto (draft, seleção, rotação) |
@@ -239,12 +239,14 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 
 ### 5.2 Persistência (IndexedDB) — `src/db.ts`
 
-Banco `mamaco-notes`, versão **7**, com object stores:
+Banco `mamaco-notes`, versão **9**, com object stores:
 
 | Store | Conteúdo | Chave |
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
-| `notebooks` | `Notebook[]` (JSON completo, inclui páginas e desenhos) | `id` |
+| `notebooks` | `NotebookSummary[]` (metadados leves: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
+| `notebooksContent` | `{ id, pages: Page[] }` — desenhos completos das páginas; os fundos de PDF são armazenados **leves** (`pdf` sem `dataUrl`) | `id` |
+| `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — imagens de fundo de páginas de PDF (imutáveis, gravadas apenas quando novas) | `pageId` (+ índice `byNotebook` em `notebookId`) |
 | `settings` | 1 registro `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 registro `CloudSyncState` | `id` |
 | `templates` | `PageTemplate[]` (modelos personalizados) | `id` |
@@ -276,6 +278,24 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*`.
 > adicionando `layerFolders: []` e `folderId: null` às páginas/camadas sem esses campos.
 > Dados vindos de sync/backup também são normalizados na leitura em `store.ts` (`init`,
 > `applySyncChanges`, `replaceAllData`), então não é preciso mudar a versão do sync.
+>
+> **Migração 7 → 8 (separação do conteúdo das páginas)**: `migrateToMetaContent()` move o
+> array `pages` (pesado) da object store `notebooks` para a nova object store
+> `notebooksContent` (keyPath `id`) e reescreve cada registro de `notebooks` como um
+> `NotebookSummary` leve. A lista de páginas / miniaturas carrega os resumos de `notebooks`
+> e as páginas completas de `notebooksContent`.
+>
+> **Migração 8 → 9 (imagens de PDF)**: `migratePdfImages()` extrai os blobs pesados e
+> imutáveis `page.pdf.dataUrl` de fundo de `notebooksContent` para a nova object store
+> `pdfImages` (keyPath `pageId`, índice `byNotebook` em `notebookId`) e reescreve o registro
+> de conteúdo com páginas "leves" (`pdf` sem `dataUrl`). Assim, `putNotebook` grava apenas
+> as páginas leves em `notebooksContent` e faz upsert dos blobs em `pdfImages` somente
+> quando são novos — rastreados por um cache em memória de `pageId → dataUrl length` — de
+> modo que um commit por traço nunca re-serializa as imagens grandes de PDF (causa raiz do
+> congelamento da UI ao soltar o traço em cadernos com muitos PDFs). `getNotebook`/
+> `getFirstPage` reidratam o `dataUrl` de `pdfImages`, então páginas/canvas/miniaturas em
+> memória se comportam exatamente como antes; `deleteNotebook` também remove os blobs do
+> caderno (sem vazamentos). Sync/backup não mudam, pois leem cadernos totalmente reidratados.
 
 ### 5.3 Stores (Zustand)
 
