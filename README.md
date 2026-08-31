@@ -37,12 +37,14 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Import PDFs as new notebooks or as page backgrounds.
     -   Insert and transform images (move, resize, rotate).
     -   Export your notes as high-quality PNG or PDF files.
--   **Organization**:
+-   **Organization & Dashboard**:
+    -   **Central Dashboard**: A dedicated file manager for all your folders and notebooks.
+    -   **Favorites**: Mark important folders and notebooks for quick access in the "Favorites" tab.
     -   Nested folders and notebooks for easy categorization.
     -   **Search bar** to quickly find folders and notebooks by name.
-    -   **Rename** folders, notebooks (sidebar/top bar) and layers (layers panel) via context menu, double-click, or the **F2** shortcut on the last clicked item (falling back to the selected/active item).
+    -   **Rename** folders, notebooks (dashboard/top bar) and layers (layers panel) via context menu, double-click, or the **F2** shortcut.
     -   Drag-and-drop reordering for folders, notebooks, and pages.
-    -   Multi-selection support for bulk actions (copy, move, delete).
+    -   Multi-selection support for bulk actions (favorite, move, copy, delete).
 -   **Intelligent UI & UX**:
     -   Multi-touch support for tablets and phones (pinch zoom, pan).
     -   Custom gestures: two-finger double-tap for **Undo**, three-finger double-tap for **Redo**, two fingers to move/zoom, and three-finger twist for **Page rotation**.
@@ -54,8 +56,9 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Data stored locally using **IndexedDB** (saved automatically).
     -   Session restoration to automatically reopen the last notebook and page, and each notebook remembers its last viewed page (returning to it when you switch notebooks or reopen the app).
     -   Manual full backup (JSON) import/export (**passwords excluded for security**). On mobile, export uses the **system "Save As" picker** so you can choose exactly where to save your backup file.
-    -   **OOM-safe on Android**: large notebook sync happens in chunks (HTTP Range downloads and streamed PUT uploads through one native output stream), so big payloads never cross the Capacitor bridge in one call; PUT chunks preserve UTF-8 byte lengths for notes with accented or non-Latin text.
-    -   **Sync bug fixes**: manual sync and auto-sync use the same algorithm — a notebook edited locally is **pushed**, never force-pulled over the edit (pulled content is applied before the sync baseline advances, so a failed apply is re-attempted on the next sync instead of being silently skipped); pending local persistence timers are discarded after a cloud replacement; deleted items never come back (tombstones are respected when pulling), stale local baselines recover the newer remote notebook, and a folder delete propagates to its subfolders/notebooks; restoring an item from the trash re-uploads it to the cloud instead of deleting it again.
+    -   **OOM-safe on Android**: large notebook sync happens in chunks, ensuring stability on mobile devices.
+    -   **Optimized PDF Persistence**: Heavy PDF background images are stored separately in IndexedDB, eliminating UI freezes when saving strokes in large notebooks.
+    -   **Sync bug fixes**: manual sync and auto-sync use the same algorithm — a notebook edited locally is **pushed**, never force-pulled over the edit.
 
 ## 🛠️ Tech Stack
 
