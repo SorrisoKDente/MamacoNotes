@@ -644,35 +644,19 @@ export function Editor() {
   }
 
   function hitTestSelectionBounds(p: Pt): boolean {
-    const pg = pageRef.current
-    if (!pg) return false
+    const engine = engineRef.current
+    if (!engine) return false
     const sel = selectionRef.current
-    const layer = getActiveLayer(pg)
-    for (const s of layer.strokes) {
-      if (!sel.strokes.has(s.id)) continue
-      const b = strokeBounds(s)
-      if (b && p.x >= b.x - 8 && p.x <= b.x + b.w + 8 && p.y >= b.y - 8 && p.y <= b.y + b.h + 8) return true
-    }
-    for (const img of layer.images) {
-      if (!sel.images.has(img.id)) continue
-      const c = imageCorners(img)
-      const minX = Math.min(c[0].x, c[1].x, c[2].x, c[3].x) - 8
-      const maxX = Math.max(c[0].x, c[1].x, c[2].x, c[3].x) + 8
-      const minY = Math.min(c[0].y, c[1].y, c[2].y, c[3].y) - 8
-      const maxY = Math.max(c[0].y, c[1].y, c[2].y, c[3].y) + 8
-      if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) return true
-    }
-    for (const t of layer.texts) {
-      if (!sel.texts.has(t.id)) continue
-      const c = textCorners(t)
-      if (c.length < 4) continue
-      const minX = Math.min(c[0].x, c[1].x, c[2].x, c[3].x) - 8
-      const maxX = Math.max(c[0].x, c[1].x, c[2].x, c[3].x) + 8
-      const minY = Math.min(c[0].y, c[1].y, c[2].y, c[3].y) - 8
-      const maxY = Math.max(c[0].y, c[1].y, c[2].y, c[3].y) + 8
-      if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) return true
-    }
-    return false
+    if (sel.strokes.size === 0 && sel.images.size === 0 && sel.texts.size === 0) return false
+    const box = engine.selectionBounds(sel)
+    if (!box) return false
+    const pad = 8
+    return (
+      p.x >= box.x - pad &&
+      p.x <= box.x + box.w + pad &&
+      p.y >= box.y - pad &&
+      p.y <= box.y + box.h + pad
+    )
   }
 
   function transformHandleAt(p: Pt): { handle: string; box: Rect } | null {
@@ -1737,6 +1721,33 @@ export function Editor() {
           recordClick(hit, pagePt)
           requestRender()
         } else {
+          if (hitTestSelectionBounds(pagePt)) {
+            pushUndo()
+            const snap = snapshotSelected()
+            const sd = engine.toPageCoords(pos.x, pos.y)
+            selectionDragRef.current = {
+              kind: 'region-move',
+              startX: pos.x,
+              startY: pos.y,
+              startPagePt: sd,
+              snapshotStrokes: snap.strokes,
+              snapshotImages: snap.images,
+              snapshotTexts: snap.texts,
+            }
+            dragRef.current = {
+              kind: 'region-move',
+              startX: pos.x,
+              startY: pos.y,
+              lastX: pos.x,
+              lastY: pos.y,
+              imageId: null,
+              handle: null,
+              startPan: { ...panRef.current },
+            }
+            canvas.style.cursor = 'grabbing'
+            requestRender()
+            return
+          }
           selectionRef.current = { strokes: new Set(), images: new Set(), texts: new Set() }
           setSelectedImageId(null)
           requestRender()
