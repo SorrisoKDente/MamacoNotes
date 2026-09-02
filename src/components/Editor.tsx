@@ -89,6 +89,12 @@ export function Editor() {
   const requestRenderIdRef = useRef<number>(0)
   const isDirtyRef = useRef<boolean>(false)
 
+  const scrollVTrackRef = useRef<HTMLDivElement>(null)
+  const scrollVThumbRef = useRef<HTMLDivElement>(null)
+  const scrollHTrackRef = useRef<HTMLDivElement>(null)
+  const scrollHThumbRef = useRef<HTMLDivElement>(null)
+  const scrollbarTimerRef = useRef<number | null>(null)
+
   const [inlineText, setInlineText] = useState<{
     pageX: number
     pageY: number
@@ -172,7 +178,7 @@ export function Editor() {
   const dirtyRef = useRef(false)
 
   const dragRef = useRef<{
-    kind: 'pan' | 'draw' | 'erase' | 'select-move' | 'select-resize' | 'select-rotate' | 'region-draw' | 'region-move' | 'text-rotate' | 'text-resize' | 'page-rotate' | 'group-resize' | 'group-rotate'
+    kind: 'pan' | 'draw' | 'erase' | 'select-move' | 'select-resize' | 'select-rotate' | 'region-draw' | 'region-move' | 'text-rotate' | 'text-resize' | 'page-rotate' | 'group-resize' | 'group-rotate' | 'scroll-v' | 'scroll-h'
     startX: number
     startY: number
     lastX: number
@@ -270,7 +276,145 @@ export function Editor() {
     }
     const zd = Math.round(zoomRef.current * 100)
     if (zd !== zoomDisplay) setZoomDisplay(zd)
+    updateScrollbars()
   }, [zoomDisplay])
+
+  const updateScrollbars = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !pagesRef.current.length) return
+
+    const limits = getPanLimits()
+    if (!limits) return
+
+    const pan = panRef.current
+
+    // Vertical
+    if (scrollVTrackRef.current && scrollVThumbRef.current) {
+      const range = limits.maxY - limits.minY
+      if (range <= 1) {
+        scrollVTrackRef.current.style.display = 'none'
+      } else {
+        scrollVTrackRef.current.style.display = 'block'
+        const trackH = scrollVTrackRef.current.clientHeight
+        const viewportH = canvas.clientHeight
+        // Thumb size represents visible area / total navigable area
+        const thumbH = Math.max(30, (viewportH / (viewportH + range)) * trackH)
+        const ratio = (pan.y - limits.maxY) / (limits.minY - limits.maxY)
+        const thumbY = clamp(ratio * (trackH - thumbH), 0, trackH - thumbH)
+        scrollVThumbRef.current.style.height = `${thumbH}px`
+        scrollVThumbRef.current.style.transform = `translateY(${thumbY}px)`
+      }
+    }
+
+    // Horizontal
+    if (scrollHTrackRef.current && scrollHThumbRef.current) {
+      const range = limits.maxX - limits.minX
+      if (range <= 1) {
+        scrollHTrackRef.current.style.display = 'none'
+      } else {
+        scrollHTrackRef.current.style.display = 'block'
+        const trackW = scrollHTrackRef.current.clientWidth
+        const viewportW = canvas.clientWidth
+        const thumbW = Math.max(30, (viewportW / (viewportW + range)) * trackW)
+        const ratio = (pan.x - limits.maxX) / (limits.minX - limits.maxX)
+        const thumbX = clamp(ratio * (trackW - thumbW), 0, trackW - thumbW)
+        scrollHThumbRef.current.style.width = `${thumbW}px`
+        scrollHThumbRef.current.style.transform = `translateX(${thumbX}px)`
+      }
+    }
+  }, [])
+
+  const showScrollbarsTemporarily = useCallback(() => {
+    if (scrollbarTimerRef.current) window.clearTimeout(scrollbarTimerRef.current)
+
+    scrollVTrackRef.current?.classList.add('active')
+    scrollVThumbRef.current?.classList.add('active')
+    scrollHTrackRef.current?.classList.add('active')
+    scrollHThumbRef.current?.classList.add('active')
+
+    scrollbarTimerRef.current = window.setTimeout(() => {
+      scrollbarTimerRef.current = null
+      if (dragRef.current?.kind !== 'scroll-v' && dragRef.current?.kind !== 'scroll-h' && dragRef.current?.kind !== 'pan') {
+        scrollVTrackRef.current?.classList.remove('active')
+        scrollVThumbRef.current?.classList.remove('active')
+        scrollHTrackRef.current?.classList.remove('active')
+        scrollHThumbRef.current?.classList.remove('active')
+      }
+    }, 1500)
+  }, [])
+
+  function getPanLimits() {
+    const engine = engineRef.current
+    const canvas = canvasRef.current
+    if (!engine || !canvas || !pagesRef.current.length) return null
+
+    const rect = canvas.getBoundingClientRect()
+    const viewW = rect.width
+    const viewH = rect.height
+    const zoom = zoomRef.current
+    const mode = viewModeRef.current
+    const pages = pagesRef.current
+    const offs = offsetsRef.current
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+    if (mode === 'separate') {
+      const p = pages[currentPageIndexRef.current]
+      if (!p) return null
+      const vr = pageVisualRect(p)
+      minX = vr.x; minY = vr.y
+      maxX = vr.x + vr.w; maxY = vr.y + vr.h
+    } else {
+      for (let i = 0; i < pages.length; i++) {
+        const p = pages[i]
+        const off = offs[i] ?? { x: 0, y: 0 }
+        const vr = pageVisualRect(p)
+        minX = Math.min(minX, off.x + vr.x)
+        minY = Math.min(minY, off.y + vr.y)
+        maxX = Math.max(maxX, off.x + vr.x + vr.w)
+        maxY = Math.max(maxY, off.y + vr.y + vr.h)
+      }
+    }
+
+    const docW = (maxX - minX) * zoom
+    const docH = (maxY - minY) * zoom
+    const scaledMinX = minX * zoom
+    const scaledMinY = minY * zoom
+
+    // Fixed extra space beyond document edges (in screen pixels)
+    const MARGIN = 60
+
+    let limitMinX, limitMaxX, limitMinY, limitMaxY
+
+    if (docW < viewW - 20) {
+      const center = (viewW - docW) / 2 - scaledMinX
+      limitMinX = center - MARGIN
+      limitMaxX = center + MARGIN
+    } else {
+      limitMinX = viewW - docW - scaledMinX - MARGIN
+      limitMaxX = -scaledMinX + MARGIN
+    }
+
+    if (docH < viewH - 20) {
+      const center = (viewH - docH) / 2 - scaledMinY
+      limitMinY = center - MARGIN
+      limitMaxY = center + MARGIN
+    } else {
+      limitMinY = viewH - docH - scaledMinY - MARGIN
+      limitMaxY = -scaledMinY + MARGIN
+    }
+
+    return { minX: limitMinX, maxX: limitMaxX, minY: limitMinY, maxY: limitMaxY }
+  }
+
+  function clampPan(p: Pt): Pt {
+    const limits = getPanLimits()
+    if (!limits) return p
+    return {
+      x: clamp(p.x, limits.minX, limits.maxX),
+      y: clamp(p.y, limits.minY, limits.maxY),
+    }
+  }
 
   const requestRender = useCallback(() => {
     isDirtyRef.current = true
@@ -488,10 +632,10 @@ export function Editor() {
         (rect.height - pad) / box.h,
       )
       zoomRef.current = clamp(z, MIN_ZOOM, MAX_ZOOM)
-      panRef.current = {
+      panRef.current = clampPan({
         x: (rect.width - box.w * zoomRef.current) / 2 - vr.x * zoomRef.current,
         y: (rect.height - box.h * zoomRef.current) / 2 - vr.y * zoomRef.current,
-      }
+      })
     } else {
       const z =
         vm === 'vertical'
@@ -513,15 +657,15 @@ export function Editor() {
     const box = pageVisualBox(pg)
     const vr = pageVisualRect(pg)
     if (vm === 'vertical') {
-      panRef.current = {
+      panRef.current = clampPan({
         x: (rect.width - box.w * zoomRef.current) / 2 - vr.x * zoomRef.current,
         y: 40 - (off.y + vr.y) * zoomRef.current,
-      }
+      })
     } else {
-      panRef.current = {
+      panRef.current = clampPan({
         x: 40 - (off.x + vr.x) * zoomRef.current,
         y: (rect.height - box.h * zoomRef.current) / 2 - vr.y * zoomRef.current,
-      }
+      })
     }
   }
 
@@ -591,11 +735,13 @@ export function Editor() {
       x: (px - panRef.current.x) / zoomRef.current,
       y: (py - panRef.current.y) / zoomRef.current,
     }
-    panRef.current = {
+    const nextPan = {
       x: px - p.x * z,
       y: py - p.y * z,
     }
     zoomRef.current = z
+    panRef.current = clampPan(nextPan)
+    showScrollbarsTemporarily()
     setZoomDisplay(Math.round(z * 100))
     requestRender()
   }
@@ -1384,6 +1530,67 @@ export function Editor() {
     activePointersRef.current.set(e.pointerId, pos)
     pointerDownPosRef.current.set(e.pointerId, pos)
 
+    const target = e.target as HTMLElement
+    const isScrollV = target.closest('.editor-scrollbar-v')
+    const isScrollH = target.closest('.editor-scrollbar-h')
+
+    if (isScrollV || isScrollH) {
+      try {
+        editorRef.current?.setPointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+      const kind = isScrollV ? 'scroll-v' : 'scroll-h'
+      dragRef.current = {
+        kind,
+        startX: pos.x,
+        startY: pos.y,
+        lastX: pos.x,
+        lastY: pos.y,
+        imageId: null,
+        handle: null,
+        startPan: { ...panRef.current },
+      }
+      dragOwnerIdRef.current = e.pointerId
+      scrollVTrackRef.current?.classList.add('active')
+      scrollVThumbRef.current?.classList.add('active')
+      scrollHTrackRef.current?.classList.add('active')
+      scrollHThumbRef.current?.classList.add('active')
+
+      if (isScrollV && scrollVTrackRef.current && scrollVThumbRef.current) {
+        const rect = scrollVTrackRef.current.getBoundingClientRect()
+        const thumbRect = scrollVThumbRef.current.getBoundingClientRect()
+        if (pos.y < thumbRect.top || pos.y > thumbRect.bottom) {
+          const trackH = rect.height
+          const thumbH = thumbRect.height
+          const clickY = pos.y - rect.top
+          const ratio = clamp((clickY - thumbH / 2) / (trackH - thumbH), 0, 1)
+          const limits = getPanLimits()
+          if (limits) {
+            const scrollableH = limits.maxY - limits.minY
+            panRef.current.y = limits.maxY - ratio * scrollableH
+            requestRender()
+          }
+        }
+      } else if (isScrollH && scrollHTrackRef.current && scrollHThumbRef.current) {
+        const rect = scrollHTrackRef.current.getBoundingClientRect()
+        const thumbRect = scrollHThumbRef.current.getBoundingClientRect()
+        if (pos.x < thumbRect.left || pos.x > thumbRect.right) {
+          const trackW = rect.width
+          const thumbW = thumbRect.width
+          const clickX = pos.x - rect.left
+          const ratio = clamp((clickX - thumbW / 2) / (trackW - thumbW), 0, 1)
+          const limits = getPanLimits()
+          if (limits) {
+            const scrollableW = limits.maxX - limits.minX
+            panRef.current.x = limits.maxX - ratio * scrollableW
+            requestRender()
+          }
+        }
+      }
+      return
+    }
+
     const multiTouch = activePointersRef.current.size >= 2
     if (multiTouch) {
       const drag = dragRef.current
@@ -2037,23 +2244,26 @@ export function Editor() {
         const a = pts[0]
         const b = pts[1]
         if (a && b) {
+          showScrollbarsTemporarily()
           const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
           const dist = Math.hypot(a.x - b.x, a.y - b.y)
           const prev = pinchRef.current
           if (prev && prev.prevDist > 0 && dist > 0) {
             const rect = canvas.getBoundingClientRect()
             applyZoomAt(mid.x - rect.left, mid.y - rect.top, dist / prev.prevDist)
-            panRef.current.x += mid.x - prev.prevMid.x
-            panRef.current.y += mid.y - prev.prevMid.y
+            panRef.current = clampPan({
+              x: panRef.current.x + (mid.x - prev.prevMid.x),
+              y: panRef.current.y + (mid.y - prev.prevMid.y),
+            })
           } else {
             const [ra, rb] = rotationPair(pts)
             drag.startAngle = angleBetween(ra, rb)
             drag.startRotation = pageRef.current?.rotation ?? 0
             pinchRotationUndoPushedRef.current = false
-            panRef.current = {
+            panRef.current = clampPan({
               x: drag.startPan.x + (mid.x - drag.startX),
               y: drag.startPan.y + (mid.y - drag.startY),
-            }
+            })
           }
           if (
             activePointersRef.current.size >= 3 &&
@@ -2083,10 +2293,11 @@ export function Editor() {
         }
       }
       pinchRef.current = null
-      panRef.current = {
+      panRef.current = clampPan({
         x: drag.startPan.x + (pos.x - drag.startX),
         y: drag.startPan.y + (pos.y - drag.startY),
-      }
+      })
+      showScrollbarsTemporarily()
       requestRender()
       return
     }
@@ -2265,6 +2476,38 @@ export function Editor() {
       requestRender()
       return
     }
+
+    if (drag.kind === 'scroll-v' && scrollVTrackRef.current && scrollVThumbRef.current) {
+      const rect = scrollVTrackRef.current.getBoundingClientRect()
+      const trackH = rect.height
+      const thumbH = scrollVThumbRef.current.clientHeight
+      const limits = getPanLimits()
+      if (limits && trackH > thumbH) {
+        const clickY = pos.y - rect.top
+        const ratio = clamp((clickY - thumbH / 2) / (trackH - thumbH), 0, 1)
+        const scrollableH = limits.maxY - limits.minY
+        panRef.current.y = limits.maxY - ratio * scrollableH
+      }
+      showScrollbarsTemporarily()
+      requestRender()
+      return
+    }
+
+    if (drag.kind === 'scroll-h' && scrollHTrackRef.current && scrollHThumbRef.current) {
+      const rect = scrollHTrackRef.current.getBoundingClientRect()
+      const trackW = rect.width
+      const thumbW = scrollHThumbRef.current.clientWidth
+      const limits = getPanLimits()
+      if (limits && trackW > thumbW) {
+        const clickX = pos.x - rect.left
+        const ratio = clamp((clickX - thumbW / 2) / (trackW - thumbW), 0, 1)
+        const scrollableW = limits.maxX - limits.minX
+        panRef.current.x = limits.maxX - ratio * scrollableW
+      }
+      showScrollbarsTemporarily()
+      requestRender()
+      return
+    }
   }
 
   async function onPointerUp(e: React.PointerEvent) {
@@ -2356,8 +2599,17 @@ export function Editor() {
         erasePendingRef.current.scheduled = false
       }
     }
-    if (drag?.kind === 'pan') {
+    if (drag?.kind === 'pan' || drag?.kind === 'scroll-v' || drag?.kind === 'scroll-h') {
+      try {
+        editorRef.current?.releasePointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
       dragRef.current = null
+      scrollVTrackRef.current?.classList.remove('active')
+      scrollVThumbRef.current?.classList.remove('active')
+      scrollHTrackRef.current?.classList.remove('active')
+      scrollHThumbRef.current?.classList.remove('active')
     } else if (isOwner) {
       dragRef.current = null
       dragOwnerIdRef.current = null
@@ -2423,10 +2675,11 @@ export function Editor() {
       const rect = canvas.getBoundingClientRect()
       zoomAt(e.clientX - rect.left, e.clientY - rect.top, -Math.sign(e.deltaY))
     } else {
-      panRef.current = {
+      panRef.current = clampPan({
         x: panRef.current.x - e.deltaX,
         y: panRef.current.y - e.deltaY,
-      }
+      })
+      showScrollbarsTemporarily()
       requestRender()
     }
     scheduleFollowPage()
@@ -2765,16 +3018,20 @@ export function Editor() {
                 : 'cursor-select'
 
   return (
-    <div ref={editorRef} className={`editor ${cursorClass}`} onMouseMove={trackMouse}>
+    <div
+      ref={editorRef}
+      className={`editor ${cursorClass}`}
+      onMouseMove={trackMouse}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
       {page ? (
         <>
           <canvas
             ref={canvasRef}
             className="editor-canvas"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
             onMouseDown={(e) => e.preventDefault()}
             style={{ touchAction: 'none' }}
           />
@@ -2818,6 +3075,27 @@ export function Editor() {
           </div>
           <div className="page-indicator">
             {t('editor.pageIndicator', { current: currentPageIndex + 1, total: notebook?.pages.length ?? 0 })}
+          </div>
+
+          <div
+            ref={scrollVTrackRef}
+            className="editor-scrollbar editor-scrollbar-v"
+            onDragStart={(e) => e.preventDefault()}
+          >
+            <div
+              ref={scrollVThumbRef}
+              className="editor-scrollbar-thumb"
+            />
+          </div>
+          <div
+            ref={scrollHTrackRef}
+            className="editor-scrollbar editor-scrollbar-h"
+            onDragStart={(e) => e.preventDefault()}
+          >
+            <div
+              ref={scrollHThumbRef}
+              className="editor-scrollbar-thumb"
+            />
           </div>
         </>
       ) : (

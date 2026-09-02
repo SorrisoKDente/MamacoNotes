@@ -1807,6 +1807,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .editor-canvas {
@@ -1903,8 +1905,8 @@ body {
 
 .zoom-controls {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
+  bottom: 34px;
+  right: 34px;
   display: flex;
   align-items: center;
   background: var(--bg-3);
@@ -1940,8 +1942,8 @@ body {
 
 .page-indicator {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 34px;
+  left: 34px;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1949,6 +1951,68 @@ body {
   font-size: 12px;
   color: var(--fg-muted);
   z-index: 5;
+}
+
+/* Editor Scrollbars */
+.editor-scrollbar {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.3s, background 0.2s;
+  pointer-events: auto;
+  box-sizing: border-box;
+  touch-action: none;
+}
+
+.editor:hover .editor-scrollbar,
+.editor-scrollbar.active {
+  opacity: 1;
+}
+
+.editor-scrollbar:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.editor-scrollbar-v {
+  top: 6px;
+  right: 6px;
+  bottom: 26px;
+  width: 16px;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.editor-scrollbar-h {
+  left: 6px;
+  right: 26px;
+  bottom: 6px;
+  height: 16px;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.editor-scrollbar-thumb {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  opacity: 0.8;
+  border-radius: 6px;
+  transition: opacity 0.2s, background 0.2s;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+}
+
+.editor-scrollbar:hover .editor-scrollbar-thumb,
+.editor-scrollbar-thumb.active {
+  opacity: 1;
+  background: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.7);
 }
 
 /* Modals */
