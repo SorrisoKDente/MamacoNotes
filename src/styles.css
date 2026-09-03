@@ -1956,8 +1956,8 @@ body {
 /* Editor Scrollbars */
 .editor-scrollbar {
   position: absolute;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   z-index: 100;
   opacity: 0;
   transition: opacity 0.3s, background 0.2s;
@@ -1995,12 +1995,12 @@ body {
 
 .editor-scrollbar-thumb {
   position: relative;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.3);
-  opacity: 0.8;
+  background: #bdbdbd;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  opacity: 0.9;
   border-radius: 6px;
   transition: opacity 0.2s, background 0.2s;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
   cursor: pointer;
   box-sizing: border-box;
   width: 100%;
