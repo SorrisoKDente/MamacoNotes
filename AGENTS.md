@@ -30,6 +30,7 @@ Before any task, consult the [Project Structure](file:///C:/Users/Eric PC/Docume
 ### 🛠️ Specialized Skills Index
 For platform-specific constraints, activate the corresponding skill:
 
+-   **[Systematic Debugging](./.agents/skills/systematic-debugging.md):** Mandatory methodology for root cause analysis. Always activate this skill when investigating bugs or applying fixes to ensure permanent solutions.
 -   **[Android & Capacitor Bridge](./.agents/skills/android-native.md):** Rules for OOM prevention, chunked I/O, SAF (Storage Access Framework), and native plugin management.
 -   **[Synchronization Logic](./.agents/skills/sync-logic.md):** Bidirectional WebDAV algorithm rules, manifest-commit guarantees, and regression testing.
 -   **[UI/UX & CSS Standards](./.agents/skills/ui-ux-standards.md):** Modal system rules (async-only), responsive safe-areas, i18n dictionaries, and CSS naming conventions.

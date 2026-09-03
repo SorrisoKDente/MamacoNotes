@@ -30,6 +30,7 @@ Antes de qualquer tarefa, consulte o [Mapa da Estrutura](file:///C:/Users/Eric P
 ### 📚 Índice de Habilidades (Skills)
 Para detalhes técnicos e restrições específicas, consulte a skill correspondente:
 
+-   **[Debugging Sistemático](./.agents/skills/systematic-debugging.md):** Metodologia obrigatória para análise de causa raiz. Ative sempre esta skill ao investigar bugs ou aplicar correções para garantir soluções permanentes.
 -   **[Android e Bridge Capacitor](./.agents/skills/android-native.pt-BR.md):** Regras para evitar OOM, E/S em chunks, SAF e gestão de plugins nativos.
 -   **[Lógica de Sincronismo](./.agents/skills/sync-logic.pt-BR.md):** Regras do algoritmo WebDAV, garantias de manifest-commit e testes de regressão.
 -   **[Padrões de UI/UX e CSS](./.agents/skills/ui-ux-standards.pt-BR.md):** Regras de modais (apenas assíncronos), safe-areas responsivas e dicionários i18n.

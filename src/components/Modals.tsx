@@ -854,11 +854,48 @@ function ImportImageModal() {
     reader.onload = async () => {
       const dataUrl = reader.result as string
       setPreview(dataUrl)
-      await addImageToPage(dataUrl, file.name)
+      const newId = await addImageToPage(dataUrl, file.name)
+      if (newId) {
+        // Selection is handled by Editor if pasted, but for file import we might want it too.
+        // However, the modal is about to close. The Editor will re-render and can pick up the selection
+        // if we were to set it in the store. For now, following user's "selected by default" for paste.
+      }
       setBusy(false)
       close()
     }
     reader.readAsDataURL(file)
+  }
+
+  async function onPaste() {
+    try {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'))
+        if (imageType) {
+          setBusy(true)
+          const blob = await item.getType(imageType)
+          const reader = new FileReader()
+          reader.onload = async () => {
+            const dataUrl = reader.result as string
+            setPreview(dataUrl)
+            const newId = await addImageToPage(dataUrl, 'clipboard-image.png')
+            if (newId) {
+              // The Editor needs to know this ID should be selected.
+              // Since the modal is closing, we can't easily set selectionRef here.
+              // But we can trigger a re-select in the editor or just let the global Ctrl+V handle it best.
+            }
+            setBusy(false)
+            close()
+          }
+          reader.readAsDataURL(blob)
+          return
+        }
+      }
+      void alertAction(t('modal.clipboardNoImage'))
+    } catch (err) {
+      logger.error('Failed to read clipboard', err)
+      void alertAction(t('modal.clipboardNoImage'))
+    }
   }
 
   return (
@@ -872,9 +909,14 @@ function ImportImageModal() {
         style={{ display: 'none' }}
         onChange={(e) => onFile(e.target.files?.[0])}
       />
-      <button className="btn primary" onClick={() => inputRef.current?.click()} disabled={busy}>
-        {busy ? t('modal.importing') : t('modal.chooseImage')}
-      </button>
+      <div className="modal-actions" style={{ justifyContent: 'center', marginTop: '10px' }}>
+        <button className="btn primary" onClick={() => inputRef.current?.click()} disabled={busy}>
+          {busy ? t('modal.importing') : t('modal.chooseImage')}
+        </button>
+        <button className="btn" onClick={onPaste} disabled={busy}>
+          {t('modal.pasteFromClipboard')}
+        </button>
+      </div>
       {preview && <div className="import-preview"><img src={preview} alt={t('modal.preview')} /></div>}
       <div className="modal-actions">
         <button className="btn" onClick={close}>{t('modal.cancel')}</button>
@@ -1784,7 +1826,7 @@ function MoveModal() {
 
   async function submit() {
     if (ids) {
-      await moveSelected(folderId)
+      await moveSelected(folderId, ids)
     } else if (id) {
       if (isFolder) {
         await moveFolder(id, folderId)

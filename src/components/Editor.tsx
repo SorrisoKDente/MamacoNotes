@@ -1083,11 +1083,13 @@ export function Editor() {
   function copySelection() {
     const snap = snapshotSelected()
     if (snap.strokes.length === 0 && snap.images.length === 0 && snap.texts.length === 0) return
-    clipboardRef.current = { strokes: snap.strokes, images: snap.images, texts: snap.texts }
+    const data = { strokes: snap.strokes, images: snap.images, texts: snap.texts }
+    clipboardRef.current = data
+    void navigator.clipboard.writeText('MamacoData:' + JSON.stringify(data))
   }
 
-  function pasteSelection() {
-    const clip = clipboardRef.current
+  function pasteSelection(data?: typeof clipboardRef.current) {
+    const clip = data ?? clipboardRef.current
     if (!clip || (clip.strokes.length === 0 && clip.images.length === 0 && clip.texts.length === 0)) return
     const pg = pageRef.current
     if (!pg) return
@@ -2934,9 +2936,6 @@ export function Editor() {
         } else if (key === 'x') {
           e.preventDefault()
           cutSelectionRef.current()
-        } else if (key === 'v') {
-          e.preventDefault()
-          pasteSelectionRef.current()
         } else if (key === 'd') {
           e.preventDefault()
           duplicateSelectionRef.current()
@@ -2978,6 +2977,19 @@ export function Editor() {
         fitPage()
       }, 150)
     }
+    window.addEventListener('ink:zoom', onZoom)
+    window.addEventListener('ink:recenter', onRecenter)
+    window.addEventListener('ink:add-page', onAddPage)
+    window.addEventListener('ink:selection-action', onSelectionAction)
+    window.addEventListener('ink:selection-rotate', onSelectionRotate)
+    window.addEventListener('ink:image-rotate', onImageRotate)
+    window.addEventListener('ink:text-update', onTextUpdate)
+    window.addEventListener('ink:text-rotate', onTextRotate)
+    window.addEventListener('ink:text-commit-center', onTextCommitCenter)
+    window.addEventListener('ink:text-delete', onTextDelete)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('ink:esc', onInkEsc)
     window.addEventListener('resize', onResize)
     window.visualViewport?.addEventListener('resize', onResize)
     return () => {
@@ -3000,6 +3012,125 @@ export function Editor() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
+
+  useEffect(() => {
+    const onPasteGlobal = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable ||
+          target.closest('.form-input') ||
+          target.closest('.title-input'))
+
+      if (isTyping) return
+
+      const clipboardData = e.clipboardData
+      if (!clipboardData) return
+
+      const items = Array.from(clipboardData.items)
+      const text = clipboardData.getData('text/plain')
+
+      // Priority 1: System Image/File (Always wins if present, as Mamaco only writes text)
+      const imageItem = items.find((item) => item.type.startsWith('image/'))
+      if (imageItem) {
+        const file = imageItem.getAsFile()
+        if (file) {
+          e.preventDefault()
+          const reader = new FileReader()
+          reader.onload = async () => {
+            const dataUrl = reader.result as string
+            const engine = engineRef.current
+            const pg = pageRef.current
+            if (!engine || !pg) return
+
+            const mx = mousePosRef.current
+            let center: Pt | undefined = undefined
+
+            if (mx.x >= 0 && mx.y >= 0) {
+              const doc = engine.toDocumentCoords(mx.x, mx.y)
+              const hitIdx = pageUnderPoint(pagesRef.current, offsetsRef.current, doc.x, doc.y)
+              if (hitIdx !== null) {
+                center = engine.toPageCoordsAt(mx.x, mx.y, hitIdx)
+                if (hitIdx !== currentPageIndexRef.current) {
+                  useAppStore.getState().selectPage(hitIdx)
+                }
+              }
+            }
+
+            const newId = await useAppStore.getState().addImageToPage(dataUrl, file.name, center)
+            if (newId) {
+              setTool('select')
+              selectionRef.current = { strokes: new Set(), images: new Set([newId]), texts: new Set() }
+              setSelectedImageId(newId)
+              requestRenderRef.current()
+            }
+          }
+          reader.readAsDataURL(file)
+          return
+        }
+      }
+
+      // Priority 2: Internal Mamaco Clipboard (via System Clipboard Text)
+      if (text.startsWith('MamacoData:')) {
+        e.preventDefault()
+        try {
+          const json = text.substring('MamacoData:'.length)
+          const data = JSON.parse(json)
+          pasteSelectionRef.current(data)
+          return
+        } catch (err) {
+          console.error('Failed to parse Mamaco clipboard data', err)
+          // fallback to regular text if parsing fails
+        }
+      }
+
+      // Priority 3: System Text
+      if (text && text.trim()) {
+        e.preventDefault()
+        const engine = engineRef.current
+        const pg = pageRef.current
+        if (!engine || !pg) return
+
+        const mx = mousePosRef.current
+        let center: Pt | undefined = undefined
+
+        if (mx.x >= 0 && mx.y >= 0) {
+          const doc = engine.toDocumentCoords(mx.x, mx.y)
+          const hitIdx = pageUnderPoint(pagesRef.current, offsetsRef.current, doc.x, doc.y)
+          if (hitIdx !== null) {
+            center = engine.toPageCoordsAt(mx.x, mx.y, hitIdx)
+            if (hitIdx !== currentPageIndexRef.current) {
+              useAppStore.getState().selectPage(hitIdx)
+            }
+          }
+        }
+
+        void useAppStore
+          .getState()
+          .addTextToPage(text, center)
+          .then((newId) => {
+            if (newId) {
+              setTool('select')
+              selectionRef.current = {
+                strokes: new Set(),
+                images: new Set(),
+                texts: new Set([newId]),
+              }
+              setSelectedImageId(null)
+              requestRenderRef.current()
+            }
+          })
+      }
+    }
+
+    window.addEventListener('paste', onPasteGlobal)
+    return () => {
+      window.removeEventListener('paste', onPasteGlobal)
+    }
+  }, [setTool, setSelectedImageId])
 
   const showToolCursor = !settings.hideToolCursor
   const cursorClass =

@@ -28,6 +28,7 @@ import {
   makeLayer,
   makeNotebook,
   makePage,
+  makeTextElement,
   newId,
   normalizePage,
   uid,
@@ -364,7 +365,7 @@ interface AppState {
   cutSelected: () => void
   pasteClipboard: () => Promise<void>
   favoriteSelected: () => Promise<void>
-  moveSelected: (targetFolderId: string | null) => Promise<void>
+  moveSelected: (targetFolderId: string | null, ids?: string[]) => Promise<void>
   duplicateSelected: () => Promise<void>
   deleteSelected: (scope?: DeleteScope) => Promise<void>
 
@@ -441,7 +442,8 @@ interface AppState {
   redo: () => Promise<void>
   canUndo: boolean
   canRedo: boolean
-  addImageToPage: (dataUrl: string, name: string, center?: { x: number; y: number }) => Promise<void>
+  addImageToPage: (dataUrl: string, name: string, center?: { x: number; y: number }) => Promise<string | undefined>
+  addTextToPage: (text: string, center?: { x: number; y: number }) => Promise<string | undefined>
   addPdfToPage: (dataUrl: string, name: string) => Promise<void>
   importPdfNotebook: (
     name: string,
@@ -925,17 +927,70 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    async moveSelected(targetFolderId) {
-      const ids = get().selectedIds
+    async moveSelected(targetFolderId: string | null, idsToMove?: string[]) {
+      const ids = idsToMove ?? get().selectedIds
       if (ids.length === 0) return
+
+      const now = Date.now()
+      const currentNotebooks = get().notebooks
+      const currentFolders = get().folders
+
+      const movedNotebooks: string[] = []
+      const movedFolders: string[] = []
+
       for (const id of ids) {
-        if (get().notebooks.some(n => n.id === id)) {
-          await get().moveNotebook(id, targetFolderId)
-        } else if (get().folders.some(f => f.id === id)) {
-          await get().moveFolder(id, targetFolderId)
+        if (currentNotebooks.some((n) => n.id === id)) movedNotebooks.push(id)
+        else if (currentFolders.some((f) => f.id === id)) movedFolders.push(id)
+      }
+
+      if (movedNotebooks.length === 0 && movedFolders.length === 0) return
+
+      const nextNotebooks = [...currentNotebooks]
+      const nextFolders = [...currentFolders]
+      const dbUpdates: Promise<void>[] = []
+
+      if (movedNotebooks.length > 0) {
+        const target = targetFolderId ?? null
+        const siblings = sortNotebooksByOrder(
+          currentNotebooks.filter((n) => (n.folderId ?? null) === target && !ids.includes(n.id)),
+        )
+        let nextOrd = siblings.length > 0 ? (siblings[siblings.length - 1].order ?? 0) + 1 : 0
+
+        for (const id of movedNotebooks) {
+          const idx = nextNotebooks.findIndex((n) => n.id === id)
+          if (idx >= 0) {
+            const nb = { ...nextNotebooks[idx], folderId: target, order: nextOrd++, updatedAt: now }
+            nextNotebooks[idx] = nb as any
+            dbUpdates.push(db.updateNotebookMeta(nb as any))
+          }
         }
       }
-      set({ selectedIds: [] })
+
+      if (movedFolders.length > 0) {
+        const target = targetFolderId ?? null
+        const siblings = sortFoldersByOrder(
+          currentFolders.filter((f) => (f.parentId ?? null) === target && !ids.includes(f.id)),
+        )
+        let nextOrd = siblings.length > 0 ? (siblings[siblings.length - 1].order ?? 0) + 1 : 0
+
+        for (const id of movedFolders) {
+          const idx = nextFolders.findIndex((f) => f.id === id)
+          if (idx >= 0) {
+            const f = { ...nextFolders[idx], parentId: target, order: nextOrd++ }
+            nextFolders[idx] = f
+            dbUpdates.push(db.putFolder(f))
+          }
+        }
+      }
+
+      set({
+        notebooks: sortNotebooksByOrder(nextNotebooks),
+        folders: sortFoldersByOrder(nextFolders),
+        selectedIds: [],
+        dataVersion: get().dataVersion + 1,
+      })
+
+      await Promise.all(dbUpdates)
     },
 
     async duplicateSelected() {
@@ -2032,6 +2087,29 @@ export const useAppStore = create<AppState>((set, get) => {
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
+      return el.id
+    },
+
+    async addTextToPage(text, center) {
+      const notebook = get().activeNotebook
+      if (!notebook) return
+      const page = notebook.pages[get().currentPageIndex]
+      if (!page) return
+      const layer = getActiveLayer(page)
+      if (layer.locked) return
+      get().pushUndo()
+      const st = get().settings
+      const cx = center?.x ?? page.width / 2
+      const cy = center?.y ?? page.height / 2
+      const el = makeTextElement(text, cx, cy, st)
+      // center it
+      el.x = Math.round(cx - 200) // approx width, will be updated on render
+      el.y = Math.round(cy - 12)  // approx half height
+      layer.texts.push(el)
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+      return el.id
     },
 
     async addPdfToPage(dataUrl, name) {

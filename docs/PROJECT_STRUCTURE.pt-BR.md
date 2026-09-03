@@ -753,7 +753,8 @@ Fluxo e arquivos envolvidos:
 
 | Assunto | Arquivo(s) |
 |---|---|
-| Importar imagem na página | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`) |
+| Importar imagem na página | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`). Suporta colar da área de transferência via botão. |
+| Colar da área de transferência (Editor) | `Editor.tsx` (`onPasteGlobal`). Pressionar **Ctrl+V** em qualquer lugar do editor cola uma imagem da área de transferência na posição do mouse (ou centralizada na página atual). |
 | Importar PDF como fundo de página (via criação de página/caderno → "Importar modelo (imagem/PDF)") | `Modals.tsx` (`AddPageModal`/`NewNotebookModal` → `TemplatePicker`, `buildPdfTemplatePage`) + `store.ts` (`createNotebook`, `addPage`, `addPagesFromTemplate`) |
 | Importar PDF como novo caderno | `Modals.tsx` (`ImportPdfNoteModal`) + `store.ts` (`importPdfNotebook`) |
 | Renderizar PDF → imagens | `src/utils/pdf.ts` |

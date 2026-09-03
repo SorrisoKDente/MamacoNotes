@@ -51,6 +51,7 @@ export function Dashboard() {
   const favoriteSelected = useAppStore((s) => s.favoriteSelected)
   const duplicateSelected = useAppStore((s) => s.duplicateSelected)
   const deleteSelected = useAppStore((s) => s.deleteSelected)
+  const moveSelected = useAppStore((s) => s.moveSelected)
   const clipboard = useAppStore((s) => s.clipboard)
   const reorderNotebook = useAppStore((s) => s.reorderNotebook)
   const reorderFolder = useAppStore((s) => s.reorderFolder)
@@ -306,24 +307,48 @@ export function Dashboard() {
 
   function itemFromPoint(x: number, y: number): { type: 'folder' | 'notebook'; id: string; isSidebar?: boolean } | null {
     const els = document.elementsFromPoint(x, y)
+
+    // First pass: Prioritize containers (root button or folders)
     for (const el of els) {
       if (!(el instanceof HTMLElement)) continue
 
-      const itemEl = el.closest('.dashboard-item')
-      if (itemEl instanceof HTMLElement) {
-        const id = itemEl.dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
-          const type = itemEl.classList.contains('folder') ? 'folder' : 'notebook'
-          return { type, id }
+      const rootEl = el.closest('[data-is-root="true"]')
+      if (rootEl instanceof HTMLElement) return { type: 'folder', id: 'root', isSidebar: true }
+
+      const treeEl = el.closest('.tree-item-row')
+      if (treeEl instanceof HTMLElement && treeEl.classList.contains('folder')) {
+        const id = (treeEl as any).dataset.id
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
+          return { type: 'folder', id, isSidebar: true }
         }
       }
+
+      const itemEl = el.closest('.dashboard-item')
+      if (itemEl instanceof HTMLElement && itemEl.classList.contains('folder')) {
+        const id = itemEl.dataset.id
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
+          return { type: 'folder', id }
+        }
+      }
+    }
+
+    // Second pass: Any item (for reordering)
+    for (const el of els) {
+      if (!(el instanceof HTMLElement)) continue
 
       const treeEl = el.closest('.tree-item-row')
       if (treeEl instanceof HTMLElement) {
         const id = (treeEl as any).dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id)) {
-          const type = treeEl.classList.contains('folder') ? 'folder' : 'notebook'
-          return { type, id, isSidebar: true }
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
+          return { type: treeEl.classList.contains('folder') ? 'folder' : 'notebook', id, isSidebar: true }
+        }
+      }
+
+      const itemEl = el.closest('.dashboard-item')
+      if (itemEl instanceof HTMLElement) {
+        const id = itemEl.dataset.id
+        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
+          return { type: itemEl.classList.contains('folder') ? 'folder' : 'notebook', id }
         }
       }
     }
@@ -340,32 +365,41 @@ export function Dashboard() {
       return
     }
 
-    if (target.type === 'folder' || target.isSidebar) {
-      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest(target.isSidebar ? '.tree-item-row' : '.dashboard-item')
-      if (el instanceof HTMLElement) {
-        const rect = el.getBoundingClientRect()
-        const relativeY = e.clientY - rect.top
-        const relativeX = e.clientX - rect.left
+    if (target.id === 'root') {
+      setDropTarget({ id: 'root', type: 'into' })
+      return
+    }
 
-        if (target.isSidebar) {
+    const els = document.elementsFromPoint(e.clientX, e.clientY)
+    const targetEl = els.find(el => {
+      if (!(el instanceof HTMLElement)) return false
+      if (target.id === 'root') return !!el.closest('[data-is-root="true"]')
+      const id = target.isSidebar ? (el.closest('.tree-item-row') as any)?.dataset?.id : el.closest('.dashboard-item')?.getAttribute('data-id')
+      return id === target.id
+    }) as HTMLElement | undefined
+
+    if (targetEl) {
+      const rect = targetEl.getBoundingClientRect()
+      const relativeY = e.clientY - rect.top
+      const relativeX = e.clientX - rect.left
+
+      if (target.isSidebar) {
+        if (target.type === 'notebook') {
+          // Sidebar notebook: only before/after
+          if (relativeY < rect.height / 2) setDropTarget({ id: target.id, type: 'before' })
+          else setDropTarget({ id: target.id, type: 'after' })
+        } else {
+          // Sidebar folder: before, after or into
           if (relativeY < rect.height * 0.25) setDropTarget({ id: target.id, type: 'before' })
           else if (relativeY > rect.height * 0.75) setDropTarget({ id: target.id, type: 'after' })
           else setDropTarget({ id: target.id, type: 'into' })
-        } else {
-          // In grid, middle is "into", edges are "before/after"
-          if (relativeX < rect.width * 0.2) setDropTarget({ id: target.id, type: 'before' })
-          else if (relativeX > rect.width * 0.8) setDropTarget({ id: target.id, type: 'after' })
-          else if (target.type === 'folder') setDropTarget({ id: target.id, type: 'into' })
-          else setDropTarget({ id: target.id, type: 'after' })
         }
-      }
-    } else {
-      // It's a notebook in grid
-      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.dashboard-item')
-      if (el instanceof HTMLElement) {
-        const rect = el.getBoundingClientRect()
-        const relativeX = e.clientX - rect.left
-        if (relativeX < rect.width / 2) setDropTarget({ id: target.id, type: 'before' })
+      } else {
+        // Grid/List: only folders accept "into"
+        // Refined: larger "into" zone (center 80% of the item)
+        if (relativeX < rect.width * 0.1) setDropTarget({ id: target.id, type: 'before' })
+        else if (relativeX > rect.width * 0.9) setDropTarget({ id: target.id, type: 'after' })
+        else if (target.type === 'folder') setDropTarget({ id: target.id, type: 'into' })
         else setDropTarget({ id: target.id, type: 'after' })
       }
     }
@@ -401,11 +435,18 @@ export function Dashboard() {
     if (!dropTarget) return
 
     const { id, type } = dropTarget
-    if (type === 'into') {
-      if (item.type === 'notebook') void reorderNotebook(item.id, id, null)
-      else void reorderFolder(item.id, id, null)
+    const isMultiDrag = selectedIds.includes(item.id)
+
+    if (id === 'root' || type === 'into') {
+      const targetFolderId = id === 'root' ? null : id
+      if (isMultiDrag) {
+        void moveSelected(targetFolderId)
+      } else {
+        if (item.type === 'notebook') void reorderNotebook(item.id, targetFolderId, null)
+        else void reorderFolder(item.id, targetFolderId, null)
+      }
     } else {
-      // Reordering
+      // Reordering (always single item for now as reorder expects specific order)
       if (item.type === 'notebook') {
         const targetNb = notebooks.find(n => n.id === id)
         const folderId = targetNb ? targetNb.folderId : selectedFolderId
@@ -416,7 +457,15 @@ export function Dashboard() {
         if (idx !== -1) {
           finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
         }
-        void reorderNotebook(item.id, folderId, finalBeforeId)
+
+        if (isMultiDrag) {
+          // Move all selected to this folder, then reorder the specific one
+          void moveSelected(folderId).then(() => {
+            void reorderNotebook(item.id, folderId, finalBeforeId)
+          })
+        } else {
+          void reorderNotebook(item.id, folderId, finalBeforeId)
+        }
       } else {
         const targetF = folders.find(f => f.id === id)
         const parentId = targetF ? targetF.parentId : null
@@ -427,7 +476,14 @@ export function Dashboard() {
         if (idx !== -1) {
           finalBeforeId = type === 'before' ? id : (siblings[idx + 1]?.id ?? null)
         }
-        void reorderFolder(item.id, parentId, finalBeforeId)
+
+        if (isMultiDrag) {
+          void moveSelected(parentId).then(() => {
+            void reorderFolder(item.id, parentId, finalBeforeId)
+          })
+        } else {
+          void reorderFolder(item.id, parentId, finalBeforeId)
+        }
       }
     }
     suppressClickRef.current = true
@@ -488,8 +544,8 @@ export function Dashboard() {
           return (
             <div key={f.id} className="tree-item">
               <div
-                className={`tree-item-row folder ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''}`}
-                style={{ paddingLeft: level * 16 + 8 }}
+                className={`tree-item-row folder ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''} ${dragItem?.id === f.id ? 'dragging' : ''}`}
+                style={{ paddingLeft: level * 16 + 8, ...(dragItem?.id === f.id ? { pointerEvents: 'none' } : {}) }}
                 data-id={f.id}
                 onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
                 onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
@@ -497,7 +553,6 @@ export function Dashboard() {
                 onPointerMove={(e) => onItemPointerMove(e as any, 'folder', f.id)}
                 onPointerUp={onItemPointerUp}
                 onPointerCancel={onItemPointerUp}
-                onPointerLeave={onItemPointerUp}
               >
                 {dropTarget?.id === f.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
                 <div
@@ -524,8 +579,8 @@ export function Dashboard() {
           return (
             <div
               key={nb.id}
-              className={`tree-item-row notebook ${isSelected ? 'selected' : ''}`}
-              style={{ paddingLeft: level * 16 + 8 }}
+              className={`tree-item-row notebook ${isSelected ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
+              style={{ paddingLeft: level * 16 + 8, ...(dragItem?.id === nb.id ? { pointerEvents: 'none' } : {}) }}
               data-id={nb.id}
               onClick={(e) => handleItemClick(e as any, 'notebook', nb.id)}
               onContextMenu={(e) => handleContextMenu(e as any, 'notebook', nb.id)}
@@ -533,7 +588,6 @@ export function Dashboard() {
               onPointerMove={(e) => onItemPointerMove(e as any, 'notebook', nb.id)}
               onPointerUp={onItemPointerUp}
               onPointerCancel={onItemPointerUp}
-              onPointerLeave={onItemPointerUp}
             >
               {dropTarget?.id === nb.id && dropTarget.type === 'before' && <div className="dashboard-drop-indicator horizontal" style={{ top: -1 }} />}
               <div className="tree-chevron-placeholder" />
@@ -550,7 +604,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+    <div className={`dashboard ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${dragItem ? 'dashboard-dragging-active' : ''}`}>
       <div
         className="dashboard-backdrop"
         onClick={() => setSidebarCollapsed(true)}
@@ -562,7 +616,8 @@ export function Dashboard() {
 
         <div className="sidebar-scroll">
           <button
-            className={`sidebar-btn ${filter === 'all' && !selectedFolderId ? 'active' : ''}`}
+            className={`sidebar-btn ${filter === 'all' && !selectedFolderId ? 'active' : ''} ${dropTarget?.id === 'root' ? 'drop-target' : ''}`}
+            data-is-root="true"
             onClick={() => { setFilter('all'); selectFolder(null); setSearch('') }}
           >
             <IconAll />
@@ -713,13 +768,13 @@ export function Dashboard() {
                   key={f.id}
                   data-id={f.id}
                   className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${isTarget && dropTarget.type === 'into' ? 'drop-target' : ''}`}
+                  style={dragItem?.id === f.id ? { pointerEvents: 'none' } : undefined}
                   onClick={(e) => handleItemClick(e, 'folder', f.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'folder', f.id)}
                   onPointerDown={(e) => onItemPointerDown(e, 'folder', f.id)}
                   onPointerMove={(e) => onItemPointerMove(e, 'folder', f.id)}
                   onPointerUp={onItemPointerUp}
                   onPointerCancel={onItemPointerUp}
-                  onPointerLeave={onItemPointerUp}
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
                   <button
@@ -754,13 +809,13 @@ export function Dashboard() {
                   key={nb.id}
                   data-id={nb.id}
                   className={`dashboard-item notebook ${selectedIds.includes(nb.id) ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
+                  style={dragItem?.id === nb.id ? { pointerEvents: 'none' } : undefined}
                   onClick={(e) => handleItemClick(e, 'notebook', nb.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'notebook', nb.id)}
                   onPointerDown={(e) => onItemPointerDown(e, 'notebook', nb.id)}
                   onPointerMove={(e) => onItemPointerMove(e, 'notebook', nb.id)}
                   onPointerUp={onItemPointerUp}
                   onPointerCancel={onItemPointerUp}
-                  onPointerLeave={onItemPointerUp}
                 >
                   {isTarget && dropTarget.type === 'before' && <div className="dashboard-drop-indicator vertical" style={{ left: -12 }} />}
                   <button

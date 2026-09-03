@@ -761,7 +761,8 @@ Flow and files involved:
 
 | Subject | File(s) |
 |---|---|
-| Import image to page | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`) |
+| Import image to page | `Modals.tsx` (`ImportImageModal`) + `store.ts` (`addImageToPage`). Supports pasting from clipboard via button. |
+| Paste from clipboard (Editor) | `Editor.tsx` (`onPasteGlobal`). Pressing **Ctrl+V** anywhere in the editor pastes an image from the clipboard at the mouse position (or centered on the current page). |
 | Import PDF as page background (via page/notebook creation → "Import template (image/PDF)") | `Modals.tsx` (`AddPageModal`/`NewNotebookModal` → `TemplatePicker`, `buildPdfTemplatePage`) + `store.ts` (`createNotebook`, `addPage`, `addPagesFromTemplate`) |
 | Import PDF as new notebook | `Modals.tsx` (`ImportPdfNoteModal`) + `store.ts` (`importPdfNotebook`) |
 | Render PDF → images | `src/utils/pdf.ts` |
