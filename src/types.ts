@@ -188,6 +188,7 @@ export interface CloudSettings {
   webdavUrl: string
   webdavUsername: string
   webdavPassword: string
+  rememberPassword: boolean
   webdavPath: string
   autoSync: boolean
   lastSyncAt: number | null
@@ -377,6 +378,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     webdavUrl: '',
     webdavUsername: '',
     webdavPassword: '',
+    rememberPassword: true,
     webdavPath: '/MamacoNotes',
     autoSync: false,
     lastSyncAt: null,

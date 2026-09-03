@@ -1855,7 +1855,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async syncNow() {
       const cloud = get().settings.cloud
-      if (!cloud.webdavUrl) return null
+      if (!cloud.webdavUrl || !cloud.enabled) return null
       if (syncRunning) {
         syncQueued = true
         return null

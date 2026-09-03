@@ -222,7 +222,7 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF used as page background (resides **at page level**, below all layers; not a `Layer`).
 - `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`, **layers panel width via `layersWidth`**).
-- `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — sync data.
+- `CloudSettings { enabled, webdavUrl, webdavUsername, webdavPassword, rememberPassword, webdavPath, autoSync, lastSyncAt }` — sync data. `rememberPassword` (boolean) controls if the password is wiped on disconnect.
 - `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **local trash entry** (NOT synced). One entry per deleted item: deleting a folder produces one entry for the folder, one for each subfolder and one for each notebook inside (each with its own `parentId`) so every item can be restored individually. `cloudKeepsCopy` is `true` when the item was deleted "só local" with a cloud configured (the heavy `data` is discarded; the item can only be brought back with "Restaurar da nuvem"). When `false` (deleted "local + nuvem" or no cloud), `data` holds the full item for a cloud-less restore.
 
 > Whenever you need to change the format of persisted data, start with `src/types.ts`
@@ -465,12 +465,18 @@ Key points:
   (`ctx.save`/`restore` per layer). The current stroke (`currentStroke`) is drawn on top,
   on the current page. Selection/hit-test functions (`selectionBounds`, `drawStrokeBoxes`,
   `drawImageBoxes`, text boxes) iterate through the arrays of the **active layer**.
+- **Scrollbars**: High-contrast interactive scrollbars (white thumb with dark border)
+  are rendered as overlays. Position and size are calculated in `updateScrollbars()`
+  within the RAF loop, using `getPanLimits()` to map the total navigable area.
+- **Pan Limits**: Movement is restricted by `clampPan()` using a fixed `MARGIN`
+  (e.g., 60px) beyond document edges. Limits are recalculated on zoom/resize, ensuring
+  the "infinite void" doesn't grow when zooming out.
 - **Coordinates**: `toPageCoords` / `toDocumentCoords` / `toPageCoordsAt` / `toScreenCoords`
   conversions (apply pan, zoom, page offset, and page rotation).
 - **Interaction**: `Editor.tsx` implements all gestures via `PointerEvent` handlers
-  (`onPointerDown/Move/Up`), a `dragRef` with a `kind` that identifies the operation:
-  `pan | draw | erase | select-move | select-resize | select-rotate | region-draw |
-  region-move | text-rotate | text-resize | page-rotate | group-resize | group-rotate`.
+  on the main container (to capture scrollbar drags). Includes `pan | draw | erase |
+  select-move | select-resize | select-rotate | region-draw | region-move |
+  text-rotate | text-resize | page-rotate | group-resize | group-rotate | scroll-v | scroll-h`.
 - **Multi-touch (mobile)**: `Editor.tsx` tracks active pointers in `activePointersRef`
   (updated in `onPointerDown`/`onPointerMove`). A second finger does not immediately
   interrupt a stroke: it only activates the move/pinch gesture after moving more than
@@ -705,9 +711,9 @@ Flow and files involved:
 
 ### Drawing / Editing Tools
 
-| Subject | File(s) |
-|---|---|
-| Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Key state is tracked via `pressedKeysRef`. Releasing the key reverts to the previous tool immediately. |
+| Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicking anywhere inside a selection bounding box allows dragging. |
+| Scrollbars (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). High-contrast design, interactive, and auto-hides after 1.5s. |
+| Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Restricted by `getPanLimits` and `clampPan`. |
 | Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
 | Stroke eraser | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`) |
 | Image eraser | `src/utils/imageErase.ts` + `Editor.tsx` |

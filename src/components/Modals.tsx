@@ -1024,6 +1024,8 @@ function SettingsModal() {
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   const [logs, setLogs] = useState(() => logger.getLogs())
   const [search, setSearch] = useState('')
+  const [connectBusy, setConnectBusy] = useState(false)
+  const [connectError, setConnectError] = useState<string | null>(null)
 
   useEffect(() => {
     if (tab === 'logs') {
@@ -1088,6 +1090,26 @@ function SettingsModal() {
 
   function cancelConflict() {
     setConflict(null)
+  }
+
+  async function handleConnect() {
+    setConnectBusy(true)
+    setConnectError(null)
+    const res = await testWebdavConnection(settings.cloud)
+    if (res.ok) {
+      await setSettings({ cloud: { ...settings.cloud, enabled: true } })
+    } else {
+      setConnectError(res.message)
+    }
+    setConnectBusy(false)
+  }
+
+  async function handleDisconnect() {
+    const nextCloud = { ...settings.cloud, enabled: false }
+    if (!settings.cloud.rememberPassword) {
+      nextCloud.webdavPassword = ''
+    }
+    await setSettings({ cloud: nextCloud })
   }
 
   async function doExport() {
@@ -1391,12 +1413,32 @@ function SettingsModal() {
 
       {tab === 'nuvem' && (
         <div className="settings-body">
+          <div className="cloud-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: settings.cloud.enabled ? 'rgba(74, 144, 226, 0.15)' : 'var(--bg-3)', borderColor: settings.cloud.enabled ? 'var(--accent)' : 'var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: settings.cloud.enabled ? '#2ecc71' : '#e74c3c' }} />
+              <span style={{ fontWeight: 600, color: settings.cloud.enabled ? 'var(--accent-2)' : 'var(--fg-muted)' }}>
+                {settings.cloud.enabled ? t('modal.connectedStatus') : t('modal.disconnectedStatus')}
+              </span>
+            </div>
+            {settings.cloud.enabled ? (
+              <button className="btn small danger" onClick={handleDisconnect}>{t('modal.disconnect')}</button>
+            ) : (
+              <button className="btn small primary" onClick={handleConnect} disabled={connectBusy || !settings.cloud.webdavUrl}>
+                {connectBusy ? t('modal.connecting') : t('modal.connect')}
+              </button>
+            )}
+          </div>
+
+          {connectError && <div className="modal-result error" style={{ marginBottom: '12px' }}>{connectError}</div>}
+
           <label className="form-label">{t('modal.webdavUrl')}</label>
           <input className="form-input" placeholder={t('modal.webdavUrlPlaceholder')}
             value={settings.cloud.webdavUrl}
+            readOnly={settings.cloud.enabled}
             onChange={(e) => setSettings({ cloud: { ...settings.cloud, webdavUrl: e.target.value } })} />
           <label className="form-label">{t('modal.username')}</label>
           <input className="form-input" value={settings.cloud.webdavUsername}
+            readOnly={settings.cloud.enabled}
             onChange={(e) => setSettings({ cloud: { ...settings.cloud, webdavUsername: e.target.value } })} />
           <label className="form-label">{t('modal.password')}</label>
           <div className="password-field">
@@ -1404,20 +1446,36 @@ function SettingsModal() {
               className="form-input"
               type={showPassword ? 'text' : 'password'}
               value={settings.cloud.webdavPassword}
+              readOnly={settings.cloud.enabled}
               onChange={(e) => setSettings({ cloud: { ...settings.cloud, webdavPassword: e.target.value } })}
             />
-            <button
-              type="button"
-              className="password-toggle"
-              title={showPassword ? t('modal.hidePassword') : t('modal.showPassword')}
-              aria-label={showPassword ? t('modal.hidePassword') : t('modal.showPassword')}
-              onClick={() => setShowPassword((v) => !v)}
-            >
-              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-            </button>
+            {!settings.cloud.enabled && (
+              <button
+                type="button"
+                className="password-toggle"
+                title={showPassword ? t('modal.hidePassword') : t('modal.showPassword')}
+                aria-label={showPassword ? t('modal.hidePassword') : t('modal.showPassword')}
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+              </button>
+            )}
           </div>
+
+          <div className="settings-check">
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.cloud.rememberPassword}
+                onChange={(e) => setSettings({ cloud: { ...settings.cloud, rememberPassword: e.target.checked } })}
+              />
+              {t('modal.rememberPassword')}
+            </label>
+          </div>
+
           <label className="form-label">{t('modal.remoteBaseFolder')}</label>
           <input className="form-input" value={settings.cloud.webdavPath}
+            readOnly={settings.cloud.enabled}
             onChange={(e) => setSettings({ cloud: { ...settings.cloud, webdavPath: e.target.value } })} />
           <div className="settings-check">
             <label>
@@ -1576,17 +1634,21 @@ function CloudSyncModal() {
           <span>{t('modal.noSyncYet')}</span>
         )}
       </div>
-      {!settings.cloud.webdavUrl && (
+      {!settings.cloud.webdavUrl ? (
         <div className="modal-hint warn">
           {t('modal.webdavFirst')}
         </div>
-      )}
+      ) : !settings.cloud.enabled ? (
+        <div className="modal-hint warn">
+          {t('modal.webdavDisconnectedHint')}
+        </div>
+      ) : null}
       {status && <div className="modal-result">{status}</div>}
       {error && <div className="modal-result error">{error}</div>}
       <div className="modal-actions">
         <button className="btn" onClick={test} disabled={busy}>{t('modal.testConnection')}</button>
         <button className="btn" onClick={doCreateFolders} disabled={busy || !settings.cloud.webdavUrl}>{t('modal.createFolders')}</button>
-        <button className="btn primary" onClick={doSync} disabled={busy}>
+        <button className="btn primary" onClick={doSync} disabled={busy || !settings.cloud.enabled}>
           {busy ? t('modal.syncing') : t('modal.syncNow')}
         </button>
         <button className="btn" onClick={close}>{t('modal.close')}</button>

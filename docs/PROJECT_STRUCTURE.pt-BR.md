@@ -221,7 +221,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt }`.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF usado como fundo da página (fica **no nível da página**, abaixo de todas as camadas; não é uma `Layer`).
 - `AppSettings` — todas as configurações (cor/tamanho da caneta, eraser, modos, atalhos, `cloud`, ocultar barra superior/ferramentas via `hideTopBar`/`hideToolbar`, ocultar barra de cadernos/preview de páginas via `hideSidebar`/`hidePageList`, ocultar nº de páginas do caderno via `hidePageCount`, ocultar o cursor da ferramenta sobre a página via `hideToolCursor`, ignorar uma versão específica de atualização via `ignoreVersion`, seleção apenas da parte delimitada via `selectDelimitedOnly`, largura da barra de cadernos via `sidebarWidth`, **largura do painel de camadas via `layersWidth`**).
-- `CloudSettings` / `CloudSyncState` / `SyncManifest` / `SyncConflictItem` — dados do sync.
+- `CloudSettings { enabled, webdavUrl, webdavUsername, webdavPassword, rememberPassword, webdavPath, autoSync, lastSyncAt }` — dados do sync. `rememberPassword` (boolean) controla se a senha é apagada ao desconectar.
 - `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **entrada da lixeira local** (NÃO sincronizada). Uma entrada por item excluído: excluir uma pasta produz uma entrada para a pasta, uma para cada subpasta e uma para cada caderno dentro (cada uma com seu `parentId`) para que cada item possa ser restaurado individualmente. `cloudKeepsCopy` é `true` quando o item foi excluído "só local" com nuvem configurada (o `data` pesado é descartado; o item só volta com "Restaurar da nuvem"). Quando `false` (excluído "local + nuvem" ou sem nuvem), `data` guarda o item completo para restauração sem nuvem.
 
 > Sempre que precisar alterar o formato de um dado persistido, comece por `src/types.ts`
@@ -465,12 +465,18 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   (`ctx.save`/`restore` por camada). O traço atual (`currentStroke`) é desenhado por cima,
   na página corrente. As funções de seleção/hit-test (`selectionBounds`, `drawStrokeBoxes`,
   `drawImageBoxes`, caixas de texto) iteram os arrays da **camada ativa**.
+- **Barras de Rolagem**: Barras interativas de alto contraste (thumb branca com borda escura) 
+  renderizadas como overlays. Posição e tamanho são calculados em `updateScrollbars()` 
+  dentro do loop RAF, usando `getPanLimits()` para mapear a área navegável total.
+- **Limites de Pan**: O movimento é restrito por `clampPan()` usando uma `MARGIN` fixa 
+  (ex: 60px) além das bordas do documento. Os limites são recalculados no zoom/resize, 
+  garantindo que o "vazio infinito" não aumente ao tirar o zoom.
 - **Coordenadas**: conversões `toPageCoords` / `toDocumentCoords` / `toPageCoordsAt` /
   `toScreenCoords` (aplica pan, zoom, offset da página e rotação da página).
 - **Interação**: `Editor.tsx` implementa todos os gestos via handlers de `PointerEvent`
-  (`onPointerDown/Move/Up`), um `dragRef` com `kind` que identifica a operação:
-  `pan | draw | erase | select-move | select-resize | select-rotate | region-draw |
-  region-move | text-rotate | text-resize | page-rotate | group-resize | group-rotate`.
+  no container principal (para capturar drags de scrollbar). Inclui `pan | draw | erase | 
+  select-move | select-resize | select-rotate | region-draw | region-move | 
+  text-rotate | text-resize | page-rotate | group-resize | group-rotate | scroll-v | scroll-h`.
 - **Multi-toque (celular)**: `Editor.tsx` rastreia os ponteiros ativos em
   `activePointersRef` (atualizado em `onPointerDown`/`onPointerMove`). Um segundo dedo
   não interrompe um traço imediatamente: só ativa o gesto de mover/pinça depois de se
@@ -696,9 +702,9 @@ Fluxo e arquivos envolvidos:
 
 ### Ferramentas de desenho / edição
 
-| Assunto | Arquivo(s) |
-|---|---|
-| Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. O estado das teclas é rastreado via `pressedKeysRef`. Ao soltar a tecla, volta para a ferramenta anterior imediatamente. |
+| Modos de seleção (clique/laço/círculo/quadrado) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicar em qualquer lugar dentro da caixa de seleção permite o arraste. |
+| Barras de Rolagem (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). Design de alto contraste, interativo e com auto-hide de 1.5s. |
+| Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. Restrito por `getPanLimits` e `clampPan`. |
 | Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
 | Borracha de traços | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`) |
 | Borracha de imagens | `src/utils/imageErase.ts` + `Editor.tsx` |
