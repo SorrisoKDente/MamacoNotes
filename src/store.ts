@@ -1135,6 +1135,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const siblings = sortFoldersByOrder(
         get().folders.filter((f) => (f.parentId ?? null) === (parentId ?? null) && f.id !== id),
       )
+      const parentChanged = (folder.parentId ?? null) !== (parentId ?? null)
       const dragged = { ...folder, parentId }
       const list: Folder[] = []
       if (beforeId) {
@@ -1147,7 +1148,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const changed = new Map<string, Folder>()
       list.forEach((s, i) => {
         if (s.id === id) {
-          if (s.parentId !== parentId || s.order !== i) {
+          if (parentChanged || s.order !== i) {
             changed.set(s.id, { ...s, parentId, order: i })
           }
         } else if (s.order !== i) {
@@ -1395,6 +1396,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const siblings = sortNotebooksByOrder(
         get().notebooks.filter((n) => (n.folderId ?? null) === (folderId ?? null) && n.id !== id),
       )
+      const folderChanged = (nb.folderId ?? null) !== (folderId ?? null)
       const dragged = { ...nb, folderId }
       const list: NotebookSummary[] = []
       if (beforeId) {
@@ -1407,7 +1409,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const changed = new Map<string, Notebook>()
       list.forEach((s, i) => {
         if (s.id === id) {
-          if (s.folderId !== folderId || s.order !== i) {
+          if (folderChanged || s.order !== i) {
             changed.set(s.id, { ...s, folderId, order: i, updatedAt: now } as any)
           }
         } else if (s.order !== i) {

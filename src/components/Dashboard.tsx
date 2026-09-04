@@ -88,6 +88,12 @@ export function Dashboard() {
   const suppressClickRef = useRef(false)
   const [dragItem, setDragItem] = useState<DragItem | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: string; type: 'into' | 'before' | 'after' } | null>(null)
+  const dropTargetRef = useRef<{ id: string; type: 'into' | 'before' | 'after' } | null>(null)
+
+  function updateDropTarget(target: { id: string; type: 'into' | 'before' | 'after' } | null) {
+    dropTargetRef.current = target
+    setDropTarget(target)
+  }
 
   useEffect(() => {
     if (dragItem) {
@@ -306,50 +312,39 @@ export function Dashboard() {
   }
 
   function itemFromPoint(x: number, y: number): { type: 'folder' | 'notebook'; id: string; isSidebar?: boolean } | null {
-    const els = document.elementsFromPoint(x, y)
+    const isUsable = (id: string | undefined) => Boolean(
+      id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id),
+    )
+    const containsPoint = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect()
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    }
 
-    // First pass: Prioritize containers (root button or folders)
-    for (const el of els) {
-      if (!(el instanceof HTMLElement)) continue
-
-      const rootEl = el.closest('[data-is-root="true"]')
-      if (rootEl instanceof HTMLElement) return { type: 'folder', id: 'root', isSidebar: true }
-
-      const treeEl = el.closest('.tree-item-row')
-      if (treeEl instanceof HTMLElement && treeEl.classList.contains('folder')) {
-        const id = (treeEl as any).dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
-          return { type: 'folder', id, isSidebar: true }
-        }
-      }
-
-      const itemEl = el.closest('.dashboard-item')
-      if (itemEl instanceof HTMLElement && itemEl.classList.contains('folder')) {
-        const id = itemEl.dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
-          return { type: 'folder', id }
+    const sidebar = document.querySelector<HTMLElement>('.dashboard-sidebar')
+    const sidebarRect = sidebar?.getBoundingClientRect()
+    const pointIsInSidebar = Boolean(
+      sidebarRect && x >= sidebarRect.left && x <= sidebarRect.right && y >= sidebarRect.top && y <= sidebarRect.bottom,
+    )
+    const rootElement = document.querySelector<HTMLElement>('[data-is-root="true"]')
+    const sidebarElement = Array.from(document.querySelectorAll<HTMLElement>('.tree-item-row'))
+      .find((element) => containsPoint(element) && isUsable(element.dataset.id))
+    if (pointIsInSidebar) {
+      if (rootElement && containsPoint(rootElement)) return { type: 'folder', id: 'root', isSidebar: true }
+      if (sidebarElement) {
+        return {
+          type: sidebarElement.classList.contains('folder') ? 'folder' : 'notebook',
+          id: sidebarElement.dataset.id!,
+          isSidebar: true,
         }
       }
     }
 
-    // Second pass: Any item (for reordering)
-    for (const el of els) {
-      if (!(el instanceof HTMLElement)) continue
-
-      const treeEl = el.closest('.tree-item-row')
-      if (treeEl instanceof HTMLElement) {
-        const id = (treeEl as any).dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
-          return { type: treeEl.classList.contains('folder') ? 'folder' : 'notebook', id, isSidebar: true }
-        }
-      }
-
-      const itemEl = el.closest('.dashboard-item')
-      if (itemEl instanceof HTMLElement) {
-        const id = itemEl.dataset.id
-        if (id && (!dragItemRef.current || id !== dragItemRef.current.id) && !selectedIds.includes(id)) {
-          return { type: itemEl.classList.contains('folder') ? 'folder' : 'notebook', id }
-        }
+    const dashboardElement = Array.from(document.querySelectorAll<HTMLElement>('.dashboard-item'))
+      .find((element) => containsPoint(element) && isUsable(element.dataset.id))
+    if (dashboardElement) {
+      return {
+        type: dashboardElement.classList.contains('folder') ? 'folder' : 'notebook',
+        id: dashboardElement.dataset.id!,
       }
     }
     return null
@@ -361,22 +356,21 @@ export function Dashboard() {
 
     const target = itemFromPoint(e.clientX, e.clientY)
     if (!target) {
-      setDropTarget(null)
+      updateDropTarget(null)
       return
     }
 
     if (target.id === 'root') {
-      setDropTarget({ id: 'root', type: 'into' })
+      updateDropTarget({ id: 'root', type: 'into' })
       return
     }
 
-    const els = document.elementsFromPoint(e.clientX, e.clientY)
-    const targetEl = els.find(el => {
-      if (!(el instanceof HTMLElement)) return false
-      if (target.id === 'root') return !!el.closest('[data-is-root="true"]')
-      const id = target.isSidebar ? (el.closest('.tree-item-row') as any)?.dataset?.id : el.closest('.dashboard-item')?.getAttribute('data-id')
-      return id === target.id
-    }) as HTMLElement | undefined
+    const targetSelector = target.id === 'root'
+      ? '[data-is-root="true"]'
+      : target.isSidebar
+        ? `.tree-item-row[data-id="${target.id}"]`
+        : `.dashboard-item[data-id="${target.id}"]`
+    const targetEl = document.querySelector<HTMLElement>(targetSelector)
 
     if (targetEl) {
       const rect = targetEl.getBoundingClientRect()
@@ -386,21 +380,21 @@ export function Dashboard() {
       if (target.isSidebar) {
         if (target.type === 'notebook') {
           // Sidebar notebook: only before/after
-          if (relativeY < rect.height / 2) setDropTarget({ id: target.id, type: 'before' })
-          else setDropTarget({ id: target.id, type: 'after' })
+          if (relativeY < rect.height / 2) updateDropTarget({ id: target.id, type: 'before' })
+          else updateDropTarget({ id: target.id, type: 'after' })
         } else {
           // Sidebar folder: before, after or into
-          if (relativeY < rect.height * 0.25) setDropTarget({ id: target.id, type: 'before' })
-          else if (relativeY > rect.height * 0.75) setDropTarget({ id: target.id, type: 'after' })
-          else setDropTarget({ id: target.id, type: 'into' })
+          if (relativeY < rect.height * 0.25) updateDropTarget({ id: target.id, type: 'before' })
+          else if (relativeY > rect.height * 0.75) updateDropTarget({ id: target.id, type: 'after' })
+          else updateDropTarget({ id: target.id, type: 'into' })
         }
       } else {
         // Grid/List: only folders accept "into"
         // Refined: larger "into" zone (center 80% of the item)
-        if (relativeX < rect.width * 0.1) setDropTarget({ id: target.id, type: 'before' })
-        else if (relativeX > rect.width * 0.9) setDropTarget({ id: target.id, type: 'after' })
-        else if (target.type === 'folder') setDropTarget({ id: target.id, type: 'into' })
-        else setDropTarget({ id: target.id, type: 'after' })
+        if (relativeX < rect.width * 0.1) updateDropTarget({ id: target.id, type: 'before' })
+        else if (relativeX > rect.width * 0.9) updateDropTarget({ id: target.id, type: 'after' })
+        else if (target.type === 'folder') updateDropTarget({ id: target.id, type: 'into' })
+        else updateDropTarget({ id: target.id, type: 'after' })
       }
     }
   }
@@ -432,9 +426,10 @@ export function Dashboard() {
   }
 
   function finishDrop(item: DragItem) {
-    if (!dropTarget) return
+    const target = dropTargetRef.current
+    if (!target) return
 
-    const { id, type } = dropTarget
+    const { id, type } = target
     const isMultiDrag = selectedIds.includes(item.id)
 
     if (id === 'root' || type === 'into') {
@@ -500,6 +495,7 @@ export function Dashboard() {
   function resetDragUi() {
     dragItemRef.current = null
     pressStartRef.current = null
+    dropTargetRef.current = null
     setDragItem(null)
     setDropTarget(null)
   }
@@ -545,7 +541,7 @@ export function Dashboard() {
             <div key={f.id} className="tree-item">
               <div
                 className={`tree-item-row folder ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${dropTarget?.id === f.id && dropTarget.type === 'into' ? 'drop-target' : ''} ${dragItem?.id === f.id ? 'dragging' : ''}`}
-                style={{ paddingLeft: level * 16 + 8, ...(dragItem?.id === f.id ? { pointerEvents: 'none' } : {}) }}
+                style={{ paddingLeft: level * 16 + 8 }}
                 data-id={f.id}
                 onClick={(e) => handleItemClick(e as any, 'folder', f.id)}
                 onContextMenu={(e) => handleContextMenu(e as any, 'folder', f.id)}
@@ -580,7 +576,7 @@ export function Dashboard() {
             <div
               key={nb.id}
               className={`tree-item-row notebook ${isSelected ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
-              style={{ paddingLeft: level * 16 + 8, ...(dragItem?.id === nb.id ? { pointerEvents: 'none' } : {}) }}
+              style={{ paddingLeft: level * 16 + 8 }}
               data-id={nb.id}
               onClick={(e) => handleItemClick(e as any, 'notebook', nb.id)}
               onContextMenu={(e) => handleContextMenu(e as any, 'notebook', nb.id)}
@@ -768,7 +764,6 @@ export function Dashboard() {
                   key={f.id}
                   data-id={f.id}
                   className={`dashboard-item folder ${selectedIds.includes(f.id) ? 'selected' : ''} ${dragItem?.id === f.id ? 'dragging' : ''} ${isTarget && dropTarget.type === 'into' ? 'drop-target' : ''}`}
-                  style={dragItem?.id === f.id ? { pointerEvents: 'none' } : undefined}
                   onClick={(e) => handleItemClick(e, 'folder', f.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'folder', f.id)}
                   onPointerDown={(e) => onItemPointerDown(e, 'folder', f.id)}
@@ -809,7 +804,6 @@ export function Dashboard() {
                   key={nb.id}
                   data-id={nb.id}
                   className={`dashboard-item notebook ${selectedIds.includes(nb.id) ? 'selected' : ''} ${dragItem?.id === nb.id ? 'dragging' : ''}`}
-                  style={dragItem?.id === nb.id ? { pointerEvents: 'none' } : undefined}
                   onClick={(e) => handleItemClick(e, 'notebook', nb.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'notebook', nb.id)}
                   onPointerDown={(e) => onItemPointerDown(e, 'notebook', nb.id)}
