@@ -326,7 +326,7 @@ export const enMessages: Record<string, string> = {
   'modal.hidePageCount': 'Hide the page count',
   'modal.hidePageCountHint': "Does not show the page count next to the notebook name.",
   'modal.hideToolCursor': 'Hide the tool cursor',
-  'modal.hideToolCursorHint': 'Hides the circular size indicator of the pen, highlighter and eraser over the page.',
+  'modal.hideToolCursorHint': 'Hides the circular size indicator of the pen, highlighter and eraser. On computers, the system cursor cannot be hidden; when disabled, it returns to the default cursor.',
   'modal.sectionPreferences': 'Preferences',
   'modal.sectionAppearance': 'Appearance',
   'modal.sectionBackup': 'Backup',

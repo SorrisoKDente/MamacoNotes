@@ -1832,7 +1832,7 @@ body {
 }
 
 .cursor-tool-hidden {
-  cursor: crosshair;
+  cursor: default;
 }
 
 .cursor-text {

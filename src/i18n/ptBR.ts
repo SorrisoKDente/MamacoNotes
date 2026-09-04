@@ -326,7 +326,7 @@ export const ptBRMessages: Record<string, string> = {
   'modal.hidePageCount': 'Ocultar o nº de páginas',
   'modal.hidePageCountHint': 'Não mostra o número de páginas ao lado do nome do caderno.',
   'modal.hideToolCursor': 'Ocultar o cursor da ferramenta',
-  'modal.hideToolCursorHint': 'Esconde o indicador circular do tamanho da caneta, do marcador e da borracha sobre a página.',
+  'modal.hideToolCursorHint': 'Esconde o indicador circular do tamanho da caneta, do marcador e da borracha. No computador, o cursor do sistema não pode ser ocultado; ao desativar, ele volta a ser o cursor padrão.',
   'modal.sectionPreferences': 'Preferências',
   'modal.sectionAppearance': 'Aparência',
   'modal.sectionBackup': 'Backup',

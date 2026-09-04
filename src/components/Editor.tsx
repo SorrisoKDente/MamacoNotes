@@ -2208,8 +2208,6 @@ export function Editor() {
     if (!drag) {
       if (tool === 'select') {
         updateSelectCursor(engine.toPageCoords(pos.x, pos.y))
-      } else if (tool === 'eraser' || tool === 'pen' || tool === 'highlighter') {
-        requestRender()
       }
       return
     }
