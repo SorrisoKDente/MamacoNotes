@@ -13,7 +13,7 @@ export async function renderThumbnail(
   const bw = page.width * cos + page.height * sin
   const bh = page.width * sin + page.height * cos
   const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1))
-  const scale = Math.max(0.02, Math.min(width / bw, height / bh) * dpr)
+  const scale = Math.max(0.02, Math.min(width / bw, height / bh) * dpr * 0.9)
 
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width * dpr))

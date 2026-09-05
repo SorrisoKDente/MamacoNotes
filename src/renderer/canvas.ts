@@ -157,7 +157,7 @@ export class PageCanvas {
     }
   }
 
-  beginStroke(tool: ToolKind, color: string, size: number, px: number, py: number) {
+  beginStroke(tool: ToolKind, color: string, size: number, px: number, py: number, pressure = 1) {
     const p = this.toPageCoords(px, py)
     this.drawing = true
     this.currentStroke = {
@@ -165,7 +165,7 @@ export class PageCanvas {
       kind: tool,
       color,
       size,
-      points: [{ x: p.x, y: p.y, pressure: 1 }],
+      points: [{ x: p.x, y: p.y, pressure }],
     }
     this.lastPoint = p
   }

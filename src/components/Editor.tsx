@@ -60,7 +60,7 @@ export function Editor() {
   const panRef = useRef({ x: 0, y: 0 })
   const mousePosRef = useRef<Pt>({ x: -1, y: -1 })
   const activePointersRef = useRef<Map<number, Pt>>(new Map())
-  const pointerPressureRef = useRef(0.5)
+  const pointerPressureRef = useRef(1)
   const pointerDownPosRef = useRef<Map<number, Pt>>(new Map())
   const eraseUndoPushedRef = useRef(false)
     const eraseMaskRef = useRef<StrokeErasure | null>(null)
@@ -746,6 +746,7 @@ export function Editor() {
     panRef.current = clampPan(nextPan)
     showScrollbarsTemporarily()
     setZoomDisplay(Math.round(z * 100))
+    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
     requestRender()
   }
 
@@ -769,8 +770,17 @@ export function Editor() {
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
+
+    // Ensure mouse hover also uses full pressure for consistent cursor size
+    if (e.nativeEvent instanceof PointerEvent && e.nativeEvent.pointerType === 'mouse') {
+      pointerPressureRef.current = 1
+    } else if (!(e.nativeEvent instanceof PointerEvent)) {
+      // Regular MouseEvent fallback
+      pointerPressureRef.current = 1
+    }
+
     mousePosRef.current = { x: mx, y: my }
-    updateCursorDOM(mx, my)
+    updateCursorDOM(mx, my, pointerPressureRef.current)
   }
 
   function getPointerPos(e: PointerEvent) {
@@ -1527,6 +1537,10 @@ export function Editor() {
     const canvas = canvasRef.current
     const engine = engineRef.current
     if (!canvas || !engine || !page) return
+
+    const target = e.target as HTMLElement
+    if (target.closest('.zoom-controls') || target.closest('.page-indicator')) return
+
     if (e.pointerType === 'mouse') {
       try {
         canvas.setPointerCapture(e.pointerId)
@@ -1540,7 +1554,6 @@ export function Editor() {
     activePointersRef.current.set(e.pointerId, pos)
     pointerDownPosRef.current.set(e.pointerId, pos)
 
-    const target = e.target as HTMLElement
     const isScrollV = target.closest('.editor-scrollbar-v')
     const isScrollH = target.closest('.editor-scrollbar-h')
 
@@ -2109,6 +2122,16 @@ export function Editor() {
 
     const color = tool === 'highlighter' ? settings.lastHighlighterColor : settings.lastPenColor
     const size = tool === 'highlighter' ? settings.lastHighlighterSize : settings.lastPenSize
+
+    // Stable pressure logic duplicated here (local scope for now, could be moved to outer helper)
+    const getStablePressure = (pe: React.PointerEvent | PointerEvent | React.MouseEvent | MouseEvent) => {
+      // @ts-ignore
+      if (pe.pointerType === 'mouse' || !('pointerType' in pe)) return 1
+      // @ts-ignore
+      return pe.pressure || 0.5
+    }
+
+    pointerPressureRef.current = getStablePressure(e)
     dragRef.current = {
       kind: 'draw',
       startX: pos.x,
@@ -2119,7 +2142,7 @@ export function Editor() {
       handle: null,
       startPan: { ...panRef.current },
     }
-    engine.beginStroke(tool, color, size, pos.x, pos.y)
+    engine.beginStroke(tool, color, size, pos.x, pos.y, pointerPressureRef.current)
     requestRender()
   }
 
@@ -2180,7 +2203,16 @@ export function Editor() {
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
-    pointerPressureRef.current = e.pressure || (e.pointerType === 'mouse' ? 0.5 : 1)
+
+    // Shared pressure calculation for consistent behavior across events
+    const getStablePressure = (pe: React.PointerEvent | PointerEvent | React.MouseEvent | MouseEvent) => {
+      // @ts-ignore - checking for pointerType on event which might be MouseEvent
+      if (pe.pointerType === 'mouse' || !('pointerType' in pe)) return 1
+      // @ts-ignore
+      return pe.pressure || 0.5
+    }
+
+    pointerPressureRef.current = getStablePressure(e)
     mousePosRef.current = { x: mx, y: my }
     updateCursorDOM(mx, my, pointerPressureRef.current)
 
@@ -2328,7 +2360,7 @@ export function Editor() {
     if (drag.kind === 'draw') {
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       for (const ev of events) {
-        engine.extendStroke(ev.clientX, ev.clientY, ev.pressure || (ev.pointerType === 'mouse' ? 1 : 0.5))
+        engine.extendStroke(ev.clientX, ev.clientY, getStablePressure(ev))
       }
       return
     }
@@ -2567,7 +2599,7 @@ export function Editor() {
         } else {
           const stroke = engine.endStroke()
           const drawPage = pageRef.current
-          if (stroke && stroke.points.length >= 2 && drawPage) {
+          if (stroke && stroke.points.length >= 1 && drawPage) {
             pushUndo()
             getActiveLayer(drawPage).strokes.push(stroke as Stroke)
             drawPage.updatedAt = Date.now()
@@ -2710,6 +2742,7 @@ export function Editor() {
       showScrollbarsTemporarily()
       requestRender()
     }
+    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
     scheduleFollowPage()
   }
 
