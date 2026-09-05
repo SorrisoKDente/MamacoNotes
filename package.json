@@ -87,7 +87,11 @@
       "perMachine": false,
       "allowElevation": true,
       "include": "build-resources/installer.nsh",
-      "deleteAppDataOnUninstall": true
+      "deleteAppDataOnUninstall": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "linux": {
       "target": [
@@ -98,6 +102,9 @@
       "syncDesktopName": true,
       "category": "Office",
       "maintainer": "Mamaco Team <mamaconotes@gmail.com>"
+    },
+    "deb": {
+      "artifactName": "${name}_${version}_${arch}.${ext}"
     }
   },
   "overrides": {
