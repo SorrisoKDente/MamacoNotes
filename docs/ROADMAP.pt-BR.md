@@ -4,9 +4,9 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 
 ## 🐛 Bugs Conhecidos (Correções Prioritárias)
 
-- [ ] **Navegação do Editor**: Os botões de zoom (+/-) e de recentralizar não funcionam nas versões Desktop e Web (funcionam apenas no Android).
+- [x] **Navegação do Editor**: Os botões de zoom (+/-) e de recentralizar não funcionam nas versões Desktop e Web (funcionam apenas no Android).
 - [ ] **Motor de Desenho**: O clique único não registra desenho; o cursor exige um arraste mínimo para iniciar um traço.
-- [ ] **Geração de Thumbnails**: As prévias dos cadernos no Dashboard estão com zoom incorreto, exibindo apenas o centro da página em vez de ajustar o conteúdo ao quadro.
+- [x] **Geração de Thumbnails**: As prévias dos cadernos no Dashboard estão com zoom incorreto, exibindo apenas o centro da página em vez de ajustar o conteúdo ao quadro.
 
 ## ✨ Funcionalidades e Melhorias Planejadas
 

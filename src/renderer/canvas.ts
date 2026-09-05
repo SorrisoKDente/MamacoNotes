@@ -738,7 +738,8 @@ export class PageCanvas {
     if (pts.length === 1) {
       ctx.fillStyle = stroke.color
       ctx.beginPath()
-      ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2)
+      const size = Math.max(0.6, stroke.size * clamp(pts[0].pressure, 0.15, 1))
+      ctx.arc(pts[0].x, pts[0].y, size / 2, 0, Math.PI * 2)
       ctx.fill()
       return
     }

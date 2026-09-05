@@ -73,7 +73,8 @@ export function drawStroke(
   if (pts.length === 1) {
     ctx.fillStyle = color
     ctx.beginPath()
-    ctx.arc(pts[0].x * scale, pts[0].y * scale, (stroke.size / 2) * scale, 0, Math.PI * 2)
+    const size = Math.max(0.6 * scale, stroke.size * scale * clamp(pts[0].pressure, 0.15, 1))
+    ctx.arc(pts[0].x * scale, pts[0].y * scale, size / 2, 0, Math.PI * 2)
     ctx.fill()
     return
   }

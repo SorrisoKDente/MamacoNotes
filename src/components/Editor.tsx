@@ -2185,12 +2185,31 @@ export function Editor() {
   }
 
   const updateCursorDOM = useCallback(
-    (mx: number, my: number, pressure = pointerPressureRef.current) => {
+    (mx: number, my: number, pressure = pointerPressureRef.current, visible = true) => {
       if (!toolCursorRef.current) return
       const t = toolRef.current
-      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') return
+      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') {
+        toolCursorRef.current.style.opacity = '0'
+        return
+      }
+
+      if (!visible || mx < 0 || my < 0) {
+        toolCursorRef.current.style.opacity = '0'
+        return
+      }
+
       const diameter = cursorDisplaySize(t, settings, zoomRef.current, pressure)
+      toolCursorRef.current.style.opacity = '1'
       toolCursorRef.current.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
+      toolCursorRef.current.style.width = `${diameter}px`
+      toolCursorRef.current.style.height = `${diameter}px`
+
+      // Update background based on tool
+      if (t === 'highlighter') {
+        toolCursorRef.current.style.background = 'rgba(255,255,255,0.1)'
+      } else {
+        toolCursorRef.current.style.background = 'transparent'
+      }
     },
     [settings.eraserMode, settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
   )
@@ -2723,6 +2742,12 @@ export function Editor() {
     } else {
       canvas.style.cursor = ''
     }
+
+    // Hide cursor on touch end to avoid "ghost" circle on top of the last point
+    if (e.pointerType !== 'mouse') {
+      updateCursorDOM(-1, -1, 1, false)
+    }
+
     requestRender()
     scheduleFollowPage()
   }
@@ -3228,9 +3253,7 @@ export function Editor() {
           {showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
             <ToolCursor
               ref={toolCursorRef}
-              size={cursorDisplaySize(tool, settings, zoomRef.current, pointerPressureRef.current)}
               color={cursorColor(tool, settings)}
-              translucent={tool === 'highlighter'}
             />
           )}
           {tool === 'text' && inlineText && page && (
@@ -3323,22 +3346,17 @@ function cursorColor(tool: ToolKind, settings: ReturnType<typeof useAppStore.get
 const ToolCursor = React.forwardRef<
   HTMLDivElement,
   {
-    size: number
     color: string
-    translucent?: boolean
   }
->(({ size, color, translucent }, ref) => {
-  const diameter = Math.max(1, size)
+>(({ color }, ref) => {
   return (
     <div
       ref={ref}
       className="tool-cursor"
       style={{
-        width: diameter,
-        height: diameter,
         transform: `translate(-100px, -100px)`,
         borderColor: color,
-        background: translucent ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.15)',
+        opacity: 0,
       }}
     />
   )
