@@ -1826,7 +1826,11 @@ function MoveModal() {
 
   async function submit() {
     if (ids) {
-      await moveSelected(folderId, ids)
+      if (isCopy) {
+        await useAppStore.getState().copySelectedToFolder(folderId, ids)
+      } else {
+        await moveSelected(folderId, ids)
+      }
     } else if (id) {
       if (isFolder) {
         await moveFolder(id, folderId)

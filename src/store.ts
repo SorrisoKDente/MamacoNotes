@@ -364,6 +364,7 @@ interface AppState {
   setSelectedIds: (ids: string[]) => void
   setLastClicked: (target: LastClickedTarget) => void
   copySelected: () => void
+  copySelectedToFolder: (targetFolderId: string | null, ids?: string[]) => Promise<void>
   cutSelected: () => void
   pasteClipboard: () => Promise<void>
   favoriteSelected: () => Promise<void>
@@ -993,6 +994,20 @@ export const useAppStore = create<AppState>((set, get) => {
       })
 
       await Promise.all(dbUpdates)
+    },
+
+    async copySelectedToFolder(targetFolderId, idsToCopy) {
+      const ids = idsToCopy ?? get().selectedIds
+      if (ids.length === 0) return
+
+      for (const id of ids) {
+        if (get().notebooks.some((n) => n.id === id)) {
+          await get().copyNotebook(id, targetFolderId)
+        } else if (get().folders.some((f) => f.id === id)) {
+          await get().copyFolder(id, targetFolderId)
+        }
+      }
+      set({ selectedIds: [] })
     },
 
     async duplicateSelected() {

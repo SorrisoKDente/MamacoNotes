@@ -747,7 +747,6 @@ export function Dashboard() {
                 <button className="btn small" onClick={() => void favoriteSelected()}>{t('tool.favorite') || 'Favoritar'}</button>
                 <button className="btn small" onClick={() => open('moveSelected', { ids: selectedIds })}>{t('sidebar.moveToFolder')}</button>
                 <button className="btn small" onClick={copySelected}>{t('tool.copy')}</button>
-                <button className="btn small" onClick={cutSelected}>{t('tool.cut')}</button>
                 <button className="btn small" onClick={() => void duplicateSelected()}>{t('sidebar.duplicate')}</button>
                 <button className="btn small danger" onClick={handleDeleteSelected}>{t('tool.delete')}</button>
                 <button className="close" onClick={clearSelection}>×</button>
@@ -856,28 +855,61 @@ export function Dashboard() {
           className="row-menu-popup row-menu-popup-fixed"
           style={{ top: menuPos?.top, left: menuPos?.left }}
         >
-          <button onClick={() => handleRename(menuOpen.type, menuOpen.id)}>{t('sidebar.rename')}</button>
-          <button onClick={() => { toggleFavorite(menuOpen.id); setMenuOpen(null) }}>
-            {menuOpen.type === 'notebook'
-              ? (notebooks.find(n => n.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
-              : (folders.find(f => f.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
+          {selectedIds.length <= 1 && (
+            <button onClick={() => handleRename(menuOpen.type, menuOpen.id)}>{t('sidebar.rename')}</button>
+          )}
+          <button onClick={() => {
+            if (selectedIds.length > 1) {
+              void favoriteSelected()
+            } else {
+              void toggleFavorite(menuOpen.id)
+            }
+            setMenuOpen(null)
+          }}>
+            {selectedIds.length > 1
+              ? t('sidebar.addFavorite')
+              : (menuOpen.type === 'notebook'
+                ? (notebooks.find(n => n.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
+                : (folders.find(f => f.id === menuOpen.id)?.favorite ? t('sidebar.removeFavorite') : t('sidebar.addFavorite'))
+              )
             }
           </button>
+          {(selectedIds.length > 1 || menuOpen.type === 'notebook') && (
+            <button onClick={() => {
+              if (selectedIds.length > 1) {
+                open('copyNotebook', { ids: selectedIds })
+              } else {
+                open('copyNotebook', { id: menuOpen.id })
+              }
+              setMenuOpen(null)
+            }}>{t('sidebar.copyToFolder')}</button>
+          )}
           <button onClick={() => {
-            if (menuOpen.type === 'notebook') open('copyNotebook', { id: menuOpen.id })
-            setMenuOpen(null)
-          }}>{t('sidebar.copyToFolder')}</button>
-          <button onClick={() => {
-            if (menuOpen.type === 'notebook') open('moveNotebook', { id: menuOpen.id })
-            else open('moveFolder', { id: menuOpen.id })
+            if (selectedIds.length > 1) {
+              open('moveSelected', { ids: selectedIds })
+            } else {
+              if (menuOpen.type === 'notebook') open('moveNotebook', { id: menuOpen.id })
+              else open('moveFolder', { id: menuOpen.id })
+            }
             setMenuOpen(null)
           }}>{t('sidebar.moveToFolder')}</button>
           <button onClick={() => {
-            if (menuOpen.type === 'notebook') void duplicateNotebook(menuOpen.id)
-            else void duplicateFolder(menuOpen.id)
+            if (selectedIds.length > 1) {
+              void duplicateSelected()
+            } else {
+              if (menuOpen.type === 'notebook') void duplicateNotebook(menuOpen.id)
+              else void duplicateFolder(menuOpen.id)
+            }
             setMenuOpen(null)
           }}>{t('sidebar.duplicate')}</button>
-          <button className="danger" onClick={() => handleDelete(menuOpen.type, menuOpen.id)}>{t('tool.delete')}</button>
+          <button className="danger" onClick={() => {
+            if (selectedIds.length > 1) {
+              void handleDeleteSelected()
+            } else {
+              void handleDelete(menuOpen.type, menuOpen.id)
+            }
+            setMenuOpen(null)
+          }}>{t('tool.delete')}</button>
         </div>
       )}
     </div>
