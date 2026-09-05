@@ -3,18 +3,27 @@
 **English** | [Português](README.pt-BR.md)
 
 <p align="center">
-  <img src="https://socialify.git.ci/SorrisoKDente/MamacoNotes/image?language=1&logo=https%3A%2F%2Fgithub.com%2FSorrisoKDente%2FMamacoNotes%2Fblob%2Fmaster%2Fbuild-resources%2Ficon.png%3Fraw%3Dtrue&name=1&owner=1&pattern=Charlie+Brown&stargazers=1&theme=Dark" alt="MamacoNotes" width="640" height="320" />
+  <img src="https://socialify.git.ci/SorrisoKDente/MamacoNotes/image?language=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2FSorrisoKDente%2FMamacoNotes%2Fmaster%2Fbuild-resources%2Ficon.png&name=1&owner=1&pattern=Charlie+Brown&stargazers=1&theme=Dark" alt="MamacoNotes" width="640" height="320" />
+</p>
+
+## 📸 Screenshots
+
+### Dashboard
+*Manage your folders and notebooks.*
+<p align="center">
+  <img src="assets/mamaco_notes_dashboard_en.png" alt="Dashboard" width="800"/>
+</p>
+
+### Editor
+*Professional drawing experience with layers.*
+<p align="center">
+  <img src="assets/mamaco_notes_editor_en.png" alt="Editor" width="800"/>
 </p>
 
 **Mamaco Notes** is a digital note-taking application designed for hand-writing and drawing, serving as a cross-platform alternative to Samsung Notes. It is built to work seamlessly across **Windows**, **Linux**, **Android**, and the **Web**.
 
 This project was developed almost 100% using **MonkeyCodeAI**, leveraging AI-assisted development to create a robust and feature-rich application.
 
-## 📸 Screenshots
-
-<p align="center">
-  <img src="assets/mamaco_notes_layout.png" alt="App Layout" width="800"/>
-</p>
 
 Beyond the technology, **Mamaco Notes** represents a personal learning journey. As a developer exploring the world of multi-platform development (Windows, Linux, and Android) for the first time, I am using this project as a hands-on way to master new tools, architectures, and the challenges of creating a seamless experience across different devices.
 
