@@ -17,10 +17,11 @@ These rules apply to **every task**, regardless of the platform or feature. Fail
 7.  **Commit Hygiene:** Always end the task by suggesting a Git commit message in English, following the **Conventional Commits** standard (e.g., `feat:`, `fix:`, `docs:`, `chore:`).
 8.  **Roadmap Protocol:** Never remove an item from `docs/ROADMAP.md` until the user explicitly confirms the implementation/fix.
 9.  **Plan-First Workflow:** For any non-trivial task, present a concise implementation plan for approval **before** modifying any code.
+10. **Ponytail Philosophy:** Always favor the simplest, most minimal solution that works. Avoid bloat, over-engineering, and unnecessary dependencies. This rule is mandatory unless the user explicitly asks to "stop ponytail".
 
 ## 📚 Knowledge Base & Skills
 
-Before any task, consult the [Project Structure](file:///C:/Users/Eric PC/Documents/Programas/mamaco_notes_dev/mamaco_notes/docs/PROJECT_STRUCTURE.md) for a map of features. For deep technical dives, use the resources below:
+Before any task, consult the [Project Structure](docs/PROJECT_STRUCTURE.md) for a map of features. For deep technical dives, use the resources below:
 
 ### 🏛️ Architecture Docs
 - **[Sync Design](./docs/architecture/sync-design.md):** Detailed WebDAV algorithm and manifest-commit guarantees.
@@ -31,6 +32,7 @@ Before any task, consult the [Project Structure](file:///C:/Users/Eric PC/Docume
 ### 🛠️ Specialized Skills Index
 For platform-specific constraints, activate the corresponding skill:
 
+-   **[Ponytail Philosophy](./.agents/skills/ponytail.md):** Rules for minimal and efficient coding. Forces YAGNI, reuse of existing helpers, and standard library usage. Mandatory for all coding tasks unless explicitly ignored.
 -   **[Roadmap Management](./.agents/skills/roadmap-management.md):** Protocol for updating the roadmap. Items are only removed after explicit user verification of the fix/feature.
 -   **[Systematic Debugging](./.agents/skills/systematic-debugging.md):** Mandatory methodology for root cause analysis. Always activate this skill when investigating bugs or applying fixes to ensure permanent solutions.
 -   **[Android & Capacitor Bridge](./.agents/skills/android-native.md):** Rules for OOM prevention, chunked I/O, SAF (Storage Access Framework), and native plugin management.

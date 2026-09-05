@@ -17,10 +17,11 @@ Estas regras se aplicam a **qualquer tarefa**. Ignorar estas regras é considera
 7.  **Higiene de Commit:** Sempre encerre a tarefa sugerindo uma mensagem de commit do Git em inglês, seguindo o padrão **Conventional Commits** (ex: `feat:`, `fix:`, `docs:`, `chore:`).
 8.  **Protocolo de Roadmap:** Nunca remova um item do `docs/ROADMAP.md` até que o usuário confirme explicitamente a implementação/correção.
 9.  **Fluxo de Plano Antecipado:** Para qualquer tarefa não trivial, apresente um plano de implementação conciso para aprovação **antes** de modificar qualquer código.
+10. **Filosofia Ponytail:** Sempre favoreça a solução mais simples e mínima que funcione. Evite excessos, complexidade desnecessária (over-engineering) e dependências supérfluas. Esta regra é obrigatória, a menos que o usuário peça explicitamente para "parar ponytail".
 
 ## 📚 Base de Conhecimento e Habilidades
 
-Antes de qualquer tarefa, consulte o [Mapa da Estrutura](file:///C:/Users/Eric PC/Documents/Programas/mamaco_notes_dev/mamaco_notes/docs/PROJECT_STRUCTURE.pt-BR.md). Para mergulhos técnicos, utilize os recursos abaixo:
+Antes de qualquer tarefa, consulte o [Mapa da Estrutura](docs/PROJECT_STRUCTURE.pt-BR.md). Para mergulhos técnicos, utilize os recursos abaixo:
 
 ### 🏛️ Documentos de Arquitetura
 - **[Design do Sync](./docs/architecture/sync-design.pt-BR.md):** Detalhes do algoritmo WebDAV e garantias de manifest-commit.
@@ -31,6 +32,7 @@ Antes de qualquer tarefa, consulte o [Mapa da Estrutura](file:///C:/Users/Eric P
 ### 📚 Índice de Habilidades (Skills)
 Para detalhes técnicos e restrições específicas, consulte a skill correspondente:
 
+-   **[Filosofia Ponytail](./.agents/skills/ponytail.md):** Regras para codificação mínima e eficiente. Força o YAGNI, reutilização de helpers existentes e uso da biblioteca padrão. Obrigatório para todas as tarefas de código, a menos que explicitamente ignorado.
 -   **[Gestão de Roadmap](./.agents/skills/roadmap-management.pt-BR.md):** Protocolo para atualizar o roadmap. Itens só são removidos após verificação explícita do usuário sobre a correção/funcionalidade.
 -   **[Debugging Sistemático](./.agents/skills/systematic-debugging.md):** Metodologia obrigatória para análise de causa raiz. Ative sempre esta skill ao investigar bugs ou aplicar correções para garantir soluções permanentes.
 -   **[Android e Bridge Capacitor](./.agents/skills/android-native.pt-BR.md):** Regras para evitar OOM, E/S em chunks, SAF e gestão de plugins nativos.
