@@ -15,7 +15,8 @@ Estas regras se aplicam a **qualquer tarefa**. Ignorar estas regras é considera
 5.  **Obrigação de Typecheck:** Sempre rode `npm run typecheck` antes de finalizar. Não comite código com erros de TypeScript.
 6.  **Fallback Multiplataforma:** Nenhuma funcionalidade pode ser exclusiva de uma plataforma (Windows/Linux/Android/Web) sem um fallback funcional para as demais.
 7.  **Higiene de Commit:** Sempre encerre a tarefa sugerindo uma mensagem de commit do Git em inglês, seguindo o padrão **Conventional Commits** (ex: `feat:`, `fix:`, `docs:`, `chore:`).
-8.  **Fluxo de Plano Antecipado:** Para qualquer tarefa não trivial, apresente um plano de implementação conciso para aprovação **antes** de modificar qualquer código.
+8.  **Protocolo de Roadmap:** Nunca remova um item do `docs/ROADMAP.md` até que o usuário confirme explicitamente a implementação/correção.
+9.  **Fluxo de Plano Antecipado:** Para qualquer tarefa não trivial, apresente um plano de implementação conciso para aprovação **antes** de modificar qualquer código.
 
 ## 📚 Base de Conhecimento e Habilidades
 
@@ -30,6 +31,7 @@ Antes de qualquer tarefa, consulte o [Mapa da Estrutura](file:///C:/Users/Eric P
 ### 📚 Índice de Habilidades (Skills)
 Para detalhes técnicos e restrições específicas, consulte a skill correspondente:
 
+-   **[Gestão de Roadmap](./.agents/skills/roadmap-management.pt-BR.md):** Protocolo para atualizar o roadmap. Itens só são removidos após verificação explícita do usuário sobre a correção/funcionalidade.
 -   **[Debugging Sistemático](./.agents/skills/systematic-debugging.md):** Metodologia obrigatória para análise de causa raiz. Ative sempre esta skill ao investigar bugs ou aplicar correções para garantir soluções permanentes.
 -   **[Android e Bridge Capacitor](./.agents/skills/android-native.pt-BR.md):** Regras para evitar OOM, E/S em chunks, SAF e gestão de plugins nativos.
 -   **[Lógica de Sincronismo](./.agents/skills/sync-logic.pt-BR.md):** Regras do algoritmo WebDAV, garantias de manifest-commit e testes de regressão.

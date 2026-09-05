@@ -82,7 +82,9 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
 
 ## 📁 Project Structure
 
-For a detailed map of the project files, architecture, and information lookup, please refer to the [Project Structure Documentation](docs/PROJECT_STRUCTURE.md).
+For a detailed map of the project files, architecture, and planned features, please refer to:
+- [Project Structure Documentation](docs/PROJECT_STRUCTURE.md)
+- [Roadmap & Known Issues](docs/ROADMAP.md)
 
 ## 📜 Open Source & Future
 

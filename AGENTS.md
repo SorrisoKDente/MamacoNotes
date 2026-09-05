@@ -15,7 +15,8 @@ These rules apply to **every task**, regardless of the platform or feature. Fail
 5.  **Typecheck Obligation:** Always run `npm run typecheck` before finishing. Do not commit code with TypeScript errors.
 6.  **Multi-platform Fallback:** No feature can be exclusive to one platform (Windows/Linux/Android/Web) without a functional fallback for the others.
 7.  **Commit Hygiene:** Always end the task by suggesting a Git commit message in English, following the **Conventional Commits** standard (e.g., `feat:`, `fix:`, `docs:`, `chore:`).
-8.  **Plan-First Workflow:** For any non-trivial task, present a concise implementation plan for approval **before** modifying any code.
+8.  **Roadmap Protocol:** Never remove an item from `docs/ROADMAP.md` until the user explicitly confirms the implementation/fix.
+9.  **Plan-First Workflow:** For any non-trivial task, present a concise implementation plan for approval **before** modifying any code.
 
 ## 📚 Knowledge Base & Skills
 
@@ -30,6 +31,7 @@ Before any task, consult the [Project Structure](file:///C:/Users/Eric PC/Docume
 ### 🛠️ Specialized Skills Index
 For platform-specific constraints, activate the corresponding skill:
 
+-   **[Roadmap Management](./.agents/skills/roadmap-management.md):** Protocol for updating the roadmap. Items are only removed after explicit user verification of the fix/feature.
 -   **[Systematic Debugging](./.agents/skills/systematic-debugging.md):** Mandatory methodology for root cause analysis. Always activate this skill when investigating bugs or applying fixes to ensure permanent solutions.
 -   **[Android & Capacitor Bridge](./.agents/skills/android-native.md):** Rules for OOM prevention, chunked I/O, SAF (Storage Access Framework), and native plugin management.
 -   **[Synchronization Logic](./.agents/skills/sync-logic.md):** Bidirectional WebDAV algorithm rules, manifest-commit guarantees, and regression testing.

@@ -82,7 +82,9 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
 
 ## 📁 Estrutura do Projeto
 
-Para um mapa detalhado dos arquivos, arquitetura e busca de informações, consulte a [Documentação da Estrutura do Projeto](docs/PROJECT_STRUCTURE.md).
+Para um mapa detalhado dos arquivos, arquitetura e funcionalidades planejadas, consulte:
+- [Documentação da Estrutura do Projeto](docs/PROJECT_STRUCTURE.md)
+- [Roadmap e Problemas Conhecidos](docs/ROADMAP.pt-BR.md)
 
 ## 📜 Código Aberto e Futuro
 
