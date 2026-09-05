@@ -251,6 +251,7 @@ export function Dashboard() {
   }
 
   async function handleRename(type: 'folder' | 'notebook', id: string) {
+    setMenuOpen(null)
     if (type === 'notebook') {
       const nb = useAppStore.getState().notebooks.find(n => n.id === id)
       if (!nb) return
@@ -268,7 +269,6 @@ export function Dashboard() {
       const name = await promptName(t('sidebar.renameFolderPrompt'), f.name)
       if (name && name.trim()) renameFolder(id, name.trim())
     }
-    setMenuOpen(null)
   }
 
   function handleToggleFavorite(id: string, e: React.MouseEvent) {

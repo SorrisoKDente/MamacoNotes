@@ -5,7 +5,6 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 ## 🐛 Known Bugs (Priority Fixes)
 
 - [ ] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
-- [ ] **UI Persistence**: The context menu does not automatically close after selecting the "Rename" option on a Dashboard item.
 - [ ] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
 - [ ] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 
