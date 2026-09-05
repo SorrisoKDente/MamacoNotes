@@ -63,6 +63,7 @@ export function clonePage(page: Page): Page {
       strokes: [...l.strokes],
       images: [...l.images],
       texts: [...l.texts],
+      strokeErasures: l.strokeErasures ? l.strokeErasures.map((e) => ({ ...e, points: e.points.map((p) => ({ ...p })), strokeIds: e.strokeIds ? [...e.strokeIds] : undefined })) : [],
     })),
     layerFolders: page.layerFolders ? page.layerFolders.map((f) => ({ ...f })) : [],
   }
@@ -87,6 +88,7 @@ export function cloneLayerWithNewIds(layer: Layer): Layer {
     strokes: cloneStrokeIds(layer.strokes),
     images: cloneImageIds(layer.images),
     texts: cloneTextIds(layer.texts),
+    strokeErasures: layer.strokeErasures ? layer.strokeErasures.map((e) => ({ ...e, points: e.points.map((p) => ({ ...p })), strokeIds: e.strokeIds ? [...e.strokeIds] : undefined })) : [],
   }
 }
 

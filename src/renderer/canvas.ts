@@ -1,4 +1,4 @@
-import type { Page, Stroke, ToolKind, ImageElement, TextElement, PageViewMode, Rect } from '../types'
+import type { Page, Stroke, ToolKind, ImageElement, TextElement, PageViewMode, Rect, StrokeErasure } from '../types'
 import { newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
@@ -260,15 +260,107 @@ export class PageCanvas {
       for (const textEl of layer.texts) {
         this.renderText(ctx, textEl)
       }
-      for (const stroke of layer.strokes) {
-        this.renderStroke(ctx, stroke)
-      }
+      this.renderMaskedStrokes(ctx, page, layer.strokes, layer.strokeErasures ?? [])
       ctx.restore()
     }
     if (drawCurrentStroke && this.currentStroke) {
       this.renderStroke(ctx, this.currentStroke)
     }
   }
+
+  private renderMaskedStrokes(
+    ctx: CanvasRenderingContext2D,
+    page: Page,
+    strokes: Stroke[],
+    erasures: StrokeErasure[],
+  ) {
+    if (erasures.length === 0) {
+      for (const stroke of strokes) this.renderStroke(ctx, stroke)
+      return
+    }
+    const appliesToStroke = (erasure: StrokeErasure, strokeId: string) =>
+      !erasure.strokeIds || erasure.strokeIds.includes(strokeId)
+    const hasScopedErasures = erasures.some((erasure) => Array.isArray(erasure.strokeIds))
+    if (hasScopedErasures) {
+      let index = 0
+      while (index < strokes.length) {
+        const applicable = erasures.filter((erasure) => appliesToStroke(erasure, strokes[index].id))
+        const key = applicable.map((erasure) => erasures.indexOf(erasure)).join(',')
+        const group = [strokes[index]]
+        index++
+        while (index < strokes.length) {
+          const nextApplicable = erasures.filter((erasure) => appliesToStroke(erasure, strokes[index].id))
+          const nextKey = nextApplicable.map((erasure) => erasures.indexOf(erasure)).join(',')
+          if (nextKey !== key) break
+          group.push(strokes[index])
+          index++
+        }
+        if (applicable.length === 0) {
+          for (const stroke of group) this.renderStroke(ctx, stroke)
+        } else {
+          this.renderMaskedStrokeGroup(ctx, page, group, applicable)
+        }
+      }
+      return
+    }
+
+    const maskCanvas = document.createElement('canvas')
+    maskCanvas.width = Math.max(1, Math.ceil(page.width * this.devicePixelRatio))
+    maskCanvas.height = Math.max(1, Math.ceil(page.height * this.devicePixelRatio))
+    const maskCtx = maskCanvas.getContext('2d')!
+    maskCtx.scale(this.devicePixelRatio, this.devicePixelRatio)
+    for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
+    maskCtx.save()
+    maskCtx.globalCompositeOperation = 'destination-out'
+    maskCtx.lineCap = 'round'
+    maskCtx.lineJoin = 'round'
+    for (const erasure of erasures) {
+      const points = erasure.points
+      if (points.length === 0) continue
+      maskCtx.lineWidth = erasure.radius * 2
+      maskCtx.beginPath()
+      maskCtx.moveTo(points[0].x, points[0].y)
+      if (points.length === 1) {
+        maskCtx.arc(points[0].x, points[0].y, erasure.radius, 0, Math.PI * 2)
+      } else {
+        for (let i = 1; i < points.length; i++) maskCtx.lineTo(points[i].x, points[i].y)
+      }
+      maskCtx.stroke()
+    }
+    maskCtx.restore()
+    ctx.drawImage(maskCanvas, 0, 0, page.width, page.height)
+  }
+
+  private renderMaskedStrokeGroup(
+    ctx: CanvasRenderingContext2D,
+    page: Page,
+    strokes: Stroke[],
+    erasures: StrokeErasure[],
+  ) {
+    const maskCanvas = document.createElement('canvas')
+    maskCanvas.width = Math.max(1, Math.ceil(page.width * this.devicePixelRatio))
+    maskCanvas.height = Math.max(1, Math.ceil(page.height * this.devicePixelRatio))
+    const maskCtx = maskCanvas.getContext('2d')!
+    maskCtx.scale(this.devicePixelRatio, this.devicePixelRatio)
+    for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
+    maskCtx.save()
+    maskCtx.globalCompositeOperation = 'destination-out'
+    maskCtx.lineCap = 'round'
+    maskCtx.lineJoin = 'round'
+    for (const erasure of erasures) {
+      const points = erasure.points
+      if (points.length === 0) continue
+      maskCtx.lineWidth = erasure.radius * 2
+      maskCtx.beginPath()
+      maskCtx.moveTo(points[0].x, points[0].y)
+      if (points.length === 1) maskCtx.arc(points[0].x, points[0].y, erasure.radius, 0, Math.PI * 2)
+      else for (let i = 1; i < points.length; i++) maskCtx.lineTo(points[i].x, points[i].y)
+      maskCtx.stroke()
+    }
+    maskCtx.restore()
+    ctx.drawImage(maskCanvas, 0, 0, page.width, page.height)
+  }
+
 
   private renderContinuous() {
     const { ctx } = this

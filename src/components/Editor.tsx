@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
-import type { ImageElement, Notebook, Page, Rect, Stroke, StrokePoint, TextElement, ToolKind } from '../types'
+import type { ImageElement, Notebook, Page, Rect, Stroke, StrokeErasure, StrokePoint, TextElement, ToolKind } from '../types'
 import { getActiveLayer, makeTextElement, newId } from '../types'
 import { ImageEraseSession } from '../utils/imageErase'
 import { computePageOffsets, pageUnderPoint, pageVisualBox, pageVisualRect } from '../utils/layout'
@@ -60,7 +60,10 @@ export function Editor() {
   const panRef = useRef({ x: 0, y: 0 })
   const mousePosRef = useRef<Pt>({ x: -1, y: -1 })
   const activePointersRef = useRef<Map<number, Pt>>(new Map())
+  const pointerPressureRef = useRef(0.5)
   const pointerDownPosRef = useRef<Map<number, Pt>>(new Map())
+  const eraseUndoPushedRef = useRef(false)
+    const eraseMaskRef = useRef<StrokeErasure | null>(null)
   const pinchRef = useRef<{ prevDist: number; prevMid: Pt } | null>(null)
   const pendingTwoFingerRef = useRef<{ id: number; start: Pt } | null>(null)
   const twoFingerDownAtRef = useRef<number | null>(null)
@@ -1387,12 +1390,19 @@ export function Editor() {
     const wholeStroke = useAppStore.getState().settings.eraserEraseWholeStroke
     let changed = false
     const layer = getActiveLayer(pg)
+    const ensureEraseUndo = () => {
+      if (!eraseUndoPushedRef.current) {
+        pushUndo()
+        eraseUndoPushedRef.current = true
+      }
+    }
     if (mode === 'strokes' || mode === 'both') {
       if (wholeStroke) {
         const next: Stroke[] = []
         for (const s of layer.strokes) {
           const er = radius + (s.size ?? 0) / 2
           if (strokeIntersectsCircle(s, p.x, p.y, er)) {
+            ensureEraseUndo()
             changed = true
           } else {
             next.push(s)
@@ -1400,27 +1410,20 @@ export function Editor() {
         }
         if (changed) layer.strokes = next
       } else {
-        const next: Stroke[] = []
-        for (const s of layer.strokes) {
-          const er = radius + (s.size ?? 0) / 2
-          if (!strokeIntersectsCircle(s, p.x, p.y, er)) {
-            next.push(s)
-            continue
-          }
-          const parts = splitStrokeByCircle(s, p.x, p.y, er)
-          if (parts.length === 1 && parts[0].points.length === s.points.length) {
-            next.push(s)
-          } else {
-            changed = true
-            next.push(...parts)
+        ensureEraseUndo()
+        const erasure = eraseMaskRef.current
+        if (erasure) {
+          const last = erasure.points[erasure.points.length - 1]
+          if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 0.5) {
+            erasure.points.push({ x: p.x, y: p.y })
           }
         }
-        if (changed) layer.strokes = next
+        changed = true
       }
     }
     if ((mode === 'images' || mode === 'both') && session) {
       for (const img of [...layer.images]) {
-        if (!circleIntersectsImageRect(img, p.x, p.y, radius + 8)) continue
+        if (!circleIntersectsImageRect(img, p.x, p.y, radius)) continue
         if (session.erase(img, p.x, p.y, radius)) {
           const canvas = session.canvasFor(img.id)
           if (canvas) engine.setImageOverride(img.id, img.dataUrl, canvas)
@@ -1485,7 +1488,10 @@ export function Editor() {
         const changed = session.commit()
         const pg = pageRef.current
         if (pg && changed.length) {
-          pushUndo()
+          if (!eraseUndoPushedRef.current) {
+            pushUndo()
+            eraseUndoPushedRef.current = true
+          }
           for (const { element, newUrl } of changed) {
             engine?.clearImageCache(element.dataUrl)
             element.dataUrl = newUrl
@@ -1499,6 +1505,8 @@ export function Editor() {
         }
       }
       eraseSessionRef.current = null
+      eraseUndoPushedRef.current = false
+      eraseMaskRef.current = null
       erasePendingRef.current.to = null
       erasePendingRef.current.scheduled = false
     } else if (drag.kind === 'region-draw') {
@@ -1844,7 +1852,6 @@ export function Editor() {
         if (selImg) {
           const handle = engine.hitTestImageHandles(selImg, pagePt.x, pagePt.y)
           if (handle) {
-            pushUndo()
             selectionRef.current.images.add(selImg.id)
             dragRef.current = {
               kind: handle === 'rotate' ? 'select-rotate' : 'select-resize',
@@ -2062,6 +2069,24 @@ export function Editor() {
 
     if (tool === 'eraser') {
       dirtyRef.current = false
+      eraseUndoPushedRef.current = false
+      eraseMaskRef.current = null
+      const eraseSettings = useAppStore.getState().settings
+      if (
+        (eraseSettings.eraserMode === 'strokes' || eraseSettings.eraserMode === 'both') &&
+        !eraseSettings.eraserEraseWholeStroke
+      ) {
+        pushUndo()
+        eraseUndoPushedRef.current = true
+        const erasure: StrokeErasure = {
+          radius: eraseSettings.lastEraserSize / 2,
+          points: [{ ...pagePt }],
+          strokeIds: getActiveLayer(page).strokes.map((stroke) => stroke.id),
+        }
+        const layer = getActiveLayer(page)
+        layer.strokeErasures = [...(layer.strokeErasures ?? []), erasure]
+        eraseMaskRef.current = erasure
+      }
       const session = new ImageEraseSession()
       eraseSessionRef.current = session
       dragRef.current = {
@@ -2137,17 +2162,14 @@ export function Editor() {
   }
 
   const updateCursorDOM = useCallback(
-    (mx: number, my: number) => {
+    (mx: number, my: number, pressure = pointerPressureRef.current) => {
       if (!toolCursorRef.current) return
       const t = toolRef.current
       if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') return
-      const diameter =
-        t === 'eraser'
-          ? Math.max(3, settings.lastEraserSize)
-          : Math.max(3, Math.min(56, (t === 'pen' ? settings.lastPenSize : settings.lastHighlighterSize) * 2.5))
+      const diameter = cursorDisplaySize(t, settings, zoomRef.current, pressure)
       toolCursorRef.current.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
     },
-    [settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
+    [settings.eraserMode, settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
   )
 
   function onPointerMove(e: React.PointerEvent) {
@@ -2158,8 +2180,9 @@ export function Editor() {
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
+    pointerPressureRef.current = e.pressure || (e.pointerType === 'mouse' ? 0.5 : 1)
     mousePosRef.current = { x: mx, y: my }
-    updateCursorDOM(mx, my)
+    updateCursorDOM(mx, my, pointerPressureRef.current)
 
     const pos = getPointerPos(e.nativeEvent)
     activePointersRef.current.set(e.pointerId, pos)
@@ -2577,7 +2600,10 @@ export function Editor() {
           const changed = session.commit()
           const pg = pageRef.current
           if (pg && changed.length) {
-            pushUndo()
+            if (!eraseUndoPushedRef.current) {
+              pushUndo()
+              eraseUndoPushedRef.current = true
+            }
             const layer = getActiveLayer(pg)
             const changedMap = new Map(changed.map((c) => [c.element.id, c.newUrl]))
             layer.images = layer.images.map((img) => {
@@ -2595,6 +2621,8 @@ export function Editor() {
           }
         }
         eraseSessionRef.current = null
+        eraseUndoPushedRef.current = false
+        eraseMaskRef.current = null
         erasePendingRef.current.to = null
         erasePendingRef.current.scheduled = false
       }
@@ -3167,10 +3195,9 @@ export function Editor() {
           {showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
             <ToolCursor
               ref={toolCursorRef}
-              size={cursorSize(tool, settings)}
+              size={cursorDisplaySize(tool, settings, zoomRef.current, pointerPressureRef.current)}
               color={cursorColor(tool, settings)}
               translucent={tool === 'highlighter'}
-              exactSize={tool === 'eraser'}
             />
           )}
           {tool === 'text' && inlineText && page && (
@@ -3243,6 +3270,17 @@ function cursorSize(tool: ToolKind, settings: ReturnType<typeof useAppStore.getS
   return 0
 }
 
+function cursorDisplaySize(
+  tool: ToolKind,
+  settings: ReturnType<typeof useAppStore.getState>['settings'],
+  zoom: number,
+  pressure: number,
+): number {
+  const size = cursorSize(tool, settings)
+  const pressureSize = tool === 'pen' ? size * Math.max(0.15, Math.min(1, pressure)) : size
+  return Math.max(1, pressureSize * zoom)
+}
+
 function cursorColor(tool: ToolKind, settings: ReturnType<typeof useAppStore.getState>['settings']): string {
   if (tool === 'pen') return settings.lastPenColor
   if (tool === 'highlighter') return settings.lastHighlighterColor
@@ -3255,12 +3293,9 @@ const ToolCursor = React.forwardRef<
     size: number
     color: string
     translucent?: boolean
-    exactSize?: boolean
   }
->(({ size, color, translucent, exactSize = false }, ref) => {
-  const diameter = exactSize
-    ? Math.max(3, size)
-    : Math.max(3, Math.min(56, size * 2.5))
+>(({ size, color, translucent }, ref) => {
+  const diameter = Math.max(1, size)
   return (
     <div
       ref={ref}
@@ -3272,12 +3307,7 @@ const ToolCursor = React.forwardRef<
         borderColor: color,
         background: translucent ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.15)',
       }}
-    >
-      <span
-        className="tool-cursor-center"
-        style={{ background: color }}
-      />
-    </div>
+    />
   )
 })
 
@@ -3689,117 +3719,6 @@ function rotateGroupBy(
       rotation: Math.round(((t.rotation + delta) % 360 + 360) % 360),
     }
   })
-}
-
-function splitStrokeByCircle(stroke: Stroke, cx: number, cy: number, r: number): Stroke[] {
-  const pts = stroke.points
-  if (pts.length === 0) return []
-  const inside = (p: { x: number; y: number }) =>
-    (p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) <= r * r
-  const chunks: { x: number; y: number; pressure: number }[][] = []
-  let cur: { x: number; y: number; pressure: number }[] = []
-
-  const flush = () => {
-    if (cur.length > 0) {
-      chunks.push(cur)
-      cur = []
-    }
-  }
-
-  for (let i = 0; i < pts.length; i++) {
-    if (i === 0) {
-      if (!inside(pts[0])) cur.push(pts[0])
-      continue
-    }
-    const a = pts[i - 1]
-    const b = pts[i]
-    const ai = inside(a)
-    const bi = inside(b)
-    if (ai && bi) continue
-    if (!ai && !bi) {
-      if (distToSegment(cx, cy, a.x, a.y, b.x, b.y) >= r) {
-        cur.push(b)
-        continue
-      }
-      const ips = segmentCircleIntersections(a, b, cx, cy, r)
-      if (ips) {
-        cur.push(pointAt(a, b, ips.t1))
-        flush()
-        cur.push(pointAt(a, b, ips.t2))
-        cur.push(b)
-      } else {
-        cur.push(b)
-      }
-      continue
-    }
-    const ip = segmentCircleIntersection(a, b, cx, cy, r)
-    if (ai && !bi) {
-      if (ip) cur.push(ip)
-      cur.push(b)
-    } else {
-      if (ip) cur.push(ip)
-      flush()
-    }
-  }
-  flush()
-
-  return chunks.map((chunk) => ({
-    ...stroke,
-    id: newId(),
-    points: chunk,
-  }))
-}
-
-function segmentCircleIntersection(
-  a: { x: number; y: number; pressure: number },
-  b: { x: number; y: number; pressure: number },
-  cx: number,
-  cy: number,
-  r: number,
-): { x: number; y: number; pressure: number } | null {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const fx = a.x - cx
-  const fy = a.y - cy
-  const A = dx * dx + dy * dy
-  if (A === 0) return null
-  const B = 2 * (fx * dx + fy * dy)
-  const C = fx * fx + fy * fy - r * r
-  const disc = B * B - 4 * A * C
-  if (disc < 0) return null
-  const sqrt = Math.sqrt(disc)
-  let t = (-B + sqrt) / (2 * A)
-  if (t < 0 || t > 1) t = (-B - sqrt) / (2 * A)
-  t = clamp(t, 0, 1)
-  return {
-    x: a.x + dx * t,
-    y: a.y + dy * t,
-    pressure: (a.pressure + b.pressure) / 2,
-  }
-}
-
-function segmentCircleIntersections(
-  a: { x: number; y: number; pressure: number },
-  b: { x: number; y: number; pressure: number },
-  cx: number,
-  cy: number,
-  r: number,
-): { t1: number; t2: number } | null {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const fx = a.x - cx
-  const fy = a.y - cy
-  const A = dx * dx + dy * dy
-  if (A === 0) return null
-  const B = 2 * (fx * dx + fy * dy)
-  const C = fx * fx + fy * fy - r * r
-  const disc = B * B - 4 * A * C
-  if (disc < 0) return null
-  const sqrt = Math.sqrt(disc)
-  const t1 = (-B - sqrt) / (2 * A)
-  const t2 = (-B + sqrt) / (2 * A)
-  if (t1 <= 0 || t2 >= 1) return null
-  return { t1, t2 }
 }
 
 function pointAt(

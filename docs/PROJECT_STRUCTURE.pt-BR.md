@@ -214,7 +214,7 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 - `Folder { id, name, parentId, createdAt, order? }` — pastas aninhadas; `order` é a posição entre os irmãos do mesmo `parentId` (usado na reordenação por arrastar).
 - `Notebook { id, name, folderId, pages, createdAt, updatedAt, order? }` — caderno; `order` é a posição entre os cadernos do mesmo `folderId` (usado na reordenação por arrastar).
 - `Page { id, template, width, height, rotation, backgroundColor, layers, layerFolders, activeLayerId, pdf?, createdAt, updatedAt }` — o conteúdo editável fica todo nas **camadas** (`layers`); `activeLayerId` persiste a camada ativa (fallback para a última do array se nulo/inexistente). Os antigos arrays planos `strokes`/`images`/`texts` foram **removidos**. `layerFolders` agrupa camadas visualmente (ver `LayerFolder`).
-- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts }` — camada de conteúdo. Ordem do array `layers`: **índice 0 = base** (desenhada primeiro), **último = topo**. Dentro de cada camada mantém-se a ordem de sub-desenho **imagens → textos → traços**. Uma camada travada (`locked: true`) não recebe conteúdo nem é editável no canvas (desenho/borracha/seleção/mover), mas continua podendo ser renomeada, reordenada, duplicada, excluída, ocultada, ter opacidade ajustada, tornar-se ativa e participar de um merge. `folderId` é o `LayerFolder` ao qual a camada pertence (`null`/indefinido = raiz, ou seja, sem pasta).
+- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts, strokeErasures? }` — camada de conteúdo. Ordem do array `layers`: **índice 0 = base** (desenhada primeiro), **último = topo**. Dentro de cada camada mantém-se a ordem de sub-desenho **imagens → textos → traços**. `strokeErasures` armazena caminhos circulares de borracha em coordenadas da página, associados aos IDs dos traços existentes no início do gesto, para que desenhos posteriores continuem visíveis sobre a área apagada. Uma camada travada (`locked: true`) não recebe conteúdo nem é editável no canvas (desenho/borracha/seleção/mover), mas continua podendo ser renomeada, reordenada, duplicada, excluída, ocultada, ter opacidade ajustada, tornar-se ativa e participar de um merge. `folderId` é o `LayerFolder` ao qual a camada pertence (`null`/indefinido = raiz, ou seja, sem pasta).
 - `LayerFolder { id, name, order? }` — **pasta de camadas** (um único nível, sem aninhamento). Vive dentro do JSON da página (`Page.layerFolders`), então o sync/backup de cadernos existente já a carrega. `order` é a posição da pasta entre as irmãs (usado na reordenação por arrastar). Uma pasta agrupa camadas visualmente; excluir uma pasta move suas camadas para a raiz (`folderId = null`).
 - `Stroke { id, kind(pen|highlighter), color, size, points[] }` — traço com pressão.
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
@@ -245,7 +245,7 @@ Banco `mamaco-notes`, versão **9**, com object stores:
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
 | `notebooks` | `NotebookSummary[]` (metadados leves: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
-| `notebooksContent` | `{ id, pages: Page[] }` — desenhos completos das páginas; os fundos de PDF são armazenados **leves** (`pdf` sem `dataUrl`) | `id` |
+| `notebooksContent` | `{ id, pages: Page[] }` — desenhos completos das páginas; os fundos de PDF são armazenados **leves** (`pdf` sem `dataUrl`); camadas podem conter máscaras persistidas de apagamento parcial (`strokeErasures`) | `id` |
 | `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — imagens de fundo de páginas de PDF (imutáveis, gravadas apenas quando novas) | `pageId` (+ índice `byNotebook` em `notebookId`) |
 | `settings` | 1 registro `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 registro `CloudSyncState` | `id` |
@@ -528,7 +528,7 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   - **Rotações nunca empurram undo vazio**: `pushUndo()` é chamado **somente quando uma
     mudança real é aplicada** à página. Traços são empurrados no commit em `onPointerUp`
     (só se `stroke.points.length >= 2`); a borracha empurra apenas se
-    `session.commit()` retornou elementos alterados (tanto no fim do gesto quanto no
+    a borracha parcial registra uma entrada quando cria a máscara, enquanto a borracha em imagens só empurra quando `session.commit()` retorna elementos alterados (tanto no fim do gesto quanto no
     aborto por pan de vários dedos); e tanto o gesto de rotação por 3 dedos quanto o
     `page-rotate` (seleção com rotação livre) empurram no primeiro movimento que muda o
     ângulo real (`|delta| > 1°`, flags `pinchRotationUndoPushedRef`/

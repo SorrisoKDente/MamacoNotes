@@ -215,7 +215,7 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 - `Folder { id, name, parentId, createdAt, order? }` — nested folders; `order` is the position among siblings of the same `parentId` (used in drag-and-drop reordering).
 - `Notebook { id, name, folderId, pages, createdAt, updatedAt, order? }` — notebook; `order` is the position among notebooks of the same `folderId` (used in drag-and-drop reordering).
 - `Page { id, template, width, height, rotation, backgroundColor, layers, layerFolders, activeLayerId, pdf?, createdAt, updatedAt }` — all editable content resides in **layers**; `activeLayerId` persists the active layer (falls back to the last one in the array if null/non-existent). The old flat arrays `strokes`/`images`/`texts` have been **removed**. `layerFolders` groups layers visually (see `LayerFolder`).
-- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts }` — content layer. `layers` array order: **index 0 = bottom** (drawn first), **last = top**. Inside each layer, the sub-drawing order is **images → texts → strokes**. A locked layer (`locked: true`) receives no content and is not editable on the canvas (draw/erase/select/move), but can still be renamed, reordered, duplicated, deleted, hidden, have its opacity adjusted, become active, and participate in a merge. `folderId` is the `LayerFolder` this layer belongs to (`null`/`undefined` = root, i.e. no folder).
+- `Layer { id, name, visible, opacity, locked, folderId, strokes, images, texts, strokeErasures? }` — content layer. `layers` array order: **index 0 = bottom** (drawn first), **last = top**. Inside each layer, the sub-drawing order is **images → texts → strokes**. `strokeErasures` stores circular eraser paths in page coordinates, associated with the stroke IDs that existed when erasing began, so later strokes remain visible over the erased area. A locked layer (`locked: true`) receives no content and is not editable on the canvas (draw/erase/select/move), but can still be renamed, reordered, duplicated, deleted, hidden, have its opacity adjusted, become active, and participate in a merge. `folderId` is the `LayerFolder` this layer belongs to (`null`/`undefined` = root, i.e. no folder).
 - `LayerFolder { id, name, order? }` — **layer folder** (one level, no nesting). Lives inside the page JSON (`Page.layerFolders`), so existing notebook sync/backup already carries it. `order` is the folder's position among siblings (used in drag-and-drop reordering). A folder groups layers visually; deleting a folder moves its layers to the root (`folderId = null`).
 - `Stroke { id, kind(pen|highlighter), color, size, points[] }` — stroke with pressure.
 - `ImageElement { id, name, dataUrl, x, y, width, height, rotation }`.
@@ -246,7 +246,7 @@ Database `mamaco-notes`, version **9**, with object stores:
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
 | `notebooks` | `NotebookSummary[]` (light metadata: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
-| `notebooksContent` | `{ id, pages: Page[] }` — full page drawings; PDF backgrounds are stored **light** (`pdf` without `dataUrl`) | `id` |
+| `notebooksContent` | `{ id, pages: Page[] }` — full page drawings; PDF backgrounds are stored **light** (`pdf` without `dataUrl`). Layers may include persisted circular `strokeErasures` masks for precise partial erasing. | `id` |
 | `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — immutable PDF page background images (written only when new) | `pageId` (+ index `byNotebook` on `notebookId`) |
 | `settings` | 1 record `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 record `CloudSyncState` | `id` |
@@ -525,7 +525,8 @@ Key points:
     is persisted via `schedulePersist()`.
   - **Rotations never push empty undo**: `pushUndo()` is called **only when a real
     change is applied** to the page. Strokes are pushed on commit in `onPointerUp`
-    (only if `stroke.points.length >= 2`); the eraser pushes only if `session.commit()`
+    (only if `stroke.points.length >= 2`); partial stroke erasing records one
+    undo entry when its mask is created, while image erasing pushes only if `session.commit()`
     returned changed elements (both at the end of the gesture and on abort by
     multi-finger pan); and both the 3-finger rotation gesture and `page-rotate` (free
     rotation selection) push on the first movement that changes the real angle

@@ -56,6 +56,14 @@ export interface Stroke {
   points: StrokePoint[]
 }
 
+export interface StrokeErasure {
+  radius: number
+  points: { x: number; y: number }[]
+  strokeIds?: string[]
+  x?: number
+  y?: number
+}
+
 export interface ImageElement {
   id: string
   name: string
@@ -89,6 +97,7 @@ export interface Layer {
   strokes: Stroke[]
   images: ImageElement[]
   texts: TextElement[]
+  strokeErasures?: StrokeErasure[]
 }
 
 export interface Page {
@@ -404,6 +413,7 @@ export function makeLayer(
     strokes?: Stroke[]
     images?: ImageElement[]
     texts?: TextElement[]
+    strokeErasures?: StrokeErasure[]
   },
 ): Layer {
   return {
@@ -416,6 +426,7 @@ export function makeLayer(
     strokes: opts?.strokes ?? [],
     images: opts?.images ?? [],
     texts: opts?.texts ?? [],
+    strokeErasures: opts?.strokeErasures ?? [],
   }
 }
 
@@ -435,17 +446,30 @@ export function normalizePage(
           texts: page.texts ?? [],
         }),
       ]
-  ).map((layer) => ({
-    id: layer.id,
-    name: layer.name ?? 'Camada 1',
-    visible: layer.visible ?? true,
-    opacity: layer.opacity ?? 1,
-    locked: layer.locked ?? false,
-    folderId: layer.folderId ?? null,
-    strokes: layer.strokes ?? [],
-    images: layer.images ?? [],
-    texts: layer.texts ?? [],
-  }))
+  ).map((layer) => {
+    const strokeErasures = (layer.strokeErasures ?? []).reduce<StrokeErasure[]>((paths, erasure) => {
+      if (Array.isArray(erasure.points)) {
+        paths.push({ radius: erasure.radius, points: erasure.points.map((p) => ({ ...p })), strokeIds: erasure.strokeIds })
+      } else if (typeof erasure.x === 'number' && typeof erasure.y === 'number') {
+        const path = paths.find((candidate) => candidate.radius === erasure.radius)
+        if (path) path.points.push({ x: erasure.x, y: erasure.y })
+        else paths.push({ radius: erasure.radius, points: [{ x: erasure.x, y: erasure.y }] })
+      }
+      return paths
+    }, [])
+    return {
+      id: layer.id,
+      name: layer.name ?? 'Camada 1',
+      visible: layer.visible ?? true,
+      opacity: layer.opacity ?? 1,
+      locked: layer.locked ?? false,
+      folderId: layer.folderId ?? null,
+      strokes: layer.strokes ?? [],
+      images: layer.images ?? [],
+      texts: layer.texts ?? [],
+      strokeErasures,
+    }
+  })
   const layerFolders: LayerFolder[] = (page.layerFolders ?? []).map((f) => ({
     id: f.id,
     name: f.name ?? 'Pasta',
