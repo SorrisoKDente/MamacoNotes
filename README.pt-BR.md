@@ -35,6 +35,7 @@ Além da tecnologia, o **Mamaco Notes** representa uma jornada pessoal de aprend
     -   Borracha eficiente (apaga traços e partes de imagens).
     -   Ferramenta de seleção com regiões de forma livre, retângulo e círculo.
     -   Seleção delimitada (divide traços e recorta imagens dinamicamente).
+    -   **Ferramenta de Texto aprimorada**: suporte a cores de fundo individuais, marcadores (ponto/números) e orientação de texto vertical.
 -   **Gerenciamento de Camadas**: Sistema de camadas de nível profissional que permite:
     -   Adicionar, renomear, duplicar e mesclar camadas.
     -   Ajustar opacidade e alternar visibilidade ou bloqueio.

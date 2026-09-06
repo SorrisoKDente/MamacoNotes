@@ -35,6 +35,7 @@ Beyond the technology, **Mamaco Notes** represents a personal learning journey. 
     -   Efficient Eraser (strokes and image erasing).
     -   Selection tool with free-form, rectangle, and circle regions.
     -   Delimited selection (split strokes and crop images dynamically).
+    -   **Improved Text tool**: support for individual background colors, markers (bullet/numbered), and vertical text orientation.
 -   **Layer Management**: Professional-grade layer system allowing you to:
     -   Add, rename, duplicate, and merge layers.
     -   Adjust opacity and toggle visibility/locking.
