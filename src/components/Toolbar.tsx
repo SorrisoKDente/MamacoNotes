@@ -74,8 +74,13 @@ export function Toolbar() {
   }
 
   function toggleRotation() {
+    const next = !rotationOpen
     setPanelOpen(false)
-    setRotationOpen(!rotationOpen)
+    setRotationOpen(next)
+    if (next) {
+      // ponytail: switch to select tool to enable free rotation gesture
+      setTool('select')
+    }
   }
 
   return (
@@ -87,41 +92,41 @@ export function Toolbar() {
         <ToolbarButton
           icon={<IconPen />}
           label={t('tool.pen')}
-          active={tool === 'pen'}
+          active={!rotationOpen && tool === 'pen'}
           onClick={() => selectTool('pen')}
           shortcut={settings.shortcuts.pen}
         />
         <ToolbarButton
           icon={<PenIcon size={settings.lastHighlighterSize} color={settings.lastHighlighterColor} line />}
           label={t('tool.highlighter')}
-          active={tool === 'highlighter'}
+          active={!rotationOpen && tool === 'highlighter'}
           onClick={() => selectTool('highlighter')}
           shortcut={settings.shortcuts.highlighter}
         />
         <ToolbarButton
           icon={<IconEraser />}
           label={t('tool.eraser')}
-          active={tool === 'eraser'}
+          active={!rotationOpen && tool === 'eraser'}
           onClick={() => selectTool('eraser')}
           shortcut={settings.shortcuts.eraser}
         />
         <ToolbarButton
           icon={<IconKeyboard />}
           label={t('tool.text')}
-          active={tool === 'text'}
+          active={!rotationOpen && tool === 'text'}
           onClick={() => selectTool('text')}
           shortcut={settings.shortcuts.text}
         />
         <ToolbarButton
           icon={<IconCursor />}
           label={t('tool.select')}
-          active={tool === 'select'}
+          active={!rotationOpen && tool === 'select'}
           onClick={() => selectTool('select')}
         />
         <ToolbarButton
           icon={<IconHand />}
           label={t('tool.pan')}
-          active={tool === 'pan'}
+          active={!rotationOpen && tool === 'pan'}
           onClick={() => selectTool('pan')}
         />
         <ToolbarButton
