@@ -620,7 +620,7 @@ export const useAppStore = create<AppState>((set, get) => {
       favorite: notebook.favorite,
     }
     const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? summary : n))
-    set({ notebooks, activeNotebook: notebook, dataVersion: get().dataVersion + 1 })
+    set({ notebooks, activeNotebook: { ...notebook }, dataVersion: get().dataVersion + 1 })
     await db.putNotebook(notebook)
   }
 

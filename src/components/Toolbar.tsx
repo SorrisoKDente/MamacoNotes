@@ -474,9 +474,8 @@ function SelectPanel() {
 
   function rotateSelection(delta: number) {
     window.dispatchEvent(new CustomEvent('ink:selection-rotate', { detail: { delta } }))
-    const next = imageId
-      ? liveImageRotation()
-      : (((selDegRef.current + delta) % 360) + 360) % 360
+    const current = imageId ? liveImageRotation() : selDegRef.current
+    const next = (((current + delta) % 360) + 360) % 360
     selDegRef.current = next
     setSelDeg(next)
     setSelDegDraft(String(Math.round(next)))
@@ -504,9 +503,10 @@ function SelectPanel() {
     window.dispatchEvent(new CustomEvent('ink:image-rotate', { detail: norm }))
     setImageRotation(norm)
     setDegDraft(String(Math.round(norm)))
-    selDegRef.current = norm
+    // ponytail: also sync selection draft if image is the only thing selected
     setSelDeg(norm)
     setSelDegDraft(String(Math.round(norm)))
+    selDegRef.current = norm
   }
 
   function commitImageDeg() {
@@ -623,7 +623,10 @@ function SelectPanel() {
       <div className="rotate-stepper">
         <button
           className="stepper-btn rotate-btn"
-          onClick={() => rotateSelection(-15)}
+          onClick={() => {
+            rotateSelection(-15)
+            setSelDegDraft(String(Math.round(selDegRef.current)))
+          }}
           title={t('tool.decrease15')}
         >
           −15°
@@ -654,7 +657,10 @@ function SelectPanel() {
         </div>
         <button
           className="stepper-btn rotate-btn"
-          onClick={() => rotateSelection(15)}
+          onClick={() => {
+            rotateSelection(15)
+            setSelDegDraft(String(Math.round(selDegRef.current)))
+          }}
           title={t('tool.increase15')}
         >
           +15°
@@ -665,8 +671,9 @@ function SelectPanel() {
           className={`btn small ${selDeg === 0 ? 'active-toggle' : ''}`}
           onClick={() => {
             const current = imageId ? liveImageRotation() : selDegRef.current
-            if (current === 0) return
-            window.dispatchEvent(new CustomEvent('ink:selection-rotate', { detail: { delta: -current } }))
+            if (current !== 0) {
+              window.dispatchEvent(new CustomEvent('ink:selection-rotate', { detail: { delta: -current } }))
+            }
             selDegRef.current = 0
             setSelDeg(0)
             setSelDegDraft('0')
@@ -734,7 +741,15 @@ function RotationPanel() {
     <div className="tool-panel rotate-screen">
       <div className="panel-label">{t('tool.rotateScreen')}</div>
       <div className="rotate-stepper">
-        <button className="stepper-btn rotate-btn" onClick={() => void rotatePageBy(currentPageIndex, -15)} title={t('tool.decrease15')}>
+        <button
+          className="stepper-btn rotate-btn"
+          onClick={() => {
+            const next = (((rotation - 15) % 360) + 360) % 360
+            void rotatePageBy(currentPageIndex, -15)
+            setDegDraft(String(Math.round(next)))
+          }}
+          title={t('tool.decrease15')}
+        >
           −15°
         </button>
         <div className="deg-input-wrap">
@@ -754,14 +769,25 @@ function RotationPanel() {
           />
           <span className="deg-unit">°</span>
         </div>
-        <button className="stepper-btn rotate-btn" onClick={() => void rotatePageBy(currentPageIndex, 15)} title={t('tool.increase15')}>
+        <button
+          className="stepper-btn rotate-btn"
+          onClick={() => {
+            const next = (((rotation + 15) % 360) + 360) % 360
+            void rotatePageBy(currentPageIndex, 15)
+            setDegDraft(String(Math.round(next)))
+          }}
+          title={t('tool.increase15')}
+        >
           +15°
         </button>
       </div>
       <div className="panel-row">
         <button
           className={`btn small ${rotation === 0 ? 'active-toggle' : ''}`}
-          onClick={() => void updatePage(currentPageIndex, { rotation: 0 })}
+          onClick={() => {
+            void updatePage(currentPageIndex, { rotation: 0 })
+            setDegDraft('0') // ponytail: manual reset to fix desync when value is already 0
+          }}
           title={t('tool.resetRotationTitle', { shortcut: settings.shortcuts.rotateReset })}
         >
           {t('tool.resetRotationButton', { shortcut: settings.shortcuts.rotateReset })}
