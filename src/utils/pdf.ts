@@ -32,8 +32,3 @@ export async function renderPdfPages(file: File): Promise<RenderedPdfPage[]> {
   pdf.destroy()
   return pages
 }
-
-export async function pdfPageToImage(file: File): Promise<RenderedPdfPage> {
-  const pages = await renderPdfPages(file)
-  return pages[0]
-}

@@ -9,10 +9,6 @@ export function isNativePlatform(): boolean {
   )
 }
 
-export function isElectron(): boolean {
-  return !!(window as any).inkfolioDesktop
-}
-
 /**
  * Returns true if the fullscreen button should be shown.
  * It should show on Web (PWA) and Desktop (Electron), but NOT on native mobile apps (APK).

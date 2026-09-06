@@ -8,17 +8,7 @@ import { uploadFileStreaming } from './chunkedIo'
 const NOTEBOOKS_DIR = 'notebooks'
 const FOLDERS_DIR = 'folders'
 
-const MIME_MAP: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  txt: 'text/plain',
-  json: 'application/json',
-}
-
+// ponytail: deleted unused MIME_MAP
 function joinUrl(base: string, path: string): string {
   const cleanBase = base.replace(/\/+$/, '')
   const cleanPath = path.replace(/^\/+/, '')
@@ -496,5 +486,3 @@ export function makeTransport(settings: CloudSettings): Transport {
     deleteRemoteFile: (filePath) => deleteRemoteFile(settings, filePath),
   }
 }
-
-export { MIME_MAP }

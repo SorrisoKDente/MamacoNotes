@@ -140,35 +140,6 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle('pick-directory', async () => {
-      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-      const result = await dialog.showOpenDialog(win, {
-        title: m('electron.pickDirectoryTitle'),
-        properties: ['openDirectory', 'createDirectory'],
-      })
-      if (result.canceled || result.filePaths.length === 0) return null
-      return result.filePaths[0]
-    })
-
-    ipcMain.handle('write-file', async (_e, dir, filename, content) => {
-      try {
-        await fs.promises.mkdir(dir, { recursive: true })
-        await fs.promises.writeFile(path.join(dir, filename), content, 'utf-8')
-        return true
-      } catch (err) {
-        console.error('Falha ao gravar arquivo local:', err)
-        return false
-      }
-    })
-
-    ipcMain.handle('read-file', async (_e, dir, filename) => {
-      try {
-        return await fs.promises.readFile(path.join(dir, filename), 'utf-8')
-      } catch {
-        return null
-      }
-    } )
-
     ipcMain.handle('save-file', async (_e, defaultName, content) => {
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       const result = await dialog.showSaveDialog(win, {

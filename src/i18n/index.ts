@@ -28,10 +28,7 @@ export function t(key: string, params?: Record<string, string | number>): string
   return str
 }
 
-export function getLanguage(): Language {
-  return currentLanguage
-}
-
+// ponytail: deleted getLanguage
 export function applyDocumentLanguage(lang: Language): void {
   if (typeof document === 'undefined') return
   document.documentElement.lang = lang
@@ -52,10 +49,7 @@ export function setLanguage(lang: Language): void {
   listeners.forEach((fn) => fn())
 }
 
-export function initI18n(lang: Language): void {
-  currentLanguage = lang
-}
-
+// ponytail: deleted initI18n
 export function useI18n(): { t: typeof t; lang: Language } {
   useSyncExternalStore(subscribe, () => currentLanguage)
   return { t, lang: currentLanguage }

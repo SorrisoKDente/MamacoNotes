@@ -408,7 +408,6 @@ interface AppState {
   duplicatePage: (index: number) => Promise<void>
   deletePage: (index: number) => Promise<void>
   movePage: (from: number, to: number) => Promise<void>
-  rotatePage: (index: number) => Promise<void>
   rotatePageBy: (index: number, delta: number) => Promise<void>
   updatePage: (index: number, patch: Partial<Page>) => Promise<void>
 
@@ -416,7 +415,6 @@ interface AppState {
   renameLayer: (index: number, name: string) => Promise<void>
   duplicateLayer: (index: number) => Promise<void>
   deleteLayer: (index: number) => Promise<void>
-  moveLayer: (from: number, to: number) => Promise<void>
   moveLayerToFolder: (
     from: number,
     folderId: string | null,
@@ -447,7 +445,6 @@ interface AppState {
   canRedo: boolean
   addImageToPage: (dataUrl: string, name: string, center?: { x: number; y: number }) => Promise<string | undefined>
   addTextToPage: (text: string, center?: { x: number; y: number }) => Promise<string | undefined>
-  addPdfToPage: (dataUrl: string, name: string) => Promise<void>
   importPdfNotebook: (
     name: string,
     folderId: string | null,
@@ -1576,10 +1573,6 @@ export const useAppStore = create<AppState>((set, get) => {
       await updateNotebookStorage(notebook)
     },
 
-    async rotatePage(index) {
-      await get().rotatePageBy(index, 90)
-    },
-
     async rotatePageBy(index, delta) {
       const notebook = get().activeNotebook
       if (!notebook) return
@@ -1680,23 +1673,6 @@ export const useAppStore = create<AppState>((set, get) => {
         const above = page.layers[index]
         page.activeLayerId = (below ?? above)?.id ?? page.layers[page.layers.length - 1]?.id ?? null
       }
-      page.updatedAt = Date.now()
-      notebook.updatedAt = Date.now()
-      await updateNotebookStorage(notebook)
-    },
-
-    async moveLayer(from, to) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page || page.layers.length === 0) return
-      const len = page.layers.length
-      const f = Math.max(0, Math.min(from, len - 1))
-      const t = Math.max(0, Math.min(to, len - 1))
-      if (f === t) return
-      get().pushUndo()
-      const [layer] = page.layers.splice(f, 1)
-      page.layers.splice(t, 0, layer)
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
@@ -2129,24 +2105,6 @@ export const useAppStore = create<AppState>((set, get) => {
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
       return el.id
-    },
-
-    async addPdfToPage(dataUrl, name) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
-      get().pushUndo()
-      const img = new Image()
-      await new Promise<void>((resolve) => {
-        img.onload = () => resolve()
-        img.onerror = () => resolve()
-        img.src = dataUrl
-      })
-      page.pdf = { dataUrl, name, pageNumber: 1 }
-      page.updatedAt = Date.now()
-      notebook.updatedAt = Date.now()
-      await updateNotebookStorage(notebook)
     },
 
     async importPdfNotebook(name, folderId, rendered) {

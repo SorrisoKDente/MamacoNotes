@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useAppStore } from '../store'
 import { findShortcutAction, normalizeKey } from '../utils/shortcuts'
 import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
@@ -174,10 +173,4 @@ async function handleExportPdf() {
   const notebook = s.activeNotebook
   if (!notebook || notebook.pages.length === 0) return
   await exportPagesAsPdf(notebook.pages)
-}
-
-export function useEditorShortcuts() {
-  useEffect(() => {
-    return initGlobalShortcuts()
-  }, [])
 }

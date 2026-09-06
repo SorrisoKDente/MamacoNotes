@@ -1,8 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('inkfolioDesktop', {
-  isDesktop: true,
-  platform: process.platform,
   saveFile: (defaultName, content) => ipcRenderer.invoke('save-file', defaultName, content),
   openFile: () => ipcRenderer.invoke('open-file'),
   setLanguage: (lang) => ipcRenderer.send('set-language', lang),
