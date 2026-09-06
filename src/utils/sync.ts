@@ -9,15 +9,13 @@ import type {
   SyncManifestNotebook,
   SyncResult,
 } from '../types'
-import { normalizePage, uid } from '../types'
+import { normalizePage, uid, NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
 import { t } from '../i18n'
 import { RemoteFileNotFoundError } from './webdav'
 import type { Transport } from './webdav'
 import { logger } from './logger'
 
 export const MANIFEST_PATH = 'manifest.json'
-export const NOTEBOOKS_DIR = 'notebooks'
-export const FOLDERS_DIR = 'folders'
 export const FOLDERS_PATH = `${FOLDERS_DIR}/folders.json`
 export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 

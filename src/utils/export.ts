@@ -1,5 +1,6 @@
 import type { ImageElement, Page } from '../types'
 import { drawTemplate, drawStroke, drawTextOnCanvas } from '../renderer/drawUtils'
+import { triggerDownload } from './download'
 
 async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
@@ -83,19 +84,10 @@ function loadAndDrawImage(
   })
 }
 
-function downloadDataUrl(dataUrl: string, filename: string) {
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-}
-
 export async function exportPageAsPng(page: Page, filename?: string): Promise<void> {
   const canvas = await renderPageToCanvas(page)
   const dataUrl = canvas.toDataURL('image/png')
-  downloadDataUrl(dataUrl, filename ?? `pagina-${Date.now()}.png`)
+  triggerDownload(dataUrl, filename ?? `pagina-${Date.now()}.png`)
 }
 
 export async function exportPagesAsPdf(pages: Page[], filename?: string): Promise<void> {
@@ -109,14 +101,7 @@ export async function exportPagesAsPdf(pages: Page[], filename?: string): Promis
 
   const pdf = buildSimplePdf(jpegs, pageW, pageH)
   const blob = new Blob([new Uint8Array(pdf)], { type: 'application/pdf' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename ?? `anotacoes-${Date.now()}.pdf`
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 5000)
+  triggerDownload(blob, filename ?? `anotacoes-${Date.now()}.pdf`)
 }
 
 function buildSimplePdf(

@@ -1,12 +1,11 @@
 import type { CloudSettings } from '../types'
+import { NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
 import { customFetch, downloadText, isConnectionError } from './http'
 import { Capacitor } from '@capacitor/core'
 import { uploadFileStreaming } from './chunkedIo'
 
-const NOTEBOOKS_DIR = 'notebooks'
-const FOLDERS_DIR = 'folders'
 
 // ponytail: deleted unused MIME_MAP
 function joinUrl(base: string, path: string): string {

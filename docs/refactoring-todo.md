@@ -72,13 +72,7 @@ se algum for realmente removível e referenciado — boa rede de segurança).
 > 0 imports em `src/`, `scripts/`, `electron/`. Só aparecem em `package.json` e nos
 > gradle gerados do Capacitor — logo, apenas aumentam o APK.
 
-- [ ] **C1. Remover do `package.json`:** `capacitor-blob-writer` (substituído pelo plugin
-      local `pick-directory` + `chunkedIo.ts`), `capacitor-native-settings`,
-      `@capacitor/filesystem`.
-      Passos: remover do `dependencies` → `npm install` → `npx cap sync android`
-      (regenera `android/app/capacitor.build.gradle` e `android/capacitor.settings.gradle`)
-      → validar compilação Android. Atualizar `docs/PROJECT_STRUCTURE.md:60` (linha do
-      stack Android) e `.pt-BR` no mesmo commit.
+- [x] **C1. Remover do `package.json`:** `capacitor-blob-writer`, `capacitor-native-settings`, `@capacitor/filesystem`
 - [ ] **C2. `pick-directory` (JS stub) — AVALIAR, não mexer por padrão:** `index.js` vazio +
       `index.d.ts` duplicam a interface inline de `chunkedIo.ts`, mas o pacote `file:` é
       necessário para o `cap sync` descobrir o plugin. *Provável `Lean already`.*
@@ -90,19 +84,10 @@ se algum for realmente removível e referenciado — boa rede de segurança).
 
 ## FASE D — Consolidação de duplicação (diffs pequenos, comportamento idêntico)
 
-- [ ] **D1. `src/store.ts` — extrair helper privado para o guard repetido**
-      "notebook ativo + página atual" (`notebook.pages[get().currentPageIndex]` aparece
-      ~18×, com `if (!notebook) return` ~30×). Um helper `activePage()` remove ~20–30 linhas
-      e padroniza o guard. *Risco: médio — contido em store.ts, validar com smoke.*
-- [ ] **D2. `src/utils/export.ts` + `src/utils/backup.ts` — unificar lógica de download
-      (anchor + objectURL + revoke) num único helper** (`downloadDataUrl` de export.ts;
-      backup.ts:86–92 repete o bloco). *-8 linhas.*
-- [ ] **D3. `src/utils/webdav.ts:8-9` × `src/utils/sync.ts:19-20` — `NOTEBOOKS_DIR` /
-      `FOLDERS_DIR` definidos em ambos** → dedup (um importa do outro). *-4 linhas.*
-- [ ] **D4. `src/renderer/canvas.ts` `renderBackground` vs `drawUtils.drawTemplate` —
-      INVESTIGAR** (constantes idênticas RULED_SPACING/GRID_SIZE/MARGIN/cores; podem
-      divergir em DPR/page-level). Se equivalente, reusar `drawTemplate`; senão
-      `Lean already` (anotar motivo). *Não forçar.*
+- [x] **D1. `src/store.ts` — extrair helper privado para o guard repetido**
+- [x] **D2. `src/utils/export.ts` + `src/utils/backup.ts` — unificar lógica de download**
+- [x] **D3. `src/utils/webdav.ts` × `src/utils/sync.ts` — dedup de `NOTEBOOKS_DIR` / `FOLDERS_DIR`**
+- [x] **D4. `src/renderer/canvas.ts` `renderBackground` vs `drawUtils.drawTemplate` — unificados**
 
 **Validação da Fase D:** `npm run typecheck` + smoke + comparar render de thumbnail/export
 não muda (drawTemplate permanece usado pelos mesmos callers).

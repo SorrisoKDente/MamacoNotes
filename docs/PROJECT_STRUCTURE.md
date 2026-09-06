@@ -57,7 +57,7 @@ custom engine (`PageCanvas`). Data is persisted in **IndexedDB**. The global sta
 | Drawing rendering | Canvas 2D (custom engine) | `src/renderer/canvas.ts` |
 | PDF | `pdfjs-dist` | `src/utils/pdf.ts` |
 | Desktop | Electron | `electron/main.cjs`, `electron/preload.cjs` |
-| Android | Capacitor (with `capacitor-blob-writer`, `capacitor-native-settings`, `CapacitorHttp`, and local `pick-directory` plugin for chunked file I/O) | `capacitor.config.ts`, `android/` |
+| Android | Capacitor (with `CapacitorHttp`, and local `pick-directory` plugin for chunked file I/O) | `capacitor.config.ts`, `android/` |
 | PWA | `vite-plugin-pwa` | `vite.config.ts` |
 | Packaging | electron-builder | `package.json` → `build` |
 
@@ -102,7 +102,6 @@ Initialization flow:
 | `index.html` | Base HTML; loads `src/main.tsx` |
 | `capacitor.config.ts` | Capacitor config (Android) |
 | `.gitignore` | Ignored files |
-| `server2.mjs` | Empty file (remnant) |
 
 ### `.agents/` — AI instructions
 
@@ -201,8 +200,7 @@ Initialization flow:
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (stale local baseline recovery, rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
-| `scripts/verify-download.ts` | Standalone verification of the Android download fix: forces the native `downloadText` path (`Capacitor.isNativePlatform()` overridden) against a mocked fetch that mimics the Android server side, asserting `decodeCapacitorData` reconstructs the correct text for parsed-JSON bodies (200), truncated JSON Range chunks (206), base64 chunks (large non-JSON file), 404 handling, the JSON-vs-base64 disambiguation (`isJson` keeps JSON strings as raw text so a chunk inside a base64 `dataUrl` is never base64-decoded), the native chunked download of a large JSON notebook with an embedded base64 image reassembles byte-exact, and the **retry behavior** (`isConnectionError` classification and `withRetry` 500ms→1s backoff: connection errors are retried, HTTP 4xx/5xx and auth errors are not). Run with `npx tsx scripts/verify-download.ts` |
-| `server2.mjs` | Empty file (remnant) |
+| `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
 
 ---
 

@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import type { AppSettings, Folder, Notebook } from '../types'
 import { pickBackupFile, saveBackupFile } from './chunkedIo'
 import { logger } from './logger'
+import { triggerDownload } from './download'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -83,14 +84,7 @@ export async function exportBackup(
   }
 
   const blob = new Blob([payload], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = BACKUP_FILENAME
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  triggerDownload(blob, BACKUP_FILENAME)
   return true
 }
 

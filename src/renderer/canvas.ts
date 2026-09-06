@@ -2,6 +2,7 @@ import type { Page, Stroke, ToolKind, ImageElement, TextElement, PageViewMode, R
 import { newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
+import { drawTemplate } from './drawUtils'
 
 interface RendererCallbacks {
   onStrokeEnd: (stroke: Stroke) => void
@@ -17,11 +18,6 @@ interface CanvasProps {
   callbacks: RendererCallbacks
 }
 
-const RULED_SPACING = 42
-const GRID_SIZE = 34
-const MARGIN = 60
-const LINE_COLOR = '#c9d4e0'
-const MARGIN_COLOR = '#e88a8a'
 
 export interface SelectionRegion {
   type: 'rect' | 'circle' | 'free'
@@ -443,50 +439,7 @@ export class PageCanvas {
   }
 
   renderBackground(ctx: CanvasRenderingContext2D, page: Page = this.page) {
-    const pad = 4
-    ctx.save()
-    ctx.fillStyle = page.backgroundColor || '#ffffff'
-    ctx.fillRect(0, 0, page.width, page.height)
-
-    if (page.template === 'ruled') {
-      ctx.strokeStyle = LINE_COLOR
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      for (let y = MARGIN; y <= page.height - pad; y += RULED_SPACING) {
-        ctx.moveTo(pad, y)
-        ctx.lineTo(page.width - pad, y)
-      }
-      ctx.stroke()
-      ctx.strokeStyle = MARGIN_COLOR
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(MARGIN, 0)
-      ctx.lineTo(MARGIN, page.height)
-      ctx.stroke()
-    } else if (page.template === 'grid') {
-      ctx.strokeStyle = LINE_COLOR
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      for (let x = pad; x <= page.width - pad; x += GRID_SIZE) {
-        ctx.moveTo(x, 0)
-        ctx.lineTo(x, page.height)
-      }
-      for (let y = pad; y <= page.height - pad; y += GRID_SIZE) {
-        ctx.moveTo(0, y)
-        ctx.lineTo(page.width, y)
-      }
-      ctx.stroke()
-    } else if (page.template === 'dot') {
-      ctx.fillStyle = LINE_COLOR
-      for (let x = GRID_SIZE / 2; x < page.width; x += GRID_SIZE) {
-        for (let y = GRID_SIZE / 2; y < page.height; y += GRID_SIZE) {
-          ctx.beginPath()
-          ctx.arc(x, y, 1.6, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-    }
-    ctx.restore()
+    drawTemplate(ctx, page, 1)
   }
 
   private getImage(dataUrl: string): HTMLImageElement | null {

@@ -2,6 +2,9 @@ export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
 export const APP_VERSION = '2.1.8'
 
+export const NOTEBOOKS_DIR = 'notebooks'
+export const FOLDERS_DIR = 'folders'
+
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
 export interface Rect {

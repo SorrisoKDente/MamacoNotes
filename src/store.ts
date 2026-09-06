@@ -32,6 +32,7 @@ import {
   newId,
   normalizePage,
   uid,
+  NOTEBOOKS_DIR,
 } from './types'
 import { db } from './db'
 import { isMobileNow } from './hooks/useIsMobile'
@@ -40,7 +41,6 @@ import {
   applyConflictChoices,
   FOLDERS_PATH,
   hashFolders,
-  NOTEBOOKS_DIR,
   runSync,
   TOMBSTONE_RETENTION_MS,
 } from './utils/sync'
@@ -248,6 +248,16 @@ function fillFolderOrder(
     }
   }
   return { folders: sortFoldersByOrder(out), changed }
+}
+
+/**
+ * ponytail: central guard for notebook/page actions.
+ */
+function getActiveContext(get: () => AppState) {
+  const notebook = get().activeNotebook
+  if (!notebook) return null
+  const page = notebook.pages[get().currentPageIndex]
+  return page ? { notebook, page, index: get().currentPageIndex } : null
 }
 
 interface PendingResume {
@@ -1595,10 +1605,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addLayer(folderId) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page || page.layers.length === 0) return
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.page.layers.length === 0) return
+      const { notebook, page } = ctx
       get().pushUndo()
       let maxN = 0
       for (const l of page.layers) {
@@ -1623,10 +1632,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameLayer(index, name) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer) return
       const trimmed = name.trim()
@@ -1639,10 +1647,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async duplicateLayer(index) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer) return
       get().pushUndo()
@@ -1655,10 +1662,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteLayer(index) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page || page.layers.length <= 1) return
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.page.layers.length <= 1) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer) return
       const wasActive = layer.id === page.activeLayerId
@@ -1679,10 +1685,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async moveLayerToFolder(from, folderId, beforeId) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page || page.layers.length === 0) return
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.page.layers.length === 0) return
+      const { notebook, page } = ctx
       const layer = page.layers[from]
       if (!layer) return
       const target = folderId ?? null
@@ -1709,10 +1714,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addLayerFolder(name) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const trimmed = name.trim()
       if (!trimmed) return
       get().pushUndo()
@@ -1730,10 +1734,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameLayerFolder(id, name) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const folder = (page.layerFolders ?? []).find((f: LayerFolder) => f.id === id)
       if (!folder) return
       const trimmed = name.trim()
@@ -1746,10 +1749,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteLayerFolder(id) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const folders = page.layerFolders ?? []
       if (!folders.some((f: LayerFolder) => f.id === id)) return
       get().pushUndo()
@@ -1767,10 +1769,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async reorderLayerFolder(id, beforeId) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const folders = page.layerFolders ?? []
       const folder = folders.find((f: LayerFolder) => f.id === id)
       if (!folder) return
@@ -1793,10 +1794,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerVisible(index, visible) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer || layer.visible === visible) return
       get().pushUndo()
@@ -1807,10 +1807,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerOpacity(index, opacity) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer) return
       const clamped = Math.max(0, Math.min(1, opacity))
@@ -1823,10 +1822,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setLayerLocked(index, locked) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = page.layers[index]
       if (!layer || layer.locked === locked) return
       get().pushUndo()
@@ -1837,10 +1835,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setActiveLayer(layerId) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page || page.layers.length === 0) return
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.page.layers.length === 0) return
+      const { notebook, page } = ctx
       if (!page.layers.some((l: Layer) => l.id === layerId)) return
       if (page.activeLayerId === layerId) return
       page.activeLayerId = layerId
@@ -1850,10 +1847,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async mergeSelectedLayers(indices) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const sel = [...new Set(indices.filter((i) => i >= 0 && i < page.layers.length))].sort(
         (a, b) => a - b,
       )
@@ -2009,13 +2005,10 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     pushUndo() {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const notebookId = notebook.id
-      const pageIndex = get().currentPageIndex
-      const page = notebook.pages[pageIndex]
-      if (!page) return
-      undoStack.push({ notebookId, pageIndex, pageSnapshot: clonePage(page) })
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page, index } = ctx
+      undoStack.push({ notebookId: notebook.id, pageIndex: index, pageSnapshot: clonePage(page) })
       if (undoStack.length > 60) undoStack.shift()
       redoStack.length = 0
       set({ canUndo: true, canRedo: false })
@@ -2024,34 +2017,33 @@ export const useAppStore = create<AppState>((set, get) => {
     async undo() {
       const entry = undoStack.pop()
       if (!entry) return
-      const notebook = get().activeNotebook
-      if (!notebook || notebook.id !== entry.notebookId) return
-      const current = notebook.pages[entry.pageIndex]
-      if (current) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
-      notebook.pages[entry.pageIndex] = entry.pageSnapshot
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.notebook.id !== entry.notebookId) return
+      const { notebook, page, index } = ctx
+      if (page) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(page) })
+      notebook.pages[index] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      set({ currentPageIndex: index, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
       await updateNotebookStorage(notebook)
     },
 
     async redo() {
       const entry = redoStack.pop()
       if (!entry) return
-      const notebook = get().activeNotebook
-      if (!notebook || notebook.id !== entry.notebookId) return
-      const current = notebook.pages[entry.pageIndex]
-      if (current) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
-      notebook.pages[entry.pageIndex] = entry.pageSnapshot
+      const ctx = getActiveContext(get)
+      if (!ctx || ctx.notebook.id !== entry.notebookId) return
+      const { notebook, page, index } = ctx
+      if (page) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(page) })
+      notebook.pages[index] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      set({ currentPageIndex: index, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
       await updateNotebookStorage(notebook)
     },
 
     async addImageToPage(dataUrl, name, center) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = getActiveLayer(page)
       if (layer.locked) return
       get().pushUndo()
@@ -2086,10 +2078,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addTextToPage(text, center) {
-      const notebook = get().activeNotebook
-      if (!notebook) return
-      const page = notebook.pages[get().currentPageIndex]
-      if (!page) return
+      const ctx = getActiveContext(get)
+      if (!ctx) return
+      const { notebook, page } = ctx
       const layer = getActiveLayer(page)
       if (layer.locked) return
       get().pushUndo()
