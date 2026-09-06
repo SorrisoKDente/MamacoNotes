@@ -3409,6 +3409,16 @@ function InlineTextInput({
   const rot = ((page.rotation % 360) + 360) % 360
   let x = pageX
   let y = pageY
+
+  // ponytail: find the actual element if editing existing
+  const element = targetId ? getActiveLayer(page).texts.find(t => t.id === targetId) : null
+  const currentColor = element ? element.color : settings.lastTextColor
+  const currentBg = element ? element.backgroundColor : settings.lastTextBackground
+  const currentSize = element ? element.fontSize : settings.lastTextFontSize
+  const currentFamily = element ? element.fontFamily : settings.lastTextFontFamily
+  const currentBold = element ? element.bold : settings.lastTextBold
+  const currentItalic = element ? element.italic : settings.lastTextItalic
+
   if (rot !== 0) {
     const cx = page.width / 2
     const cy = page.height / 2
@@ -3450,12 +3460,12 @@ function InlineTextInput({
       style={{
         left: sx - editorRect.left,
         top: sy - editorRect.top,
-        fontSize: Math.max(13, settings.lastTextFontSize * zoom),
-        color: settings.lastTextColor,
-        fontFamily: settings.lastTextFontFamily,
-        fontStyle: settings.lastTextItalic ? 'italic' : 'normal',
-        fontWeight: settings.lastTextBold ? 700 : 400,
-        background: settings.lastTextBackground ?? 'rgba(20,20,32,0.85)',
+        fontSize: Math.max(13, currentSize * zoom),
+        color: currentColor,
+        fontFamily: currentFamily,
+        fontStyle: currentItalic ? 'italic' : 'normal',
+        fontWeight: currentBold ? 700 : 400,
+        background: currentBg ?? 'rgba(20,20,32,0.85)',
         width: Math.max(220, 420 * zoom),
       }}
     />

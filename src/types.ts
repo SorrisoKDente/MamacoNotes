@@ -548,7 +548,7 @@ export function makeTextElement(
     text,
     x,
     y,
-    width: 400,
+    width: 0,
     rotation: 0,
     fontSize: settings.lastTextFontSize,
     fontFamily: settings.lastTextFontFamily,

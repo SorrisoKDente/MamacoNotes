@@ -31,7 +31,8 @@ export function measureTextElement(
     return { w, h }
   }
   const maxLine = Math.max(1, ...lines.map((l) => ctx.measureText(l).width))
-  const w = Math.max(el.width, maxLine)
+  const padding = el.fontSize * 0.4
+  const w = Math.max(el.width, maxLine + padding * 2)
   const h = lines.length * lineHeight
   ctx.restore()
   return { w, h }
@@ -82,6 +83,7 @@ function drawHorizontalText(
   lineHeight: number,
   fontSize: number,
 ) {
+  const padding = fontSize * 0.4
   ctx.textAlign = el.align
   for (let i = 0; i < lines.length; i++) {
     const prefix =
@@ -94,13 +96,13 @@ function drawHorizontalText(
     const textW = ctx.measureText(text).width
     let startX: number
     if (el.align === 'center') startX = w / 2
-    else if (el.align === 'right') startX = w
-    else startX = 0
+    else if (el.align === 'right') startX = w - padding
+    else startX = padding
     const baseline = i * lineHeight + fontSize * 0.95
     ctx.fillText(text, startX, baseline)
 
     const markerGap = el.marker === 'none' ? 0 : fontSize * 1.1
-    const textStart = el.align === 'left' ? markerGap : startX
+    const textStart = el.align === 'left' ? startX + markerGap : startX
     if (el.underline) {
       ctx.strokeStyle = el.color
       ctx.lineWidth = Math.max(1, fontSize / 16)

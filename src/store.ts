@@ -2088,9 +2088,6 @@ export const useAppStore = create<AppState>((set, get) => {
       const cx = center?.x ?? page.width / 2
       const cy = center?.y ?? page.height / 2
       const el = makeTextElement(text, cx, cy, st)
-      // center it
-      el.x = Math.round(cx - 200) // approx width, will be updated on render
-      el.y = Math.round(cy - 12)  // approx half height
       layer.texts.push(el)
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()

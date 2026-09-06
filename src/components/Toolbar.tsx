@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useTextStore } from '../textStore'
@@ -770,23 +770,56 @@ function TextPanel() {
   const setDraftRotation = useTextStore((s) => s.setDraftRotation)
 
   const [fonts, setFonts] = useState<string[]>([])
+
+  // ponytail: find the selected element to show its properties in the toolbar
+  const activeNb = useAppStore((s) => s.activeNotebook)
+  const selectedElement = useMemo(() => {
+    if (!selectedTextId || !activeNb) return null
+    const page = activeNb.pages[useAppStore.getState().currentPageIndex]
+    if (!page) return null
+    return getActiveLayer(page).texts.find(t => t.id === selectedTextId) ?? null
+  }, [selectedTextId, activeNb])
+
   const [hexColor, setHexColor] = useState(settings.lastTextColor)
   const [hexBg, setHexBg] = useState(settings.lastTextBackground ?? '#ffff00')
 
   useEffect(() => {
+    if (selectedElement) {
+      setHexColor(selectedElement.color)
+      setHexBg(selectedElement.backgroundColor ?? '#ffff00')
+    } else {
+      setHexColor(settings.lastTextColor)
+      setHexBg(settings.lastTextBackground ?? '#ffff00')
+    }
+  }, [selectedElement, settings.lastTextColor, settings.lastTextBackground])
+
+  useEffect(() => {
     void getSystemFonts().then((list) => {
-      const cur = settings.lastTextFontFamily
+      const cur = selectedElement ? selectedElement.fontFamily : settings.lastTextFontFamily
       if (cur && !list.includes(cur)) list = [cur, ...list]
       setFonts(list)
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [selectedElement, settings.lastTextFontFamily])
 
   function applySettings(patch: Partial<typeof settings>) {
     setSettings(patch)
     if (selectedTextId) {
+      // map settings keys back to TextElement properties
+      const elementPatch: any = {}
+      if ('lastTextFontFamily' in patch) elementPatch.fontFamily = patch.lastTextFontFamily
+      if ('lastTextFontSize' in patch) elementPatch.fontSize = patch.lastTextFontSize
+      if ('lastTextColor' in patch) elementPatch.color = patch.lastTextColor
+      if ('lastTextBackground' in patch) elementPatch.backgroundColor = patch.lastTextBackground
+      if ('lastTextBold' in patch) elementPatch.bold = patch.lastTextBold
+      if ('lastTextItalic' in patch) elementPatch.italic = patch.lastTextItalic
+      if ('lastTextUnderline' in patch) elementPatch.underline = patch.lastTextUnderline
+      if ('lastTextStrikethrough' in patch) elementPatch.strikethrough = patch.lastTextStrikethrough
+      if ('lastTextAlign' in patch) elementPatch.align = patch.lastTextAlign
+      if ('lastTextMarker' in patch) elementPatch.marker = patch.lastTextMarker
+      if ('lastTextDirection' in patch) elementPatch.direction = patch.lastTextDirection
+
       window.dispatchEvent(
-        new CustomEvent('ink:text-update', { detail: { id: selectedTextId, patch } }),
+        new CustomEvent('ink:text-update', { detail: { id: selectedTextId, patch: elementPatch } }),
       )
     }
   }
@@ -803,13 +836,24 @@ function TextPanel() {
     window.dispatchEvent(new CustomEvent('ink:text-delete'))
   }
 
-  const currentRotation = selectedTextId ? null : draftRotation
+  const currentFontSize = selectedElement ? selectedElement.fontSize : settings.lastTextFontSize
+  const currentFontFamily = selectedElement ? selectedElement.fontFamily : settings.lastTextFontFamily
+  const currentBold = selectedElement ? selectedElement.bold : settings.lastTextBold
+  const currentItalic = selectedElement ? selectedElement.italic : settings.lastTextItalic
+  const currentUnderline = selectedElement ? selectedElement.underline : settings.lastTextUnderline
+  const currentStrikethrough = selectedElement ? selectedElement.strikethrough : settings.lastTextStrikethrough
+  const currentColor = selectedElement ? selectedElement.color : settings.lastTextColor
+  const currentBg = selectedElement ? selectedElement.backgroundColor : settings.lastTextBackground
+  const currentAlign = selectedElement ? selectedElement.align : settings.lastTextAlign
+  const currentMarker = selectedElement ? selectedElement.marker : settings.lastTextMarker
+  const currentDirection = selectedElement ? selectedElement.direction : settings.lastTextDirection
+  const currentRotation = selectedTextId ? (selectedElement?.rotation ?? 0) : draftRotation
 
   return (
     <div className="tool-panel tool-panel-wide">
       <div className="panel-label">{t('tool.fontSize')}</div>
       <SizeStepper
-        value={settings.lastTextFontSize}
+        value={currentFontSize}
         min={FONT_SIZE_MIN}
         max={FONT_SIZE_MAX}
         onChange={(v) => applySettings({ lastTextFontSize: v })}
@@ -817,7 +861,7 @@ function TextPanel() {
       <div className="panel-label">{t('tool.font')}</div>
       <select
         className="form-input"
-        value={settings.lastTextFontFamily}
+        value={currentFontFamily}
         onChange={(e) => applySettings({ lastTextFontFamily: e.target.value })}
       >
         {fonts.map((f) => (
@@ -829,29 +873,29 @@ function TextPanel() {
       <div className="panel-label">{t('tool.style')}</div>
       <div className="text-style-buttons">
         <button
-          className={`style-btn ${settings.lastTextBold ? 'active' : ''}`}
-          onClick={() => applySettings({ lastTextBold: !settings.lastTextBold })}
+          className={`style-btn ${currentBold ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextBold: !currentBold })}
           title={t('tool.bold')}
         >
           <strong>B</strong>
         </button>
         <button
-          className={`style-btn ${settings.lastTextItalic ? 'active' : ''}`}
-          onClick={() => applySettings({ lastTextItalic: !settings.lastTextItalic })}
+          className={`style-btn ${currentItalic ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextItalic: !currentItalic })}
           title={t('tool.italic')}
         >
           <em>I</em>
         </button>
         <button
-          className={`style-btn ${settings.lastTextUnderline ? 'active' : ''}`}
-          onClick={() => applySettings({ lastTextUnderline: !settings.lastTextUnderline })}
+          className={`style-btn ${currentUnderline ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextUnderline: !currentUnderline })}
           title={t('tool.underline')}
         >
           <u>U</u>
         </button>
         <button
-          className={`style-btn ${settings.lastTextStrikethrough ? 'active' : ''}`}
-          onClick={() => applySettings({ lastTextStrikethrough: !settings.lastTextStrikethrough })}
+          className={`style-btn ${currentStrikethrough ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextStrikethrough: !currentStrikethrough })}
           title={t('tool.strikethrough')}
         >
           <s>S</s>
@@ -859,7 +903,7 @@ function TextPanel() {
       </div>
       <div className="panel-label">{t('tool.textColor')}</div>
       <ColorOptions
-        value={settings.lastTextColor}
+        value={currentColor}
         onSelect={(c) => {
           setHexColor(c)
           applySettings({ lastTextColor: c })
@@ -876,14 +920,14 @@ function TextPanel() {
       <div className="panel-label">{t('tool.textBackground')}</div>
       <div className="panel-row">
         <button
-          className={`btn small ${settings.lastTextBackground === null ? 'active-toggle' : ''}`}
+          className={`btn small ${currentBg === null ? 'active-toggle' : ''}`}
           onClick={() => applySettings({ lastTextBackground: null })}
         >
           {t('tool.noBackground')}
         </button>
       </div>
       <ColorOptions
-        value={settings.lastTextBackground ?? '#ffff00'}
+        value={currentBg ?? '#ffff00'}
         onSelect={(c) => {
           setHexBg(c)
           applySettings({ lastTextBackground: c })
@@ -900,21 +944,21 @@ function TextPanel() {
       <div className="panel-label">{t('tool.alignment')}</div>
       <div className="align-buttons">
         <button
-          className={`align-btn ${settings.lastTextAlign === 'left' ? 'active' : ''}`}
+          className={`align-btn ${currentAlign === 'left' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextAlign: 'left' as TextAlign })}
           title={t('tool.alignLeft')}
         >
           <IconAlignLeft />
         </button>
         <button
-          className={`align-btn ${settings.lastTextAlign === 'center' ? 'active' : ''}`}
+          className={`align-btn ${currentAlign === 'center' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextAlign: 'center' as TextAlign })}
           title={t('tool.alignCenter')}
         >
           <IconAlignCenter />
         </button>
         <button
-          className={`align-btn ${settings.lastTextAlign === 'right' ? 'active' : ''}`}
+          className={`align-btn ${currentAlign === 'right' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextAlign: 'right' as TextAlign })}
           title={t('tool.alignRight')}
         >
@@ -924,21 +968,21 @@ function TextPanel() {
       <div className="panel-label">{t('tool.markers')}</div>
       <div className="marker-buttons">
         <button
-          className={`marker-btn ${settings.lastTextMarker === 'none' ? 'active' : ''}`}
+          className={`marker-btn ${currentMarker === 'none' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextMarker: 'none' as TextMarker })}
           title={t('tool.noMarker')}
         >
           <IconListNone />
         </button>
         <button
-          className={`marker-btn ${settings.lastTextMarker === 'disc' ? 'active' : ''}`}
+          className={`marker-btn ${currentMarker === 'disc' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextMarker: 'disc' as TextMarker })}
           title={t('tool.bulletList')}
         >
           <IconListBullet />
         </button>
         <button
-          className={`marker-btn ${settings.lastTextMarker === 'number' ? 'active' : ''}`}
+          className={`marker-btn ${currentMarker === 'number' ? 'active' : ''}`}
           onClick={() => applySettings({ lastTextMarker: 'number' as TextMarker })}
           title={t('tool.numberedList')}
         >
@@ -947,37 +991,42 @@ function TextPanel() {
       </div>
       <div className="panel-label">{t('tool.textDirection')}</div>
       <div className="mode-buttons">
-        {(
-          [
-            { id: 'horizontal', label: t('tool.horizontal') },
-            { id: 'vertical', label: t('tool.vertical') },
-          ] as { id: TextDirection; label: string }[]
-        ).map((d) => (
-          <button
-            key={d.id}
-            className={`mode-btn ${settings.lastTextDirection === d.id ? 'active' : ''}`}
-            onClick={() => applySettings({ lastTextDirection: d.id })}
-          >
-            {d.label}
-          </button>
-        ))}
+        <button
+          className={`mode-btn ${currentDirection === 'horizontal' ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextDirection: 'horizontal' as TextDirection })}
+        >
+          {t('tool.horizontal')}
+        </button>
+        <button
+          className={`mode-btn ${currentDirection === 'vertical' ? 'active' : ''}`}
+          onClick={() => applySettings({ lastTextDirection: 'vertical' as TextDirection })}
+        >
+          {t('tool.vertical')}
+        </button>
       </div>
+
       <div className="panel-label">{t('tool.textRotation')}</div>
-      <div className="rotate-buttons">
-        {[0, 90, 180, 270].map((deg) => (
-          <button key={deg} className={`btn small ${currentRotation === deg ? 'active-toggle' : ''}`} onClick={() => applyRotation(deg)}>
-            {deg}°
-          </button>
-        ))}
-      </div>
-      <div className="panel-hint">
-        {t('tool.freeRotateTextHint')}
-      </div>
-      <div className="panel-label">{t('tool.text')}</div>
-      <div className="panel-hint">
-        {t('tool.textHint')}
-      </div>
       <div className="panel-row">
+        <button className="icon-btn small" onClick={() => applyRotation(currentRotation - 15)} title={t('tool.decrease15')}>
+          -15°
+        </button>
+        <input
+          type="number"
+          className="form-input small-input"
+          value={Math.round(currentRotation)}
+          onChange={(e) => applyRotation(parseInt(e.target.value, 10) || 0)}
+          title={t('tool.degreesHint')}
+        />
+        <button className="icon-btn small" onClick={() => applyRotation(currentRotation + 15)} title={t('tool.increase15')}>
+          +15°
+        </button>
+        <button className="icon-btn small" onClick={() => applyRotation(0)} title={t('tool.resetRotation0')}>
+          ↺
+        </button>
+      </div>
+      <p className="panel-hint">{t('tool.freeRotateTextHint')}</p>
+
+      <div className="panel-actions">
         <button className="btn small danger" onClick={deleteSelected} disabled={!selectedTextId}>
           {t('tool.deleteSelected')}
         </button>
