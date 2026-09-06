@@ -440,7 +440,9 @@ export class PageCanvas {
   }
 
   renderBackground(ctx: CanvasRenderingContext2D, page: Page = this.page) {
+    ctx.save()
     drawTemplate(ctx, page, 1)
+    ctx.restore()
   }
 
   private getImage(dataUrl: string): HTMLImageElement | null {

@@ -94,7 +94,7 @@ export function Editor() {
 
   const toolCursorRef = useRef<HTMLDivElement>(null)
   const requestRenderIdRef = useRef<number>(0)
-  const isDirtyRef = useRef<boolean>(false)
+  const isDirtyRef = useRef<boolean>(true)
 
   const scrollVTrackRef = useRef<HTMLDivElement>(null)
   const scrollVThumbRef = useRef<HTMLDivElement>(null)
@@ -429,22 +429,23 @@ export function Editor() {
   }
 
   const requestRender = useCallback(() => {
-    if (isDirtyRef.current) return
     isDirtyRef.current = true
-    requestRenderIdRef.current = requestAnimationFrame(() => {
-      isDirtyRef.current = false
-      performRender()
-    })
-  }, [performRender])
+  }, [])
 
   const requestRenderRef = useRef(requestRender)
   requestRenderRef.current = requestRender
 
   useEffect(() => {
-    return () => {
-      if (requestRenderIdRef.current) cancelAnimationFrame(requestRenderIdRef.current)
+    const loop = () => {
+      if (isDirtyRef.current) {
+        isDirtyRef.current = false
+        performRender()
+      }
+      requestRenderIdRef.current = requestAnimationFrame(loop)
     }
-  }, [])
+    requestRenderIdRef.current = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(requestRenderIdRef.current)
+  }, [performRender])
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
@@ -2805,6 +2806,16 @@ export function Editor() {
     return () => canvas.removeEventListener('wheel', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
+
+  useEffect(() => {
+    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+  }, [
+    settings.lastPenSize,
+    settings.lastHighlighterSize,
+    settings.lastEraserSize,
+    settings.lastTextFontSize,
+    updateCursorDOM,
+  ])
 
   useEffect(() => {
     const onZoom = (e: Event) => {
