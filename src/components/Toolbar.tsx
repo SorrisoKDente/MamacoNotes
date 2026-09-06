@@ -20,6 +20,15 @@ export function Toolbar() {
   const redo = useAppStore((s) => s.redo)
 
   const [panelOpen, setPanelOpen] = useState(false)
+  const selectedTextId = useTextStore((s) => s.selectedTextId)
+
+  // ponytail: auto-open panel when a text is selected
+  useEffect(() => {
+    if (selectedTextId) {
+      setPanelOpen(true)
+    }
+  }, [selectedTextId])
+
   const rotationOpen = useAppStore((s) => s.rotationOpen)
   const setRotationOpen = useAppStore((s) => s.setRotationOpen)
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -37,10 +46,13 @@ export function Toolbar() {
     const onPointerDownOutside = (e: PointerEvent) => {
       const el = toolbarRef.current
       if (!el) return
-      if (!el.contains(e.target as Node)) {
-        setPanelOpen(false)
-        setRotationOpen(false)
-      }
+      if (el.contains(e.target as Node)) return
+
+      // ponytail: don't close if clicking the editor to select something
+      if ((e.target as HTMLElement).closest('.editor-area')) return
+
+      setPanelOpen(false)
+      setRotationOpen(false)
     }
     document.addEventListener('pointerdown', onPointerDownOutside)
     return () => document.removeEventListener('pointerdown', onPointerDownOutside)
@@ -49,7 +61,12 @@ export function Toolbar() {
   function selectTool(t: ToolKind) {
     setRotationOpen(false)
     if (t === tool) {
-      setPanelOpen((v) => !v)
+      // ponytail: only toggle if nothing is selected, otherwise keep/re-open
+      if (selectedTextId && t === 'text') {
+        setPanelOpen(true)
+      } else {
+        setPanelOpen((v) => !v)
+      }
     } else {
       setTool(t)
       setPanelOpen(true)
@@ -62,7 +79,7 @@ export function Toolbar() {
   }
 
   return (
-    <div ref={toolbarRef} className="toolbar">
+    <div ref={toolbarRef} className="toolbar" onPointerDown={(e) => e.stopPropagation()}>
       {rotationOpen && <RotationPanel />}
       {panelOpen && <ToolPanel tool={tool} />}
 
@@ -188,6 +205,9 @@ function PenIcon({ size, color, line = false }: { size: number; color: string; l
 }
 
 function ToolPanel({ tool }: { tool: ToolKind }) {
+  const selectedTextId = useTextStore((s) => s.selectedTextId)
+  if (selectedTextId && (tool === 'select' || tool === 'text')) return <TextPanel />
+
   if (tool === 'pen') return <PenPanel />
   if (tool === 'highlighter') return <PenPanel highlighter />
   if (tool === 'eraser') return <EraserPanel />
@@ -773,12 +793,13 @@ function TextPanel() {
 
   // ponytail: find the selected element to show its properties in the toolbar
   const activeNb = useAppStore((s) => s.activeNotebook)
+  const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const selectedElement = useMemo(() => {
     if (!selectedTextId || !activeNb) return null
-    const page = activeNb.pages[useAppStore.getState().currentPageIndex]
+    const page = activeNb.pages[currentPageIndex]
     if (!page) return null
     return getActiveLayer(page).texts.find(t => t.id === selectedTextId) ?? null
-  }, [selectedTextId, activeNb])
+  }, [selectedTextId, activeNb, currentPageIndex])
 
   const [hexColor, setHexColor] = useState(settings.lastTextColor)
   const [hexBg, setHexBg] = useState(settings.lastTextBackground ?? '#ffff00')

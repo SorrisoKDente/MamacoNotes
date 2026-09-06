@@ -453,6 +453,14 @@ export function Editor() {
 
   useEffect(() => {
     if (tool !== 'select') {
+      const selectedTexts = [...selectionRef.current.texts]
+      if (tool === 'text' && selectedTexts.length === 1) {
+        // ponytail: transfer single text selection to text tool context
+        useTextStore.getState().selectText(selectedTexts[0])
+      } else if (tool !== 'text') {
+        // ponytail: only clear text store if we are NOT in text tool
+        useTextStore.getState().selectText(null)
+      }
       selectionRef.current = { strokes: new Set(), images: new Set(), texts: new Set() }
       selectionRegionRef.current = null
       selectionDragRef.current = null
@@ -1019,15 +1027,25 @@ export function Editor() {
   }
 
   function finishSelectionUi() {
-    const selImages = [...selectionRef.current.images]
+    const sel = selectionRef.current
+    const selImages = [...sel.images]
     if (selImages.length === 0) {
       setSelectedImageId(null)
     } else if (
       !selectedImageIdRef.current ||
-      !selectionRef.current.images.has(selectedImageIdRef.current)
+      !sel.images.has(selectedImageIdRef.current)
     ) {
       setSelectedImageId(selImages[0])
     }
+
+    const selTexts = [...sel.texts]
+    if (selTexts.length === 1 && sel.strokes.size === 0 && sel.images.size === 0) {
+      // ponytail: automatically select text in text store for context menu
+      useTextStore.getState().selectText(selTexts[0])
+    } else {
+      useTextStore.getState().selectText(null)
+    }
+
     ctrlSelectRef.current = false
     requestRender()
   }
@@ -1369,6 +1387,8 @@ export function Editor() {
           pg.updatedAt = Date.now()
           notebookRef.current!.updatedAt = Date.now()
           dirtyRef.current = true
+          // ponytail: update store reference to notify other components (Toolbar)
+          useAppStore.setState({ activeNotebook: { ...notebookRef.current! } })
           schedulePersist()
         }
       } else if (value.trim()) {
@@ -1377,9 +1397,13 @@ export function Editor() {
         commitDraftAt(pageX, pageY)
       }
     }
-    ts.selectText(null)
+    // ponytail: only clear selection if we were NOT editing an existing text
+    // this allows styling the text right after typing/blurring.
+    if (!targetId) {
+      ts.selectText(null)
+      ts.setDraft('')
+    }
     ts.setEditingExisting(false)
-    ts.setDraft('')
     ts.setDraftRotation(0)
     setInlineText(null)
     requestRender()
@@ -1952,10 +1976,8 @@ export function Editor() {
             }
           }
           selectionRef.current = singleSelection(hit)
-          if (hit.type === 'image') setSelectedImageId(hit.id)
-          else setSelectedImageId(null)
           recordClick(hit, pagePt)
-          requestRender()
+          finishSelectionUi()
         } else {
           if (hitTestSelectionBounds(pagePt)) {
             pushUndo()
@@ -1984,8 +2006,10 @@ export function Editor() {
             requestRender()
             return
           }
+          // ponytail: clear both selections when clicking empty space
           selectionRef.current = { strokes: new Set(), images: new Set(), texts: new Set() }
           setSelectedImageId(null)
+          useTextStore.getState().selectText(null)
           requestRender()
         }
         return
@@ -2874,6 +2898,8 @@ export function Editor() {
       pg.updatedAt = Date.now()
       nb.updatedAt = Date.now()
       dirtyRef.current = true
+      // ponytail: force store update to refresh Toolbar UI
+      useAppStore.setState({ activeNotebook: { ...nb } })
       requestRenderRef.current()
       schedulePersist()
     }
