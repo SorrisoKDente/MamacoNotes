@@ -1,6 +1,6 @@
 export type TemplateId = 'blank' | 'ruled' | 'grid' | 'dot'
 
-export const APP_VERSION = '2.1.8'
+export const APP_VERSION = '2.2.0'
 
 export const NOTEBOOKS_DIR = 'notebooks'
 export const FOLDERS_DIR = 'folders'
