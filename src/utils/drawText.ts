@@ -14,6 +14,12 @@ export function textFont(el: Pick<TextElement, 'fontSize' | 'fontFamily' | 'bold
   return `${weight} ${style}${el.fontSize}px ${el.fontFamily}`
 }
 
+function getMarkerPrefix(marker: string, index: number): string {
+  if (marker === 'number') return `${index + 1}. `
+  if (marker === 'disc') return '• '
+  return ''
+}
+
 export function measureTextElement(
   ctx: CanvasRenderingContext2D,
   el: TextElement,
@@ -21,17 +27,20 @@ export function measureTextElement(
   const lines = el.text.split('\n')
   const fontSize = el.fontSize
   const lineHeight = fontSize * LINE_HEIGHT_FACTOR
+  const padding = fontSize * 0.4
+
   ctx.save()
   ctx.font = textFont(el)
+
   if (el.direction === 'vertical') {
-    const maxLen = Math.max(1, ...lines.map((l) => l.length))
-    const w = lines.length * fontSize * COLUMN_WIDTH_FACTOR
-    const h = maxLen * lineHeight
+    const maxLen = Math.max(1, ...lines.map((l, i) => (l.length + getMarkerPrefix(el.marker, i).trim().length)))
+    const w = lines.length * fontSize * COLUMN_WIDTH_FACTOR + padding * 2
+    const h = maxLen * lineHeight + padding * 2
     ctx.restore()
     return { w, h }
   }
-  const maxLine = Math.max(1, ...lines.map((l) => ctx.measureText(l).width))
-  const padding = el.fontSize * 0.4
+
+  const maxLine = Math.max(1, ...lines.map((l, i) => ctx.measureText(getMarkerPrefix(el.marker, i) + l).width))
   const w = Math.max(el.width, maxLine + padding * 2)
   const h = lines.length * lineHeight
   ctx.restore()
@@ -86,12 +95,7 @@ function drawHorizontalText(
   const padding = fontSize * 0.4
   ctx.textAlign = el.align
   for (let i = 0; i < lines.length; i++) {
-    const prefix =
-      el.marker === 'number'
-        ? `${i + 1}. `
-        : el.marker === 'disc'
-          ? '•  '
-          : ''
+    const prefix = getMarkerPrefix(el.marker, i)
     const text = prefix + lines[i]
     const textW = ctx.measureText(text).width
     let startX: number
@@ -101,8 +105,9 @@ function drawHorizontalText(
     const baseline = i * lineHeight + fontSize * 0.95
     ctx.fillText(text, startX, baseline)
 
-    const markerGap = el.marker === 'none' ? 0 : fontSize * 1.1
-    const textStart = el.align === 'left' ? startX + markerGap : startX
+    const markerGap = el.marker === 'none' ? 0 : ctx.measureText(prefix).width
+    const textStart = el.align === 'left' ? startX + markerGap : (el.align === 'right' ? startX - textW + markerGap : startX - textW / 2 + markerGap)
+
     if (el.underline) {
       ctx.strokeStyle = el.color
       ctx.lineWidth = Math.max(1, fontSize / 16)
@@ -133,32 +138,44 @@ function drawVerticalText(
 ) {
   const colW = fontSize * COLUMN_WIDTH_FACTOR
   const blockW = lines.length * colW
-  let startX = 0
+  const padding = fontSize * 0.4
+  let startX = padding
   if (el.align === 'center') startX = (w - blockW) / 2
-  else if (el.align === 'right') startX = w - blockW
+  else if (el.align === 'right') startX = w - blockW - padding
+
   ctx.textAlign = 'center'
   for (let c = 0; c < lines.length; c++) {
-    const line = lines[c]
-    const colY = (h - line.length * lineHeight) / 2
+    const prefix = getMarkerPrefix(el.marker, c).trim()
+    const line = prefix + lines[c]
+
+    let colY: number
+    if (el.align === 'center') colY = (h - line.length * lineHeight) / 2
+    else if (el.align === 'right') colY = h - line.length * lineHeight - padding
+    else colY = padding
+
     for (let j = 0; j < line.length; j++) {
       const ch = line[j]
       const y = colY + j * lineHeight + fontSize * 0.95
       ctx.fillText(ch, startX + c * colW + colW / 2, y)
-      if (el.underline) {
-        ctx.strokeStyle = el.color
-        ctx.lineWidth = Math.max(1, fontSize / 16)
-        ctx.beginPath()
-        ctx.moveTo(startX + c * colW + colW / 2 - fontSize / 2, y)
-        ctx.lineTo(startX + c * colW + colW / 2 + fontSize / 2, y)
-        ctx.stroke()
-      }
-      if (el.strikethrough) {
-        ctx.strokeStyle = el.color
-        ctx.lineWidth = Math.max(1, fontSize / 16)
-        ctx.beginPath()
-        ctx.moveTo(startX + c * colW + colW / 2 - fontSize / 2, y - fontSize * 0.45)
-        ctx.lineTo(startX + c * colW + colW / 2 + fontSize / 2, y - fontSize * 0.45)
-        ctx.stroke()
+
+      const isMarker = j < prefix.length
+      if (!isMarker) {
+        if (el.underline) {
+          ctx.strokeStyle = el.color
+          ctx.lineWidth = Math.max(1, fontSize / 16)
+          ctx.beginPath()
+          ctx.moveTo(startX + c * colW + colW / 2 - fontSize / 2, y)
+          ctx.lineTo(startX + c * colW + colW / 2 + fontSize / 2, y)
+          ctx.stroke()
+        }
+        if (el.strikethrough) {
+          ctx.strokeStyle = el.color
+          ctx.lineWidth = Math.max(1, fontSize / 16)
+          ctx.beginPath()
+          ctx.moveTo(startX + c * colW + colW / 2 - fontSize / 2, y - fontSize * 0.45)
+          ctx.lineTo(startX + c * colW + colW / 2 + fontSize / 2, y - fontSize * 0.45)
+          ctx.stroke()
+        }
       }
     }
   }
