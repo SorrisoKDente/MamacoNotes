@@ -7,6 +7,7 @@ import { getSystemFonts } from '../utils/fonts'
 import type { EraserMode, SelectMode, TextAlign, TextDirection, TextMarker, ToolKind } from '../types'
 import { getActiveLayer } from '../types'
 import { useI18n } from '../i18n'
+import { clamp } from '../utils/math'
 
 export function Toolbar() {
   const { t } = useI18n()
@@ -196,10 +197,7 @@ function ToolPanel({ tool }: { tool: ToolKind }) {
   return null
 }
 
-function clampNum(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v))
-}
-
+// ponytail: replaced local clampNum with central clamp
 function SizeStepper({
   value,
   min = 1,
@@ -222,7 +220,7 @@ function SizeStepper({
   function commit() {
     const n = Math.round(Number(draft))
     if (!Number.isNaN(n)) {
-      onChange(clampNum(n, min, max))
+      onChange(clamp(n, min, max))
     } else {
       setDraft(String(value))
     }
@@ -230,7 +228,7 @@ function SizeStepper({
 
   return (
     <div className="size-stepper">
-      <button className="stepper-btn" onClick={() => onChange(clampNum(value - step, min, max))} title={t('tool.decrease')}>
+      <button className="stepper-btn" onClick={() => onChange(clamp(value - step, min, max))} title={t('tool.decrease')}>
         −
       </button>
       <div className="stepper-value-editable">
@@ -250,7 +248,7 @@ function SizeStepper({
         />
         <span className="stepper-unit">{unit}</span>
       </div>
-      <button className="stepper-btn" onClick={() => onChange(clampNum(value + step, min, max))} title={t('tool.increase')}>
+      <button className="stepper-btn" onClick={() => onChange(clamp(value + step, min, max))} title={t('tool.increase')}>
         +
       </button>
     </div>

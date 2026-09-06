@@ -3,6 +3,7 @@ import type { AppSettings, Folder, Notebook } from '../types'
 import { pickBackupFile, saveBackupFile } from './chunkedIo'
 import { logger } from './logger'
 import { triggerDownload } from './download'
+import { isDesktop } from './platform'
 
 const BACKUP_FILENAME = 'mamaco-notes-backup.json'
 
@@ -33,7 +34,7 @@ interface DesktopBridge {
 }
 
 function desktop(): DesktopBridge {
-  return (window as unknown as { inkfolioDesktop?: DesktopBridge }).inkfolioDesktop ?? {}
+  return isDesktop() ? (window as any).inkfolioDesktop : {}
 }
 
 function sanitizeSettingsForBackup(settings: AppSettings | null | undefined): AppSettings | null {

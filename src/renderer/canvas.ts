@@ -3,6 +3,7 @@ import { newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
 import { drawTemplate } from './drawUtils'
+import { clamp } from '../utils/math'
 
 interface RendererCallbacks {
   onStrokeEnd: (stroke: Stroke) => void
@@ -1231,10 +1232,6 @@ function pointInPolygon(
     if (intersect) inside = !inside
   }
   return inside
-}
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v))
 }
 
 function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {

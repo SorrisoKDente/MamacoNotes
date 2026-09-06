@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { Language } from './languages'
 import { ptBRMessages } from './ptBR'
 import { enMessages } from './en'
+import { isDesktop } from '../utils/platform'
 
 let currentLanguage: Language = 'pt-BR'
 const listeners = new Set<() => void>()
@@ -40,11 +41,10 @@ export function setLanguage(lang: Language): void {
   applyDocumentLanguage(lang)
   if (
     typeof window !== 'undefined' &&
-    (window as unknown as { inkfolioDesktop?: { setLanguage?: (l: string) => void } })
-      .inkfolioDesktop?.setLanguage
+    isDesktop() &&
+    (window as any).inkfolioDesktop?.setLanguage
   ) {
-    ;(window as unknown as { inkfolioDesktop: { setLanguage: (l: string) => void } })
-      .inkfolioDesktop.setLanguage(lang)
+    ;(window as any).inkfolioDesktop.setLanguage(lang)
   }
   listeners.forEach((fn) => fn())
 }

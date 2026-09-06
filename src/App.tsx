@@ -12,6 +12,7 @@ import { initGlobalShortcuts } from './hooks/useShortcuts'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useI18n } from './i18n'
 import { checkForUpdates } from './utils/updateCheck'
+import { isNativePlatform } from './utils/platform'
 
 export default function App() {
   const { t } = useI18n()
@@ -94,10 +95,7 @@ export default function App() {
   }, [init])
 
   useEffect(() => {
-    const capacitorGlobal = window as unknown as {
-      Capacitor?: { isNativePlatform?: () => boolean }
-    }
-    if (!capacitorGlobal.Capacitor?.isNativePlatform?.()) return
+    if (!isNativePlatform()) return
     let removeBackButton: (() => void) | null = null
     let cancelled = false
     const initBackButton = async () => {

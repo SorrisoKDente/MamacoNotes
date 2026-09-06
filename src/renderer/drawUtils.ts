@@ -1,5 +1,6 @@
 import type { ImageElement, Layer, Page, Stroke, TextElement } from '../types'
 import { drawTextElement } from '../utils/drawText'
+import { clamp } from '../utils/math'
 
 const RULED_SPACING = 42
 const GRID_SIZE = 34
@@ -57,10 +58,7 @@ export function drawTemplate(
   }
 }
 
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v))
-}
-
+// ponytail: removed local clamp
 export function drawStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,

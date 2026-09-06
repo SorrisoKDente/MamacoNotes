@@ -24,6 +24,7 @@ import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { testWebdavConnection, ensureRemoteStructure } from '../utils/webdav'
 import { shortcutLabel, normalizeKey, findShortcutAction } from '../utils/shortcuts'
 import { exportBackup, importBackup } from '../utils/backup'
+import { isDesktop } from '../utils/platform'
 import { useI18n } from '../i18n'
 import { SUPPORTED_LANGUAGES } from '../i18n/languages'
 import { checkForUpdates } from '../utils/updateCheck'
@@ -1896,11 +1897,11 @@ function UpdateModal() {
   const [error, setError] = useState<string | null>(null)
 
   const info = modalData.info as { latestVersion: string; releaseNotes: string; url: string }
-  const isDesktop = !!window.inkfolioDesktop
+  const desktopMode = isDesktop()
 
   useEffect(() => {
-    if (!isDesktop || !window.inkfolioDesktop) return
-    const desktop = window.inkfolioDesktop
+    if (!desktopMode) return
+    const desktop = (window as any).inkfolioDesktop
     const unA = desktop.onUpdateAvailable(() => {
       // Don't set downloading here, wait for user click
     })
@@ -1925,12 +1926,13 @@ function UpdateModal() {
   }, [isDesktop])
 
   function doUpdate() {
-    if (isDesktop && window.inkfolioDesktop) {
+    if (desktopMode) {
+      const desktop = (window as any).inkfolioDesktop
       if (downloaded) {
-        window.inkfolioDesktop.installUpdate()
+        desktop.installUpdate()
       } else {
         setDownloading(true)
-        void window.inkfolioDesktop.downloadUpdate()
+        void desktop.downloadUpdate()
       }
     } else {
       window.open(info.url, '_blank')

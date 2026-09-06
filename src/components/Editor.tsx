@@ -11,6 +11,7 @@ import { measureTextElement, textElementCorners, type TextLayout } from '../util
 import { normalizeKey } from '../utils/shortcuts'
 import { useI18n } from '../i18n'
 import { isMobileNow } from '../hooks/useIsMobile'
+import { clamp } from '../utils/math'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -3448,10 +3449,6 @@ function InlineTextInput({
       }}
     />
   )
-}
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v))
 }
 
 const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(

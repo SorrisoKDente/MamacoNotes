@@ -1,5 +1,6 @@
 import { APP_VERSION } from '../types'
 import { customFetch } from './http'
+import { isDesktop } from './platform'
 
 export interface GitHubRelease {
   tag_name: string
@@ -18,8 +19,8 @@ export interface UpdateInfo {
 
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
   // If desktop, use the Electron bridge to check
-  if (window.inkfolioDesktop) {
-    const res = await window.inkfolioDesktop.checkForUpdates()
+  if (isDesktop()) {
+    const res = await (window as any).inkfolioDesktop.checkForUpdates()
     if (!res || !res.updateInfo) return null
     const latestVersion = res.updateInfo.version
     return {

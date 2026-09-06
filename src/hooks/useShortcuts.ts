@@ -2,6 +2,7 @@ import { useAppStore } from '../store'
 import { findShortcutAction, normalizeKey } from '../utils/shortcuts'
 import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { toggleFullscreen } from '../utils/fullscreen'
+import { clamp } from '../utils/math'
 
 import { useUiStore } from '../uiStore'
 
@@ -149,7 +150,6 @@ async function handleExportPng() {
 function adjustActiveSize(delta: number) {
   const s = useAppStore.getState()
   const st = s.settings
-  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
   switch (s.tool) {
     case 'pen':
       void s.setSettings({ lastPenSize: clamp(st.lastPenSize + delta, 1, 100) })

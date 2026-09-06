@@ -96,15 +96,9 @@ não muda (drawTemplate permanece usado pelos mesmos callers).
 
 ## FASE E — Opcional / adiado (churn alto, ganho marginal — decisão do usuário)
 
-- [ ] **E1. Centralizar `clamp`** (6 cópias de uma linha: Editor, Toolbar `clampNum`,
-      useShortcuts, drawUtils, canvas, colors 0-255). *Provável `Lean already`* — trocar
-      6 one-liners por import vira wash e adiciona acoplamento em caminho quente (canvas).
-- [ ] **E2. Padronizar geração de IDs (`uid()` × `newId()`)** — ~40 call sites divididos;
-      `newId` (crypto.randomUUID) já cai para `uid`. Unificar exigiria tocar Editor,
-      Modals, canvas, store, sync. Sem ganho de comportamento → *provavelmente skip.*
-- [ ] **E3. Centralizar detecção desktop `!!window.inkfolioDesktop`** (~6 ocorrências com
-      casts variados: App, main, i18n, updateCheck, Modals, backup). Adicionar helper em
-      `platform.ts` = +1 export e imports novos; ~wash. *Provavelmente skip.*
+- [x] **E1. Centralizar `clamp`**
+- [ ] **E2. Padronizar geração de IDs (`uid()` × `newId()`)**
+- [x] **E3. Centralizar detecção desktop `isDesktop()`**
 
 ---
 

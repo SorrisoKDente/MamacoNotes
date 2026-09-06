@@ -1,4 +1,4 @@
-function isNativePlatform(): boolean {
+export function isNativePlatform(): boolean {
   const capacitorGlobal = window as unknown as {
     Capacitor?: { isNativePlatform?: () => boolean }
   }
@@ -7,6 +7,10 @@ function isNativePlatform(): boolean {
     (capacitorGlobal.Capacitor && capacitorGlobal.Capacitor.isNativePlatform && capacitorGlobal.Capacitor.isNativePlatform()) ||
     capacitorGlobal.Capacitor
   )
+}
+
+export function isDesktop(): boolean {
+  return !!(window as any).inkfolioDesktop
 }
 
 /**
