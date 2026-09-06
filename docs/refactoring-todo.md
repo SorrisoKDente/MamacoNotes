@@ -48,43 +48,19 @@ Estimativa: **net ≈ -200 linhas, -1 arquivo, -3 dependências** (+ ~50 exports
 > Nenhuma mudança funcional; encolhe a superfície pública (store de 82 KB, utils).
 > Se um export "morto externamente" for usado internamente, apenas perde o `export`.
 
-- [ ] **B1. `src/store.ts` — remover `export` de helpers usados só internamente:**
-      `cloneStrokeIds`, `cloneImageIds`, `cloneTextIds`, `cloneLayerWithNewIds`,
-      `cloneNotebookForCopy`, `cloneTemplatePages`, `sortNotebooksByOrder`,
-      `sortFoldersByOrder`, `sortTrash`, e tipos `UndoEntry`, `LastClickedTarget`.
-      **Manter `clonePage` exportado** (usado por `Editor.tsx:947`).
-- [ ] **B2. `src/utils/export.ts` — tornar privados `renderPageToCanvas`,
-      `downloadDataUrl`, `buildSimplePdf`** (usados só pelos entrypoints vivos
-      `exportPageAsPng`/`exportPagesAsPdf`).
-- [ ] **B3. `src/utils/backup.ts` — tornar privados `sanitizeSettingsForBackup`,
-      `buildBackupPayload`, `parseBackup` e o tipo `BackupPayload`**
-      (Modals importa só `exportBackup`/`importBackup`).
-- [ ] **B4. `src/utils/chunkedIo.ts` — tornar privados `CHUNK_SIZE` e
-      `readBackupFileFromUri`** (usados internamente; superfície viva:
-      `uploadFileStreaming`, `pickBackupFile`, `saveBackupFile`).
-- [ ] **B5. `src/utils/imageErase.ts` — `imageEraseParams` deixa de ser exportado**
-      (único chamador é `ImageEraseSession.erase`, no mesmo arquivo).
-- [ ] **B6. `src/utils/drawText.ts` — deletar `DEFAULT_TEXT_WIDTH`** (zero usos; valor 400
-      está hardcoded em `makeTextElement`); manter `LINE_HEIGHT_FACTOR`/`textFont` internos.
-- [ ] **B7. `src/utils/fullscreen.ts` — deletar `isFullscreen`** (zero chamadores;
-      `toggleFullscreen` lê `document.fullscreenElement` direto). *-6 linhas.*
-- [ ] **B8. `src/utils/fonts.ts` — deletar `isFontLoaded`** (zero chamadores; só
-      `getSystemFonts` é vivo). *-4 linhas.*
-- [ ] **B9. `src/utils/layout.ts` — deletar `totalDocumentSize`** (zero chamadores).
-      *-4 linhas.*
-- [ ] **B10. `src/utils/logger.ts` — remover pub/sub morto (`LogListener`, `listeners`,
-      `subscribe`)** (único consumidor, Modals, faz polling de `getLogs()` em setInterval).
-      *-10 linhas.*
-- [ ] **B11. `src/utils/webdav.ts` — remover `export` de `ensureDirectory`, `listDirectory`,
-      `uploadFile`, `downloadFile`, `deleteRemoteFile`** (só re-embrulhados por
-      `makeTransport` no próprio módulo; sem importadores externos). Manter exports reais:
-      `RemoteFileNotFoundError`, `ensureRemoteStructure`, `testWebdavConnection`,
-      `makeTransport`, tipo `Transport`.
-- [ ] **B12. `src/renderer/canvas.ts` — tipos `RendererCallbacks`/`CanvasProps` sem uso
-      externo → não exportar** (Editor importa só `PageCanvas`, `strokeBounds`,
-      `type SelectionRegion`); confirmar uso interno antes.
-- [ ] **B13. `src/utils/platform.ts` — `isNativePlatform` deixa de ser exportado**
-      (único chamador externo: nenhum; só `shouldShowFullscreen` internamente).
+- [x] **B1. `src/store.ts` — remover `export` de helpers usados só internamente**
+- [x] **B2. `src/utils/export.ts` — tornar privados `renderPageToCanvas`, `downloadDataUrl`, `buildSimplePdf`**
+- [x] **B3. `src/utils/backup.ts` — tornar privados `sanitizeSettingsForBackup`, `buildBackupPayload`, `parseBackup` e o tipo `BackupPayload`**
+- [x] **B4. `src/utils/chunkedIo.ts` — tornar privados `CHUNK_SIZE` e `readBackupFileFromUri`**
+- [x] **B5. `src/utils/imageErase.ts` — `imageEraseParams` deixa de ser exportado**
+- [x] **B6. `src/utils/drawText.ts` — deletar `DEFAULT_TEXT_WIDTH`**
+- [x] **B7. `src/utils/fullscreen.ts` — deletar `isFullscreen`**
+- [x] **B8. `src/utils/fonts.ts` — deletar `isFontLoaded`**
+- [x] **B9. `src/utils/layout.ts` — deletar `totalDocumentSize`**
+- [x] **B10. `src/utils/logger.ts` — remover pub/sub morto**
+- [x] **B11. `src/utils/webdav.ts` — remover `export` de `ensureDirectory`, `listDirectory`, `uploadFile`, `downloadFile`, `deleteRemoteFile`**
+- [x] **B12. `src/renderer/canvas.ts` — tipos `RendererCallbacks`/`CanvasProps` sem uso externo → não exportar**
+- [x] **B13. `src/utils/platform.ts` — `isNativePlatform` deixa de ser exportado**
 
 **Validação da Fase B:** `npm run typecheck` (exports não usados geram erro TS 6133/6196
 se algum for realmente removível e referenciado — boa rede de segurança).

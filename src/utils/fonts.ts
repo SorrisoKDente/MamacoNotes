@@ -47,11 +47,3 @@ export async function getSystemFonts(): Promise<string[]> {
   }
   return [...FALLBACK_FONTS].sort((a, b) => a.localeCompare(b))
 }
-
-export function isFontLoaded(fontFamily: string): boolean {
-  try {
-    return document.fonts?.check(`16px "${fontFamily}"`) ?? true
-  } catch {
-    return true
-  }
-}

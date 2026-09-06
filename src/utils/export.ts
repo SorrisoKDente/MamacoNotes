@@ -1,7 +1,7 @@
 import type { ImageElement, Page } from '../types'
 import { drawTemplate, drawStroke, drawTextOnCanvas } from '../renderer/drawUtils'
 
-export async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanvasElement> {
+async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(page.width * outputScale)
   canvas.height = Math.round(page.height * outputScale)
@@ -83,7 +83,7 @@ function loadAndDrawImage(
   })
 }
 
-export function downloadDataUrl(dataUrl: string, filename: string) {
+function downloadDataUrl(dataUrl: string, filename: string) {
   const a = document.createElement('a')
   a.href = dataUrl
   a.download = filename
@@ -119,7 +119,7 @@ export async function exportPagesAsPdf(pages: Page[], filename?: string): Promis
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
-export function buildSimplePdf(
+function buildSimplePdf(
   jpegDataUrls: string[],
   pageWidth: number,
   pageHeight: number,

@@ -5,7 +5,6 @@ export interface TextLayout {
   h: number
 }
 
-export const DEFAULT_TEXT_WIDTH = 400
 export const LINE_HEIGHT_FACTOR = 1.35
 const COLUMN_WIDTH_FACTOR = 1.25
 

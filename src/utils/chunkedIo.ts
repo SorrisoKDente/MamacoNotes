@@ -27,7 +27,7 @@ export const PickDirectory = registerPlugin<{
 
 // Base64 adds roughly one third to the bridge payload. Keep each native call
 // small enough that large notebooks do not freeze the Android WebView.
-export const CHUNK_SIZE = 128 * 1024
+const CHUNK_SIZE = 128 * 1024
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
@@ -89,7 +89,7 @@ export async function uploadFileStreaming(
   return status
 }
 
-export async function readBackupFileFromUri(uri: string): Promise<string> {
+async function readBackupFileFromUri(uri: string): Promise<string> {
   const { size } = await PickDirectory.getUriFileInfo({ uri })
   return decodeChunked(size, (offset, length) =>
     PickDirectory.readUriChunk({ uri, offset, length }),

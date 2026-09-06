@@ -1,4 +1,4 @@
-export function isNativePlatform(): boolean {
+function isNativePlatform(): boolean {
   const capacitorGlobal = window as unknown as {
     Capacitor?: { isNativePlatform?: () => boolean }
   }

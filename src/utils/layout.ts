@@ -58,28 +58,6 @@ export function computePageOffsets(
   })
 }
 
-export function totalDocumentSize(
-  pages: Page[],
-  mode: PageViewMode,
-  offsets: PageOffset[],
-): { width: number; height: number } {
-  if (pages.length === 0) return { width: 0, height: 0 }
-  if (mode === 'separate') {
-    const p = pages[0]
-    return { width: p.width, height: p.height }
-  }
-  let maxX = 0
-  let maxY = 0
-  for (let i = 0; i < pages.length; i++) {
-    const p = pages[i]
-    const off = offsets[i] ?? { x: 0, y: 0 }
-    const vr = pageVisualRect(p)
-    maxX = Math.max(maxX, off.x + vr.x + vr.w)
-    maxY = Math.max(maxY, off.y + vr.y + vr.h)
-  }
-  return { width: maxX, height: maxY }
-}
-
 export function pageUnderPoint(
   pages: Page[],
   offsets: PageOffset[],

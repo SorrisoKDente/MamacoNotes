@@ -18,7 +18,7 @@ function buildBackupFilename(date = new Date()): string {
   return `mamaco-notes-backup-${stamp}.json`
 }
 
-export interface BackupPayload {
+interface BackupPayload {
   app: string
   exportedAt: string
   folders: Folder[]
@@ -35,7 +35,7 @@ function desktop(): DesktopBridge {
   return (window as unknown as { inkfolioDesktop?: DesktopBridge }).inkfolioDesktop ?? {}
 }
 
-export function sanitizeSettingsForBackup(settings: AppSettings | null | undefined): AppSettings | null {
+function sanitizeSettingsForBackup(settings: AppSettings | null | undefined): AppSettings | null {
   if (!settings) return null
   return {
     ...settings,
@@ -46,7 +46,7 @@ export function sanitizeSettingsForBackup(settings: AppSettings | null | undefin
   }
 }
 
-export function buildBackupPayload(
+function buildBackupPayload(
   folders: Folder[],
   notebooks: Notebook[],
   settings?: AppSettings | null,
@@ -94,7 +94,7 @@ export async function exportBackup(
   return true
 }
 
-export function parseBackup(text: string): BackupPayload | null {
+function parseBackup(text: string): BackupPayload | null {
   try {
     const data = JSON.parse(text)
     if (!data || !Array.isArray(data.notebooks) || !Array.isArray(data.folders)) return null

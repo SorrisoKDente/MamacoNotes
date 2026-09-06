@@ -10,9 +10,6 @@ export interface LogEntry {
 let logs: LogEntry[] = []
 const MAX_LOGS = 1000
 
-type LogListener = (entry: LogEntry) => void
-const listeners: Set<LogListener> = new Set()
-
 export const logger = {
   log(level: LogLevel, message: string, details?: any) {
     const entry: LogEntry = {
@@ -34,7 +31,6 @@ export const logger = {
     }
 
     console[level](message, details || '')
-    listeners.forEach(l => l(entry))
   },
 
   info(message: string, details?: any) {
@@ -55,10 +51,5 @@ export const logger = {
 
   clear() {
     logs = []
-  },
-
-  subscribe(listener: LogListener) {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
   }
 }

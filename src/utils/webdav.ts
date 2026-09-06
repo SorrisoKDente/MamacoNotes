@@ -217,7 +217,7 @@ async function directoryExists(settings: CloudSettings, dirPath: string): Promis
   }
 }
 
-export async function ensureDirectory(
+async function ensureDirectory(
   settings: CloudSettings,
   dirPath: string,
 ): Promise<void> {
@@ -270,7 +270,7 @@ export async function ensureRemoteStructure(
   }
 }
 
-export async function listDirectory(
+async function listDirectory(
   settings: CloudSettings,
   dirPath: string,
 ): Promise<string[]> {
@@ -302,7 +302,7 @@ export async function listDirectory(
   return names.filter((n) => n)
 }
 
-export async function uploadFile(
+async function uploadFile(
   settings: CloudSettings,
   filePath: string,
   bytes: Uint8Array | Blob,
@@ -370,7 +370,7 @@ export async function uploadFile(
   }
 }
 
-export async function downloadFile(
+async function downloadFile(
   settings: CloudSettings,
   filePath: string,
 ): Promise<string> {
@@ -402,7 +402,7 @@ export async function downloadFile(
   }
 }
 
-export async function deleteRemoteFile(
+async function deleteRemoteFile(
   settings: CloudSettings,
   filePath: string,
 ): Promise<void> {

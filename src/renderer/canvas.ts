@@ -3,12 +3,12 @@ import { newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
 
-export interface RendererCallbacks {
+interface RendererCallbacks {
   onStrokeEnd: (stroke: Stroke) => void
   onRequestRerender: () => void
 }
 
-export interface CanvasProps {
+interface CanvasProps {
   canvas: HTMLCanvasElement
   page: Page
   zoom: number

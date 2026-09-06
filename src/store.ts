@@ -49,7 +49,7 @@ import type { RenderedPdfPage } from './utils/pdf'
 import { setLanguage, t } from './i18n'
 import { detectLanguage } from './i18n/languages'
 
-export interface UndoEntry {
+interface UndoEntry {
   notebookId: string
   pageIndex: number
   pageSnapshot: Page
@@ -69,19 +69,19 @@ export function clonePage(page: Page): Page {
   }
 }
 
-export function cloneStrokeIds(strokes: Stroke[]): Stroke[] {
+function cloneStrokeIds(strokes: Stroke[]): Stroke[] {
   return strokes.map((s) => ({ ...s, id: uid(), points: s.points.slice() }))
 }
 
-export function cloneImageIds(images: ImageElement[]): ImageElement[] {
+function cloneImageIds(images: ImageElement[]): ImageElement[] {
   return images.map((i) => ({ ...i, id: uid() }))
 }
 
-export function cloneTextIds(texts: TextElement[]): TextElement[] {
+function cloneTextIds(texts: TextElement[]): TextElement[] {
   return texts.map((t) => ({ ...t, id: uid() }))
 }
 
-export function cloneLayerWithNewIds(layer: Layer): Layer {
+function cloneLayerWithNewIds(layer: Layer): Layer {
   return {
     ...layer,
     id: uid(),
@@ -92,7 +92,7 @@ export function cloneLayerWithNewIds(layer: Layer): Layer {
   }
 }
 
-export function cloneNotebookForCopy(nb: Notebook, folderId: string | null): Notebook {
+function cloneNotebookForCopy(nb: Notebook, folderId: string | null): Notebook {
   const now = Date.now()
   return {
     ...nb,
@@ -110,7 +110,7 @@ export function cloneNotebookForCopy(nb: Notebook, folderId: string | null): Not
   }
 }
 
-export function cloneTemplatePages(pages: Page[]): Page[] {
+function cloneTemplatePages(pages: Page[]): Page[] {
   return pages.map((p) => ({
     ...p,
     id: uid(),
@@ -119,15 +119,15 @@ export function cloneTemplatePages(pages: Page[]): Page[] {
   }))
 }
 
-export function sortNotebooksByOrder<T extends { order?: number; updatedAt: number }>(notebooks: T[]): T[] {
+function sortNotebooksByOrder<T extends { order?: number; updatedAt: number }>(notebooks: T[]): T[] {
   return notebooks.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
-export function sortFoldersByOrder(folders: Folder[]): Folder[] {
+function sortFoldersByOrder(folders: Folder[]): Folder[] {
   return folders.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
-export function sortTrash(items: TrashItem[]): TrashItem[] {
+function sortTrash(items: TrashItem[]): TrashItem[] {
   return items.slice().sort((a, b) => b.deletedAt - a.deletedAt)
 }
 
@@ -315,7 +315,7 @@ let syncQueued = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined
 let pendingResume: PendingResume | null = null
 
-export type LastClickedTarget =
+type LastClickedTarget =
   | { type: 'folder'; id: string }
   | { type: 'notebook'; id: string }
   | { type: 'layer'; id: string }

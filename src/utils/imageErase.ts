@@ -9,7 +9,7 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement | null> {
   })
 }
 
-export function imageEraseParams(
+function imageEraseParams(
   image: ImageElement,
   pageX: number,
   pageY: number,

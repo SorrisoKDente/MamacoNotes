@@ -1,7 +1,3 @@
-export function isFullscreen(): boolean {
-  return !!document.fullscreenElement
-}
-
 export async function toggleFullscreen(): Promise<boolean> {
   try {
     if (document.fullscreenElement) {
