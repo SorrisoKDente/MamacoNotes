@@ -5,7 +5,8 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 ## 🐛 Known Bugs (Priority Fixes)
 
 - [x] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
-- [ ] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
+- [x] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
+- [ ] **Critical Performance (Android)**: Severe lag reported in specific notes on Android devices. Currently under investigation.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 
 ## ✨ Planned Features & Improvements

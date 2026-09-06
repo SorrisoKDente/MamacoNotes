@@ -42,6 +42,7 @@ export class PageCanvas {
   drawing = false
   currentStroke: Stroke | null = null
   lastPoint: { x: number; y: number } | null = null
+  private lastRect: DOMRect | null = null
 
   eraserActive = false
   eraserPoint: { x: number; y: number } | null = null
@@ -84,8 +85,12 @@ export class PageCanvas {
     return this.offsets[this.currentPageIndex] ?? { x: 0, y: 0 }
   }
 
+  updateRect() {
+    this.lastRect = this.canvas.getBoundingClientRect()
+  }
+
   toPageCoords(px: number, py: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.lastRect || this.canvas.getBoundingClientRect()
     const off = this.currentOffset
     let x = (px - rect.left - this.panX) / this.zoom - off.x
     let y = (py - rect.top - this.panY) / this.zoom - off.y
@@ -105,7 +110,7 @@ export class PageCanvas {
   }
 
   toDocumentCoords(px: number, py: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.lastRect || this.canvas.getBoundingClientRect()
     return {
       x: (px - rect.left - this.panX) / this.zoom,
       y: (py - rect.top - this.panY) / this.zoom,
@@ -113,7 +118,7 @@ export class PageCanvas {
   }
 
   toPageCoordsAt(px: number, py: number, pageIndex: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.lastRect || this.canvas.getBoundingClientRect()
     const off = this.offsets[pageIndex] ?? { x: 0, y: 0 }
     const pg = this.pages[pageIndex]
     if (!pg) return { x: 0, y: 0 }
@@ -193,7 +198,7 @@ export class PageCanvas {
   }
 
   resize() {
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.lastRect || this.canvas.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
     const dpr = this.devicePixelRatio
     const w = Math.max(1, Math.round(rect.width * dpr))

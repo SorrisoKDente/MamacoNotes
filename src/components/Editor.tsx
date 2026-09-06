@@ -10,6 +10,7 @@ import type { PageOffset } from '../utils/layout'
 import { measureTextElement, textElementCorners, type TextLayout } from '../utils/drawText'
 import { normalizeKey } from '../utils/shortcuts'
 import { useI18n } from '../i18n'
+import { isMobileNow } from '../hooks/useIsMobile'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -58,6 +59,8 @@ export function Editor() {
   const engineRef = useRef<PageCanvas | null>(null)
   const zoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
+  const prevPanRef = useRef({ x: 0, y: 0 })
+  const prevZoomRef = useRef(0)
   const mousePosRef = useRef<Pt>({ x: -1, y: -1 })
   const activePointersRef = useRef<Map<number, Pt>>(new Map())
   const pointerPressureRef = useRef(1)
@@ -217,7 +220,7 @@ export function Editor() {
       // screen flicker on release.
       if (current?.id !== source.id) return
       void persistNotebook(source)
-    }, 400)
+    }, isMobileNow() ? 1500 : 400)
   }
 
   const performRender = useCallback(() => {
@@ -277,19 +280,24 @@ export function Editor() {
         }
       }
     }
-    const zd = Math.round(zoomRef.current * 100)
-    if (zd !== zoomDisplay) setZoomDisplay(zd)
     updateScrollbars()
-  }, [zoomDisplay])
+  }, [])
 
-  const updateScrollbars = useCallback(() => {
+  const updateScrollbars = useCallback((force = false) => {
     const canvas = canvasRef.current
     if (!canvas || !pagesRef.current.length) return
 
+    const currPan = panRef.current
+    const zoom = zoomRef.current
+
+    if (!force && currPan.x === prevPanRef.current.x && currPan.y === prevPanRef.current.y && zoom === prevZoomRef.current) {
+      return
+    }
+    prevPanRef.current = { ...currPan }
+    prevZoomRef.current = zoom
+
     const limits = getPanLimits()
     if (!limits) return
-
-    const pan = panRef.current
 
     // Vertical
     if (scrollVTrackRef.current && scrollVThumbRef.current) {
@@ -302,7 +310,7 @@ export function Editor() {
         const viewportH = canvas.clientHeight
         // Thumb size represents visible area / total navigable area
         const thumbH = Math.max(30, (viewportH / (viewportH + range)) * trackH)
-        const ratio = (pan.y - limits.maxY) / (limits.minY - limits.maxY)
+        const ratio = (currPan.y - limits.maxY) / (limits.minY - limits.maxY)
         const thumbY = clamp(ratio * (trackH - thumbH), 0, trackH - thumbH)
         scrollVThumbRef.current.style.height = `${thumbH}px`
         scrollVThumbRef.current.style.transform = `translateY(${thumbY}px)`
@@ -319,7 +327,7 @@ export function Editor() {
         const trackW = scrollHTrackRef.current.clientWidth
         const viewportW = canvas.clientWidth
         const thumbW = Math.max(30, (viewportW / (viewportW + range)) * trackW)
-        const ratio = (pan.x - limits.maxX) / (limits.minX - limits.maxX)
+        const ratio = (currPan.x - limits.maxX) / (limits.minX - limits.maxX)
         const thumbX = clamp(ratio * (trackW - thumbW), 0, trackW - thumbW)
         scrollHThumbRef.current.style.width = `${thumbW}px`
         scrollHThumbRef.current.style.transform = `translateX(${thumbX}px)`
@@ -420,23 +428,22 @@ export function Editor() {
   }
 
   const requestRender = useCallback(() => {
+    if (isDirtyRef.current) return
     isDirtyRef.current = true
-  }, [])
+    requestRenderIdRef.current = requestAnimationFrame(() => {
+      isDirtyRef.current = false
+      performRender()
+    })
+  }, [performRender])
 
   const requestRenderRef = useRef(requestRender)
   requestRenderRef.current = requestRender
 
   useEffect(() => {
-    const loop = () => {
-      if (isDirtyRef.current) {
-        isDirtyRef.current = false
-        performRender()
-      }
-      requestRenderIdRef.current = requestAnimationFrame(loop)
+    return () => {
+      if (requestRenderIdRef.current) cancelAnimationFrame(requestRenderIdRef.current)
     }
-    requestRenderIdRef.current = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(requestRenderIdRef.current)
-  }, [performRender])
+  }, [])
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
@@ -677,17 +684,17 @@ export function Editor() {
     if (!canvas) return
     const vm = viewModeRef.current
     if (vm === 'separate') return
-    const pan = panRef.current
+    const currentPan = panRef.current
     const lastPan = lastInteractionPanRef.current
     if (
-      Math.abs(pan.x - lastPan.x) < 0.5 &&
-      Math.abs(pan.y - lastPan.y) < 0.5
+      Math.abs(currentPan.x - lastPan.x) < 0.5 &&
+      Math.abs(currentPan.y - lastPan.y) < 0.5
     ) {
       return
     }
     const rect = canvas.getBoundingClientRect()
-    const docX = (rect.width / 2 - pan.x) / zoomRef.current
-    const docY = (rect.height / 2 - pan.y) / zoomRef.current
+    const docX = (rect.width / 2 - currentPan.x) / zoomRef.current
+    const docY = (rect.height / 2 - currentPan.y) / zoomRef.current
     const idx = pageUnderPoint(pagesRef.current, offsetsRef.current, docX, docY)
     if (idx !== null && idx !== currentPageIndexRef.current) {
       autoFollowRef.current = true
@@ -767,20 +774,18 @@ export function Editor() {
   function trackMouse(e: React.MouseEvent | React.PointerEvent) {
     const canvas = canvasRef.current
     if (!canvas) return
+
+    // ponytail: skip if not a mouse input (finger/pen is its own cursor)
+    const isMouse = (e.nativeEvent as any).pointerType === 'mouse' || !('pointerType' in e.nativeEvent)
+    if (!isMouse) return
+
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
 
-    // Ensure mouse hover also uses full pressure for consistent cursor size
-    if (e.nativeEvent instanceof PointerEvent && e.nativeEvent.pointerType === 'mouse') {
-      pointerPressureRef.current = 1
-    } else if (!(e.nativeEvent instanceof PointerEvent)) {
-      // Regular MouseEvent fallback
-      pointerPressureRef.current = 1
-    }
-
+    pointerPressureRef.current = 1
     mousePosRef.current = { x: mx, y: my }
-    updateCursorDOM(mx, my, pointerPressureRef.current)
+    updateCursorDOM(mx, my, 1)
   }
 
   function getPointerPos(e: PointerEvent) {
@@ -2123,15 +2128,7 @@ export function Editor() {
     const color = tool === 'highlighter' ? settings.lastHighlighterColor : settings.lastPenColor
     const size = tool === 'highlighter' ? settings.lastHighlighterSize : settings.lastPenSize
 
-    // Stable pressure logic duplicated here (local scope for now, could be moved to outer helper)
-    const getStablePressure = (pe: React.PointerEvent | PointerEvent | React.MouseEvent | MouseEvent) => {
-      // @ts-ignore
-      if (pe.pointerType === 'mouse' || !('pointerType' in pe)) return 1
-      // @ts-ignore
-      return pe.pressure || 0.5
-    }
-
-    pointerPressureRef.current = getStablePressure(e)
+    pointerPressureRef.current = e.pointerType === 'mouse' ? 1 : (e.pressure || 0.5)
     dragRef.current = {
       kind: 'draw',
       startX: pos.x,
@@ -2186,30 +2183,19 @@ export function Editor() {
 
   const updateCursorDOM = useCallback(
     (mx: number, my: number, pressure = pointerPressureRef.current, visible = true) => {
-      if (!toolCursorRef.current) return
+      const el = toolCursorRef.current
+      if (!el) return
       const t = toolRef.current
-      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') {
-        toolCursorRef.current.style.opacity = '0'
+      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser' || !visible || mx < 0) {
+        el.style.opacity = '0'
         return
       }
-
-      if (!visible || mx < 0 || my < 0) {
-        toolCursorRef.current.style.opacity = '0'
-        return
-      }
-
       const diameter = cursorDisplaySize(t, settings, zoomRef.current, pressure)
-      toolCursorRef.current.style.opacity = '1'
-      toolCursorRef.current.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
-      toolCursorRef.current.style.width = `${diameter}px`
-      toolCursorRef.current.style.height = `${diameter}px`
-
-      // Update background based on tool
-      if (t === 'highlighter') {
-        toolCursorRef.current.style.background = 'rgba(255,255,255,0.1)'
-      } else {
-        toolCursorRef.current.style.background = 'transparent'
-      }
+      el.style.opacity = '1'
+      el.style.width = `${diameter}px`
+      el.style.height = `${diameter}px`
+      el.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
+      el.style.background = t === 'highlighter' ? 'rgba(255,255,255,0.1)' : 'transparent'
     },
     [settings.eraserMode, settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
   )
@@ -2219,21 +2205,19 @@ export function Editor() {
     const canvas = canvasRef.current
     if (!engine || !canvas || !page) return
 
-    const rect = canvas.getBoundingClientRect()
-    const mx = e.clientX - rect.left
-    const my = e.clientY - rect.top
+    engine.updateRect()
+    const isMouse = e.pointerType === 'mouse'
+    pointerPressureRef.current = isMouse ? 1 : (e.pressure || 0.5)
 
-    // Shared pressure calculation for consistent behavior across events
-    const getStablePressure = (pe: React.PointerEvent | PointerEvent | React.MouseEvent | MouseEvent) => {
-      // @ts-ignore - checking for pointerType on event which might be MouseEvent
-      if (pe.pointerType === 'mouse' || !('pointerType' in pe)) return 1
-      // @ts-ignore
-      return pe.pressure || 0.5
+    if (isMouse) {
+      const rect = canvas.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      mousePosRef.current = { x: mx, y: my }
+      updateCursorDOM(mx, my, pointerPressureRef.current)
+    } else if (toolCursorRef.current) {
+      toolCursorRef.current.style.opacity = '0'
     }
-
-    pointerPressureRef.current = getStablePressure(e)
-    mousePosRef.current = { x: mx, y: my }
-    updateCursorDOM(mx, my, pointerPressureRef.current)
 
     const pos = getPointerPos(e.nativeEvent)
     activePointersRef.current.set(e.pointerId, pos)
@@ -2280,7 +2264,7 @@ export function Editor() {
 
     const drag = dragRef.current
     if (!drag) {
-      if (tool === 'select') {
+      if (tool === 'select' && isMouse) {
         updateSelectCursor(engine.toPageCoords(pos.x, pos.y))
       }
       return
@@ -2379,7 +2363,7 @@ export function Editor() {
     if (drag.kind === 'draw') {
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       for (const ev of events) {
-        engine.extendStroke(ev.clientX, ev.clientY, getStablePressure(ev))
+        engine.extendStroke(ev.clientX, ev.clientY, isMouse ? 1 : (ev.pressure || 0.5))
       }
       return
     }
@@ -2388,10 +2372,12 @@ export function Editor() {
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       const session = eraseSessionRef.current
       if (!session) return
+
       for (const ev of events) {
         const cur = engine.toPageCoords(ev.clientX, ev.clientY)
         erasePendingRef.current.to = cur
       }
+
       scheduleEraseStep()
       return
     }
