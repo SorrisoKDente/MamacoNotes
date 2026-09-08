@@ -6,7 +6,10 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 
 - [x] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
 - [x] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
-- [ ] **Critical Performance (Android)**: Severe lag reported in specific notes on Android devices. Currently under investigation.
+- [/] **Critical Performance (Android)**: Severe lag reported in specific notes. Currently unable to reproduce consistently; waiting for further occurrences to gather more data for testing.
+- [ ] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reports as "Connected" on the new device even though the password was (correctly) excluded from the backup and no connection can be made.
+- [ ] **Multi-touch Drawing Artifacts**: Depending on how two fingers touch the screen on mobile, stray lines may be created connecting the two points.
+- [ ] **Premature Stroke Deletion**: Some strokes are being intermittently deleted or discarded before the user finishes drawing them.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 
 ## ✨ Planned Features & Improvements
