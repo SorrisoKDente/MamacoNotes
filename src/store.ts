@@ -2017,27 +2017,29 @@ export const useAppStore = create<AppState>((set, get) => {
     async undo() {
       const entry = undoStack.pop()
       if (!entry) return
-      const ctx = getActiveContext(get)
-      if (!ctx || ctx.notebook.id !== entry.notebookId) return
-      const { notebook, page, index } = ctx
-      if (page) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(page) })
-      notebook.pages[index] = entry.pageSnapshot
+      const notebook = get().activeNotebook
+      if (!notebook || notebook.id !== entry.notebookId) return
+      const current = notebook.pages[entry.pageIndex]
+      if (current) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
+      notebook.pages[entry.pageIndex] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: index, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
-      await updateNotebookStorage(notebook)
+      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      // ponytail: force state refresh to update UI and notify observers
+      await updateNotebookStorage({ ...notebook })
     },
 
     async redo() {
       const entry = redoStack.pop()
       if (!entry) return
-      const ctx = getActiveContext(get)
-      if (!ctx || ctx.notebook.id !== entry.notebookId) return
-      const { notebook, page, index } = ctx
-      if (page) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(page) })
-      notebook.pages[index] = entry.pageSnapshot
+      const notebook = get().activeNotebook
+      if (!notebook || notebook.id !== entry.notebookId) return
+      const current = notebook.pages[entry.pageIndex]
+      if (current) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
+      notebook.pages[entry.pageIndex] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: index, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
-      await updateNotebookStorage(notebook)
+      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      // ponytail: force state refresh to update UI and notify observers
+      await updateNotebookStorage({ ...notebook })
     },
 
     async addImageToPage(dataUrl, name, center) {

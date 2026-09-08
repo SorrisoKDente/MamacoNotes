@@ -1524,8 +1524,9 @@ export function Editor() {
     if (drag.kind === 'draw') {
       const stroke = engine?.endStroke()
       const pg = pageRef.current
-      if (stroke && stroke.points.length >= 1 && pg) {
-        // ponytail: commit the stroke before switching to pan
+      if (stroke && stroke.points.length > 2 && pg) {
+        // ponytail: only commit if it's a real stroke (> 2 points),
+        // otherwise it's just a "phantom" touch at the start of a pan/zoom.
         pushUndo()
         getActiveLayer(pg).strokes.push(stroke as Stroke)
         pg.updatedAt = Date.now()
@@ -1691,6 +1692,7 @@ export function Editor() {
         threeFingerDownAtRef.current = null
       }
       pendingTwoFingerRef.current = { id: e.pointerId, start: pos }
+      // ponytail: always return on multi-touch to prevent second finger from starting a new stroke/action
       return
     }
 
