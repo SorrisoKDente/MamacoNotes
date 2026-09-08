@@ -178,7 +178,12 @@ export class PageCanvas {
     const last = this.currentStroke.points[this.currentStroke.points.length - 1]
     const dx = p.x - last.x
     const dy = p.y - last.y
-    if (dx * dx + dy * dy < 0.4) return
+    const distSq = dx * dx + dy * dy
+    if (distSq < 0.4) return
+
+    // ponytail: ignore "teleportation" artifacts from multi-touch jumps (> 300px)
+    if (distSq > 300 * 300) return
+
     this.currentStroke.points.push({ x: p.x, y: p.y, pressure })
     this.lastPoint = p
     this.callbacks.onRequestRerender()

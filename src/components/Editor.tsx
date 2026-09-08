@@ -1522,7 +1522,16 @@ export function Editor() {
     const drag = dragRef.current
     if (!drag) return
     if (drag.kind === 'draw') {
-      engine?.endStroke()
+      const stroke = engine?.endStroke()
+      const pg = pageRef.current
+      if (stroke && stroke.points.length >= 1 && pg) {
+        // ponytail: commit the stroke before switching to pan
+        pushUndo()
+        getActiveLayer(pg).strokes.push(stroke as Stroke)
+        pg.updatedAt = Date.now()
+        notebookRef.current!.updatedAt = Date.now()
+        dirtyRef.current = true
+      }
     } else if (drag.kind === 'erase') {
       const session = eraseSessionRef.current
       if (session) {
@@ -1659,6 +1668,8 @@ export function Editor() {
         drag &&
         (drag.kind === 'draw' || drag.kind === 'erase' || drag.kind === 'region-draw')
       ) {
+        // ponytail: immediate abort on second touch to prevent stray lines
+        abortForPan()
         dragInterruptedByTouchRef.current = true
         if (multiTouchDownAtRef.current === 0) multiTouchDownAtRef.current = Date.now()
       }
@@ -2387,6 +2398,7 @@ export function Editor() {
     }
 
     if (drag.kind === 'draw') {
+      if (e.pointerId !== dragOwnerIdRef.current) return
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       for (const ev of events) {
         engine.extendStroke(ev.clientX, ev.clientY, isMouse ? 1 : (ev.pressure || 0.5))
@@ -2395,6 +2407,7 @@ export function Editor() {
     }
 
     if (drag.kind === 'erase') {
+      if (e.pointerId !== dragOwnerIdRef.current) return
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       const session = eraseSessionRef.current
       if (!session) return
@@ -2436,6 +2449,7 @@ export function Editor() {
     }
 
     if (drag.kind === 'region-draw') {
+      if (e.pointerId !== dragOwnerIdRef.current) return
       const region = selectionRegionRef.current
       if (!region) return
       const p = engine.toPageCoords(pos.x, pos.y)
