@@ -24,10 +24,11 @@ import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { testWebdavConnection, ensureRemoteStructure } from '../utils/webdav'
 import { shortcutLabel, normalizeKey, findShortcutAction } from '../utils/shortcuts'
 import { exportBackup, importBackup } from '../utils/backup'
-import { isDesktop } from '../utils/platform'
+import { isDesktop, isNativePlatform } from '../utils/platform'
 import { useI18n } from '../i18n'
 import { SUPPORTED_LANGUAGES } from '../i18n/languages'
 import { checkForUpdates } from '../utils/updateCheck'
+import { renderMarkdown } from '../utils/markdown'
 import {
   alertAction,
   chooseTemplateImageMode,
@@ -1896,7 +1897,12 @@ function UpdateModal() {
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
-  const info = modalData.info as { latestVersion: string; releaseNotes: string; url: string }
+  const info = modalData.info as {
+    latestVersion: string
+    releaseNotes: string
+    url: string
+    apkUrl?: string
+  }
   const desktopMode = isDesktop()
 
   useEffect(() => {
@@ -1935,7 +1941,10 @@ function UpdateModal() {
         void desktop.downloadUpdate()
       }
     } else {
-      window.open(info.url, '_blank')
+      // Android: if we have a direct APK URL, use it to trigger a direct download
+      // instead of opening the GitHub releases page.
+      const url = isNativePlatform() && info.apkUrl ? info.apkUrl : info.url
+      window.open(url, '_blank')
       close()
     }
   }
@@ -1957,7 +1966,9 @@ function UpdateModal() {
           <h3>{t('modal.updateNotes')}</h3>
           <div
             className="update-notes-content"
-            dangerouslySetInnerHTML={{ __html: info.releaseNotes }}
+            dangerouslySetInnerHTML={{
+              __html: desktopMode ? info.releaseNotes : renderMarkdown(info.releaseNotes),
+            }}
           />
         </div>
       )}

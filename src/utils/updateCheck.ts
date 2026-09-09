@@ -2,12 +2,19 @@ import { APP_VERSION } from '../types'
 import { customFetch } from './http'
 import { isDesktop } from './platform'
 
+export interface GitHubAsset {
+  name: string
+  browser_download_url: string
+  content_type: string
+}
+
 export interface GitHubRelease {
   tag_name: string
   name: string
   body: string
   html_url: string
   published_at: string
+  assets: GitHubAsset[]
 }
 
 export interface UpdateInfo {
@@ -15,6 +22,7 @@ export interface UpdateInfo {
   latestVersion: string
   releaseNotes: string
   url: string
+  apkUrl?: string
 }
 
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
@@ -39,12 +47,14 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
 
     const data: GitHubRelease = await response.json()
     const latestVersion = data.tag_name.replace(/^v/, '')
+    const apkAsset = data.assets?.find((a) => a.name.endsWith('.apk'))
 
     return {
       available: isNewerVersion(latestVersion, APP_VERSION),
       latestVersion,
       releaseNotes: data.body,
       url: data.html_url,
+      apkUrl: apkAsset?.browser_download_url,
     }
   } catch (err) {
     console.error('Failed to check for updates:', err)

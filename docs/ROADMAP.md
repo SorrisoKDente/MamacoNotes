@@ -12,6 +12,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Cross-page Undo Corruption**: Pressing Ctrl+Z after switching pages duplicated content from the previous page onto the current one instead of undoing on the correct page.
 - [x] **Premature Stroke Deletion**: Some strokes were being intermittently deleted or discarded before completion. Fixed by preventing engine resets during active gestures.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
+- [/] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser. (Fix implemented in v2.2.4; pending validation in next release).
 
 ## ✨ Planned Features & Improvements
 
@@ -24,6 +25,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [ ] **Safe Deletion**: 
   - Implement a confirmation popup for bulk deletion of layers or folders.
   - **Layer Constraint**: Ensure at least one layer always exists; if the user attempts to delete all, prompt them to select one to remain.
+- [/] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download. (Implemented in v2.2.4; pending validation in next release).
 
 ## 💡 Future Ideas (Backlog)
 
@@ -31,7 +33,6 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [ ] **Hover Tooltips**: Display the full name of folders and notebooks when hovering over them for a short period (Sidebar and Grid view).
 - [ ] **Visual Sync Diff**: Show a side-by-side preview of differences between local and cloud versions when a sync conflict occurs.
 - [ ] **Minimalist Desktop UI**: Option to remove the standard native menu bar (File, Edit, View) in the Electron version for a more immersive experience.
-- [ ] **Rich Release Notes**: Render Markdown previews directly within the Software Update modal.
 
 ### Advanced Drawing Tools
 - [ ] **Dynamic Canvas**: Option to create notes with an "infinite" auto-growing canvas (limited to separate pages mode).
