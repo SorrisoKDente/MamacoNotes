@@ -7,7 +7,7 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [x] **Navegação do Editor**: Os botões de zoom (+/-) e de recentralizar não funcionam nas versões Desktop e Web (funcionam apenas no Android).
 - [x] **Motor de Desenho**: O clique único não registra desenho; o cursor exige um arraste mínimo para iniciar um traço.
 - [/] **Desempenho Crítico (Android)**: Lag severo relatado em notas específicas. Atualmente incapaz de reproduzir consistentemente; aguardando novas ocorrências para coletar mais dados para testes.
-- [ ] **Falso Positivo de Status da Nuvem**: Ao importar um backup de um dispositivo conectado à nuvem, o app informa estar "Conectado" no novo dispositivo, mesmo que a senha tenha sido (corretamente) excluída do backup e nenhuma conexão possa ser feita.
+- [x] **Falso Positivo de Status da Nuvem**: Ao importar um backup de um dispositivo conectado à nuvem, o app informava estar "Conectado" mesmo sem a senha. Agora desconecta automaticamente se a senha estiver ausente após a importação.
 - [x] **Artefatos de Desenho Multi-toque**: Dependendo de como dois dedos tocam a tela no celular, linhas indesejadas podem ser criadas conectando os dois pontos.
 - [x] **Corrupção de Desfazer entre Páginas**: Apertar Ctrl+Z após trocar de página duplicava o conteúdo da página anterior na atual em vez de desfazer na página correta.
 - [x] **Exclusão Prematura de Traços**: Alguns traços estavam sendo excluídos ou descartados de forma intermitente antes de o usuário terminar de desenhá-los. Corrigido bloqueando o reset do motor gráfico durante gestos ativos.

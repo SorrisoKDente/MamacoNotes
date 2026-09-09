@@ -7,7 +7,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
 - [x] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
 - [/] **Critical Performance (Android)**: Severe lag reported in specific notes. Currently unable to reproduce consistently; waiting for further occurrences to gather more data for testing.
-- [ ] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reports as "Connected" on the new device even though the password was (correctly) excluded from the backup and no connection can be made.
+- [x] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reported as "Connected" even though the password was missing. Now automatically disconnects if the password is absent after import.
 - [x] **Multi-touch Drawing Artifacts**: Depending on how two fingers touch the screen on mobile, stray lines may be created connecting the two points.
 - [x] **Cross-page Undo Corruption**: Pressing Ctrl+Z after switching pages duplicated content from the previous page onto the current one instead of undoing on the correct page.
 - [x] **Premature Stroke Deletion**: Some strokes were being intermittently deleted or discarded before completion. Fixed by preventing engine resets during active gestures.

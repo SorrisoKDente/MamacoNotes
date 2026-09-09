@@ -2265,6 +2265,10 @@ export const useAppStore = create<AppState>((set, get) => {
           cloud: { ...DEFAULT_SETTINGS.cloud, ...(settings.cloud ?? {}) },
           shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...(settings.shortcuts ?? {}) },
         }
+        // ponytail: avoid "connected" false positive if password is missing after backup import
+        if (safeSettings.cloud.enabled && !safeSettings.cloud.webdavPassword) {
+          safeSettings.cloud.enabled = false
+        }
         nextSettings = safeSettings
         setLanguage(safeSettings.language === 'en' ? 'en' : 'pt-BR')
       }
