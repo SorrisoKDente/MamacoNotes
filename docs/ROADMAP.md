@@ -12,11 +12,12 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Cross-page Undo Corruption**: Pressing Ctrl+Z after switching pages duplicated content from the previous page onto the current one instead of undoing on the correct page.
 - [x] **Premature Stroke Deletion**: Some strokes were being intermittently deleted or discarded before completion. Fixed by preventing engine resets during active gestures.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
-- [/] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser. (Fix implemented in v2.2.4; pending validation in next release).
+- [x] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser.
 
 ## ✨ Planned Features & Improvements
 
-- [ ] **Navigation Flow**: Implement folder state persistence so that returning from the Editor brings the user back to the exact subfolder they were in.
+- [x] **Navigation Flow**: Returning from the Editor now brings the user back to the exact subfolder they were in.
+- [x] **Auto-follow Page Preview**: The page list now automatically scrolls to keep the current page in view and opens at the correct position when expanded.
 - [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
   - **Page Preview**: Select all pages.
   - **Canvas**: Select all strokes, images, and text.
@@ -25,7 +26,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [ ] **Safe Deletion**: 
   - Implement a confirmation popup for bulk deletion of layers or folders.
   - **Layer Constraint**: Ensure at least one layer always exists; if the user attempts to delete all, prompt them to select one to remain.
-- [/] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download. (Implemented in v2.2.4; pending validation in next release).
+- [x] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download.
 
 ## 💡 Future Ideas (Backlog)
 

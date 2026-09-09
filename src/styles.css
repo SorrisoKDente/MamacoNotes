@@ -3048,7 +3048,7 @@ body {
 }
 
 .update-notes-content a {
-  color: var(--accent);
+  color: var(--accent-2);
   text-decoration: underline;
 }
 

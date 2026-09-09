@@ -739,7 +739,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }),
     async selectNotebook(id) {
       let currentPageIndex = 0
-      let folderId: string | null = null
+      let folderId: string | null = get().selectedFolderId // ponytail: default to current folder
       let activeNotebook: Notebook | null = null
 
       if (id) {

@@ -42,6 +42,21 @@ export function PageList() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<number | null>(null)
+  const thumbsContainerRef = useRef<HTMLDivElement>(null)
+
+  // ponytail: auto-follow current page in preview
+  useEffect(() => {
+    const container = thumbsContainerRef.current
+    if (!container) return
+    // ponytail: small delay to allow DOM nodes to be ready after mount/page-switch
+    const timer = setTimeout(() => {
+      const currentEl = container.querySelector('.page-thumb-wrap.current')
+      if (currentEl) {
+        currentEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [currentPageIndex])
 
   useEffect(() => {
     if (searchOpen) {
@@ -280,7 +295,7 @@ export function PageList() {
         </div>
       )}
 
-      <div className="page-thumbs">
+      <div className="page-thumbs" ref={thumbsContainerRef}>
         {visibleIndices.length === 0 && (
           <div className="page-thumbs-empty">{t('pageList.empty')}</div>
         )}
