@@ -477,25 +477,9 @@ Key points:
   on the main container (to capture scrollbar drags). Includes `pan | draw | erase |
   select-move | select-resize | select-rotate | region-draw | region-move |
   text-rotate | text-resize | page-rotate | group-resize | group-rotate | scroll-v | scroll-h`.
-- **Multi-touch (mobile)**: `Editor.tsx` tracks active pointers in `activePointersRef`
-  (updated in `onPointerDown`/`onPointerMove`). A second finger does not immediately
-  interrupt a stroke: it only activates the move/pinch gesture after moving more than
-  `TWO_FINGER_THRESHOLD` (14px), preventing the palm from canceling a drawing. Once 2
-  fingers are confirmed, `dragRef` becomes `pan` with `multiTouch: true`: finger
-  spreading/pinching applies zoom (`applyZoomAt`, factor = distance ratio) around the
-  midpoint, and midpoint displacement moves the screen. Gesture state: `pinchRef`
-  (previous distance/midpoint) and `pendingTwoFingerRef` (candidate finger to confirm
-  gesture). The canvas performs `preventDefault` on touch/pen `pointerdown` and only uses
-  explicit `setPointerCapture` for mouse (touch/pen use browser implicit capture).
-  The pointer that started a drag is tracked in `dragOwnerIdRef`; **only the owner's
-  `pointerup` commits the content drag** (draw/erase/region selection) — a non-owner
-  finger lifting no longer prematurely ends or commits the stroke. When a second finger
-  joins a content drag (`dragInterruptedByTouchRef`), the gesture is considered a
-  potential tap/palm: on the owner's `pointerup`, if the multi-touch was tap-like
-  (other fingers still down, or `multiTouchDownAtRef` within `TWO_FINGER_TAP_MAX_MS`),
-  the in-progress content is **discarded** (stroke not committed, region not finalized),
-  so a multi-finger tap never creates stray strokes/selections nor clears the
-  undo/redo stacks.
+- **Multi-touch (mobile)**: `Editor.tsx` tracks active pointers in `activePointersRef` (updated in `onPointerDown`/`onPointerMove`). A second finger does not immediately interrupt a stroke: it only activates the move/pinch gesture after moving more than `TWO_FINGER_THRESHOLD` (14px), preventing the palm from canceling a drawing. Once 2 fingers are confirmed, `dragRef` becomes `pan` with `multiTouch: true`: finger spreading/pinching applies zoom (`applyZoomAt`, factor = distance ratio) around the midpoint, and midpoint displacement moves the screen. Gesture state: `pinchRef` (previous distance/midpoint) and `pendingTwoFingerRef` (candidate finger to confirm gesture). The canvas performs `preventDefault` on touch/pen `pointerdown` and uses `setPointerCapture` for all pointer types to ensure the stroke is not interrupted by system gestures. 
+  - **Drawing Stability**: **Pen input is sovereign**: pen strokes can start even if other fingers are present. The pointer that started a drag is tracked in `dragOwnerIdRef`; **only the owner's pointer events extend the stroke**, and a 300px distance filter in `canvas.ts` (`extendStroke`) ignores "teleportation" artifacts from coordinate jumps. When a second finger joins, `abortForPan` is called, which commits the in-progress stroke **only if it has more than 2 points** (discarding tiny phantom touches).
+  - **Engine Stability**: To prevent data loss during high-frequency drawing, the `PageCanvas` engine reset (which occurs when the `notebook` object reference updates via auto-save) is **blocked** while `dragRef.current` is active. This ensures that fast successive strokes are never interrupted by background persistence.
   - **Two-finger double tap = Undo**: a 2-finger "tap" is recognized when both pointers
     go up without significant displacement (`pointerDownPosRef` stores the initial
     position of each finger; if the first finger has already moved more than
@@ -829,11 +813,7 @@ Flow and files involved:
 - **State**: everything shared goes through Zustand stores; components read with
   `useAppStore((s) => s.xxx)` and write via store actions (never mutating directly without
   going through persistence).
-- **Persistence**: every data change persists via `db.*` (IndexedDB is the primary store).
-  Inside the editor, canvas edits persist through `schedulePersist()` (`Editor.tsx`),
-  **debounced (400ms)** persisting the current live notebook at fire time — high-frequency
-  edits (drawing strokes) are written at most once per window with the latest state,
-  instead of a full `persistNotebook` write on every pointer release.
+- **Persistence**: every data change persists via `db.*` (IndexedDB is the primary store). Inside the editor, canvas edits persist through `schedulePersist()` (`Editor.tsx`), **debounced (400ms on desktop, 1.5s on mobile)** persisting the current live notebook at fire time. To ensure UI reactivity, `updateNotebookStorage` always creates a **new object reference** for the `activeNotebook`, allowing React observers (like the rotation inputs) to update in real-time.
 - **UI ↔ canvas communication**: via `CustomEvent` (`ink:*`), never deep props.
 - **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs to avoid React re-renders. High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
 - **Canvas**: `Editor.tsx` owns the engine; `PageCanvas` only renders and performs hit

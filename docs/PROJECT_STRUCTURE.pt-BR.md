@@ -478,17 +478,9 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   no container principal (para capturar drags de scrollbar). Inclui `pan | draw | erase | 
   select-move | select-resize | select-rotate | region-draw | region-move | 
   text-rotate | text-resize | page-rotate | group-resize | group-rotate | scroll-v | scroll-h`.
-- **Multi-toque (celular)**: `Editor.tsx` rastreia os ponteiros ativos em
-  `activePointersRef` (atualizado em `onPointerDown`/`onPointerMove`). Um segundo dedo
-  não interrompe um traço imediatamente: só ativa o gesto de mover/pinça depois de se
-  deslocar mais de `TWO_FINGER_THRESHOLD` (14px), evitando que a palma da mão anule um
-  desenho. Com 2 dedos confirmados, `dragRef` vira `pan` com `multiTouch: true`: o
-  afastamento/aproximação dos dedos aplica zoom (`applyZoomAt`, fator = razão das
-  distâncias) em torno do ponto médio e o deslocamento do ponto médio move a tela.
-  Estado dos gestos: `pinchRef` (distância/ponto médio anteriores) e
-  `pendingTwoFingerRef` (dedo candidato a confirmar o gesto). O canvas faz
-  `preventDefault` no `pointerdown` de toque/caneta e só usa `setPointerCapture`
-  explícito para mouse (toque/caneta usam captura implícita do navegador).
+- **Multi-toque (celular)**: `Editor.tsx` rastreia os ponteiros ativos em `activePointersRef` (atualizado em `onPointerDown`/`onPointerMove`). Um segundo dedo não interrompe um traço imediatamente: só ativa o gesto de mover/pinça depois de se deslocar mais de `TWO_FINGER_THRESHOLD` (14px), evitando que a palma da mão anule um desenho. Com 2 dedos confirmados, `dragRef` vira `pan` com `multiTouch: true`: o afastamento/aproximação dos dedos aplica zoom (`applyZoomAt`, fator = razão das distâncias) em torno do ponto médio e o deslocamento do ponto médio move a tela. Estado dos gestos: `pinchRef` (distância/ponto médio anteriores) e `pendingTwoFingerRef` (dedo candidato a confirmar o gesto). O canvas faz `preventDefault` no `pointerdown` de toque/caneta e usa `setPointerCapture` para todos os tipos de ponteiro para garantir que o traço não seja interrompido por gestos do sistema.
+  - **Estabilidade de Desenho**: **A caneta (pen) é soberana**: traços de caneta começam mesmo com outros dedos na tela. O ponteiro que iniciou um drag é rastreado em `dragOwnerIdRef`; **apenas os eventos do dono estendem o traço**, e um filtro de distância de 300px no `canvas.ts` (`extendStroke`) ignora artefatos de "teletransporte" causados por saltos de coordenadas. Quando um segundo dedo entra, o `abortForPan` é chamado, efetivando o traço em andamento **apenas se ele tiver mais de 2 pontos** (descartando toques fantasma minúsculos).
+  - **Estabilidade do Motor**: Para evitar perda de dados em desenhos rápidos, o reset do motor `PageCanvas` (que ocorre quando a referência do objeto `notebook` muda via auto-save) é **bloqueado** enquanto o `dragRef.current` estiver ativo. Isso garante que traços sucessivos nunca sejam interrompidos pela persistência em segundo plano.
   O ponteiro que iniciou um drag é rastreado em `dragOwnerIdRef`; **só o `pointerup` do
   dono efetiva o drag de conteúdo** (desenho/borracha/seleção por região) — um dedo que
   não é o dono, ao ser levantado, não encerra nem efetiva o traço prematuramente. Quando
@@ -820,12 +812,7 @@ Fluxo e arquivos envolvidos:
 - **Estado**: tudo que é compartilhado passa por Zustand stores; componentes leem com
   `useAppStore((s) => s.xxx)` e escrevem via ações da store (nunca mutando diretamente sem
   passar pela persistência).
-- **Persistência**: toda alteração de dados persiste via `db.*` (IndexedDB é o store
-  primário). Dentro do editor, edições de canvas persistem via `schedulePersist()`
-  (`Editor.tsx`), **debounced (400ms)** persistindo o caderno vivo atual no momento do
-  fire — edições de alta frequência (traços de desenho) são gravadas no máximo uma vez por
-  janela com o estado mais recente, em vez de um `persistNotebook` completo a cada release
-  do ponteiro.
+- **Persistência**: toda alteração de dados persiste via `db.*` (IndexedDB é o store primário). No editor, as edições persistem via `schedulePersist()` (`Editor.tsx`), **com debounce (400ms no PC, 1.5s no mobile)**. Para garantir a reatividade da UI, o `updateNotebookStorage` sempre cria uma **nova referência de objeto** para o `activeNotebook`, permitindo que campos de texto (como os de rotação) se atualizem em tempo real.
 - **Comunicação UI ↔ canvas**: via `CustomEvent` (`ink:*`), nunca props profundas.
 - **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** otimizado com uma flag `isDirtyRef` para evitar desenhos desnecessários quando o canvas está ocioso, garantindo alta performance em dispositivos móveis. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs para evitar re-renders do React. Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
 - **Canvas**: `Editor.tsx` é o dono do motor; `PageCanvas` só renderiza e faz hit tests.
