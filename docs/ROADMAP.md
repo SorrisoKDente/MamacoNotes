@@ -10,7 +10,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [ ] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reports as "Connected" on the new device even though the password was (correctly) excluded from the backup and no connection can be made.
 - [x] **Multi-touch Drawing Artifacts**: Depending on how two fingers touch the screen on mobile, stray lines may be created connecting the two points.
 - [x] **Cross-page Undo Corruption**: Pressing Ctrl+Z after switching pages duplicated content from the previous page onto the current one instead of undoing on the correct page.
-- [ ] **Premature Stroke Deletion**: Some strokes are being intermittently deleted or discarded before the user finishes drawing them.
+- [x] **Premature Stroke Deletion**: Some strokes were being intermittently deleted or discarded before completion. Fixed by preventing engine resets during active gestures.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 
 ## ✨ Planned Features & Improvements

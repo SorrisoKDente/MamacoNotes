@@ -10,7 +10,7 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [ ] **Falso Positivo de Status da Nuvem**: Ao importar um backup de um dispositivo conectado à nuvem, o app informa estar "Conectado" no novo dispositivo, mesmo que a senha tenha sido (corretamente) excluída do backup e nenhuma conexão possa ser feita.
 - [x] **Artefatos de Desenho Multi-toque**: Dependendo de como dois dedos tocam a tela no celular, linhas indesejadas podem ser criadas conectando os dois pontos.
 - [x] **Corrupção de Desfazer entre Páginas**: Apertar Ctrl+Z após trocar de página duplicava o conteúdo da página anterior na atual em vez de desfazer na página correta.
-- [ ] **Exclusão Prematura de Traços**: Alguns traços estão sendo excluídos ou descartados de forma intermitente antes de o usuário terminar de desenhá-los.
+- [x] **Exclusão Prematura de Traços**: Alguns traços estavam sendo excluídos ou descartados de forma intermitente antes de o usuário terminar de desenhá-los. Corrigido bloqueando o reset do motor gráfico durante gestos ativos.
 - [x] **Geração de Thumbnails**: As prévias dos cadernos no Dashboard estão com zoom incorreto, exibindo apenas o centro da página em vez de ajustar o conteúdo ao quadro.
 
 ## ✨ Funcionalidades e Melhorias Planejadas
