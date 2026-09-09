@@ -538,7 +538,11 @@ export function Editor() {
       return
     }
     if (notebookObjectRef.current !== undefined && notebookObjectRef.current !== notebook) {
-      engineRef.current = null
+      // ponytail: only reset engine if NOT currently drawing or dragging.
+      // resetting during an active gesture causes the current stroke to be lost (disappear).
+      if (!dragRef.current) {
+        engineRef.current = null
+      }
     }
     notebookObjectRef.current = notebook
     if (!engineRef.current || engineRef.current.canvas !== canvas) {
@@ -1524,9 +1528,9 @@ export function Editor() {
     if (drag.kind === 'draw') {
       const stroke = engine?.endStroke()
       const pg = pageRef.current
-      if (stroke && stroke.points.length > 2 && pg) {
-        // ponytail: only commit if it's a real stroke (> 2 points),
-        // otherwise it's just a "phantom" touch at the start of a pan/zoom.
+      if (stroke && stroke.points.length >= 1 && pg) {
+        // ponytail: always commit if it has at least 1 point.
+        // Even a single point (dot) is a valid intentional mark.
         pushUndo()
         getActiveLayer(pg).strokes.push(stroke as Stroke)
         pg.updatedAt = Date.now()
@@ -1582,13 +1586,13 @@ export function Editor() {
     const target = e.target as HTMLElement
     if (target.closest('.zoom-controls') || target.closest('.page-indicator')) return
 
-    if (e.pointerType === 'mouse') {
-      try {
-        canvas.setPointerCapture(e.pointerId)
-      } catch {
-        // ignore
-      }
+    // ponytail: capture all pointers to prevent the browser from "stealing" the stroke
+    try {
+      canvas.setPointerCapture(e.pointerId)
+    } catch {
+      // ignore
     }
+
     if (e.pointerType !== 'mouse') e.preventDefault()
     const pos = getPointerPos(e.nativeEvent)
     trackMouse(e)
@@ -1656,7 +1660,9 @@ export function Editor() {
     }
 
     const multiTouch = activePointersRef.current.size >= 2
-    if (multiTouch) {
+    const isPen = e.pointerType === 'pen'
+
+    if (multiTouch && !isPen) {
       const drag = dragRef.current
       if (drag?.kind === 'pan' && drag.multiTouch) {
         pinchRef.current = null
@@ -2628,6 +2634,7 @@ export function Editor() {
       dragInterruptedByTouchRef.current &&
       (activePointersRef.current.size >= 1 ||
         Date.now() - multiTouchDownAtRef.current <= TWO_FINGER_TAP_MAX_MS)
+
     if (drag?.kind === 'pan' && multiTouch && activePointersRef.current.size >= 1) {
       const rem = [...activePointersRef.current.values()][0]
       drag.startX = rem.x
@@ -2639,19 +2646,22 @@ export function Editor() {
     if (drag?.kind === 'pan' && activePointersRef.current.size < 2) {
       pinchRef.current = null
     }
+
     if (drag?.kind === 'draw') {
       if (isOwner) {
-        if (multiTouchTap) {
-          engine.endStroke()
-        } else {
-          const stroke = engine.endStroke()
-          const drawPage = pageRef.current
-          if (stroke && stroke.points.length >= 1 && drawPage) {
-            pushUndo()
-            getActiveLayer(drawPage).strokes.push(stroke as Stroke)
-            drawPage.updatedAt = Date.now()
-            dirtyRef.current = true
-          }
+        const stroke = engine.endStroke()
+        const drawPage = pageRef.current
+
+        // ponytail: only discard if it's literally empty (0 points).
+        // intentional dots (1 point) or interrupted strokes must be kept.
+        const shouldDiscard = multiTouchTap && (!stroke || stroke.points.length === 0)
+
+        if (!shouldDiscard && stroke && stroke.points.length >= 1 && drawPage) {
+          pushUndo()
+          getActiveLayer(drawPage).strokes.push(stroke as Stroke)
+          drawPage.updatedAt = Date.now()
+          notebookRef.current!.updatedAt = Date.now()
+          dirtyRef.current = true
         }
       }
     }
