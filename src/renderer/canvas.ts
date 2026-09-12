@@ -52,6 +52,8 @@ export class PageCanvas {
   private imageCache = new Map<string, HTMLImageElement>()
   private static globalImageCache = new Map<string, HTMLImageElement>()
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
+  private scratchCanvas: HTMLCanvasElement | null = null
+  private scratchCtx: CanvasRenderingContext2D | null = null
 
   constructor(props: CanvasProps) {
     this.canvas = props.canvas
@@ -181,8 +183,9 @@ export class PageCanvas {
     const distSq = dx * dx + dy * dy
     if (distSq < 0.4) return
 
-    // ponytail: ignore "teleportation" artifacts from multi-touch jumps (> 300px)
-    if (distSq > 300 * 300) return
+    // ponytail: relax "teleportation" filter to 1000px to avoid discarding strokes
+    // during lag spikes, while still catching extreme palm-rejection artifacts.
+    if (distSq > 1000 * 1000) return
 
     this.currentStroke.points.push({ x: p.x, y: p.y, pressure })
     this.lastPoint = p
@@ -311,11 +314,9 @@ export class PageCanvas {
       return
     }
 
-    const maskCanvas = document.createElement('canvas')
-    maskCanvas.width = Math.max(1, Math.ceil(page.width * this.devicePixelRatio))
-    maskCanvas.height = Math.max(1, Math.ceil(page.height * this.devicePixelRatio))
-    const maskCtx = maskCanvas.getContext('2d')!
-    maskCtx.scale(this.devicePixelRatio, this.devicePixelRatio)
+    const maskCtx = this.getMaskCtx(page.width, page.height)
+    if (!maskCtx || !this.scratchCanvas) return
+
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
     maskCtx.save()
     maskCtx.globalCompositeOperation = 'destination-out'
@@ -335,7 +336,7 @@ export class PageCanvas {
       maskCtx.stroke()
     }
     maskCtx.restore()
-    ctx.drawImage(maskCanvas, 0, 0, page.width, page.height)
+    ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
   }
 
   private renderMaskedStrokeGroup(
@@ -344,11 +345,9 @@ export class PageCanvas {
     strokes: Stroke[],
     erasures: StrokeErasure[],
   ) {
-    const maskCanvas = document.createElement('canvas')
-    maskCanvas.width = Math.max(1, Math.ceil(page.width * this.devicePixelRatio))
-    maskCanvas.height = Math.max(1, Math.ceil(page.height * this.devicePixelRatio))
-    const maskCtx = maskCanvas.getContext('2d')!
-    maskCtx.scale(this.devicePixelRatio, this.devicePixelRatio)
+    const maskCtx = this.getMaskCtx(page.width, page.height)
+    if (!maskCtx || !this.scratchCanvas) return
+
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
     maskCtx.save()
     maskCtx.globalCompositeOperation = 'destination-out'
@@ -365,7 +364,27 @@ export class PageCanvas {
       maskCtx.stroke()
     }
     maskCtx.restore()
-    ctx.drawImage(maskCanvas, 0, 0, page.width, page.height)
+    ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
+  }
+
+  private getMaskCtx(w: number, h: number): CanvasRenderingContext2D | null {
+    if (!this.scratchCanvas) {
+      this.scratchCanvas = document.createElement('canvas')
+      this.scratchCtx = this.scratchCanvas.getContext('2d')
+    }
+    const dpr = this.devicePixelRatio
+    const tw = Math.max(1, Math.ceil(w * dpr))
+    const th = Math.max(1, Math.ceil(h * dpr))
+    if (this.scratchCanvas.width !== tw || this.scratchCanvas.height !== th) {
+      this.scratchCanvas.width = tw
+      this.scratchCanvas.height = th
+    }
+    const sctx = this.scratchCtx
+    if (!sctx) return null
+    sctx.setTransform(1, 0, 0, 1, 0, 0)
+    sctx.clearRect(0, 0, tw, th)
+    sctx.scale(dpr, dpr)
+    return sctx
   }
 
 

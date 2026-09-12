@@ -505,6 +505,8 @@ export const useAppStore = create<AppState>((set, get) => {
       (changes.pulledFolders ?? prev.folders).map((f) => f.id),
     )
 
+    let activeNotebook = prev.activeNotebook
+
     for (const nb of changes.pulledNotebooks) {
       const idx = notebooks.findIndex((n) => n.id === nb.id)
       const existing = idx >= 0 ? notebooks[idx] : undefined
@@ -534,6 +536,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (idx >= 0) notebooks[idx] = summary
       else notebooks.push(summary)
       await db.putNotebook(norm)
+
+      if (norm.id === prev.selectedNotebookId) {
+        activeNotebook = norm
+      }
     }
     for (const nb of changes.newNotebooks) {
       const resolvedFolderId = normalizeNotebookFolder(nb, effectiveFolderIds)
@@ -561,6 +567,10 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       notebooks.push(summary)
       await db.putNotebook(added)
+
+      if (added.id === prev.selectedNotebookId) {
+        activeNotebook = added
+      }
     }
     for (const id of changes.removedLocalNotebookIds) {
       await db.deleteNotebook(id)
@@ -574,17 +584,30 @@ export const useAppStore = create<AppState>((set, get) => {
       for (const f of filled.folders) await db.putFolder(f)
     }
 
+    let currentPageIndex = prev.currentPageIndex
+    if (activeNotebook && activeNotebook.id === prev.selectedNotebookId) {
+      currentPageIndex = Math.min(prev.currentPageIndex, activeNotebook.pages.length - 1)
+      if (currentPageIndex < 0 && activeNotebook.pages.length > 0) currentPageIndex = 0
+    }
+
     if (prev.selectedNotebookId && removed.has(prev.selectedNotebookId)) {
       set({
         folders,
         notebooks,
         selectedNotebookId: null,
+        activeNotebook: null,
         currentPageIndex: 0,
         lastClicked: null,
         dataVersion: get().dataVersion + 1,
       })
     } else {
-      set({ folders, notebooks, dataVersion: get().dataVersion + 1 })
+      set({
+        folders,
+        notebooks,
+        activeNotebook,
+        currentPageIndex,
+        dataVersion: get().dataVersion + 1,
+      })
     }
   }
 

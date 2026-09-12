@@ -212,14 +212,13 @@ export function Editor() {
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
       if (!source) return
-      const current = useAppStore.getState().notebooks.find((item) => item.id === source.id)
-      // A cloud pull replaces the notebook object. Do not let a persistence
-      // timer created before that pull write stale local edits back. Persist
-      // the current live notebook (already rendered) instead of a snapshot, so
-      // the store keeps the same object reference and the canvas engine is not
-      // torn down (losing its image cache) after every stroke, which caused a
-      // screen flicker on release.
-      if (current?.id !== source.id) return
+      const live = useAppStore.getState().activeNotebook
+      // ponytail: object reference check! A sync pull replaces the notebook object.
+      // Do not let a persistence timer created before that pull write stale local
+      // edits back. Persisting the current live notebook instead of a snapshot
+      // keeps the same object reference in the store so the canvas engine is not
+      // torn down after every stroke.
+      if (live !== source) return
       void persistNotebook(source)
     }, isMobileNow() ? 1500 : 400)
   }
