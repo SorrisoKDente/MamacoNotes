@@ -6,6 +6,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 
 - [x] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
 - [x] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
+- [ ] **Sync Manifest Failure**: Sincronização falha com erro de "sem conexão" quando o arquivo `manifest.json` não existe no servidor, mesmo que a conexão esteja funcionando (pastas criadas com sucesso).
 - [/] **Critical Performance (Android)**: Severe lag reported in specific notes. Currently unable to reproduce consistently; waiting for further occurrences to gather more data for testing.
 - [x] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reported as "Connected" even though the password was missing. Now automatically disconnects if the password is absent after import.
 - [x] **Multi-touch Drawing Artifacts**: Depending on how two fingers touch the screen on mobile, stray lines may be created connecting the two points.

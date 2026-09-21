@@ -442,9 +442,24 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     const text = await transport.downloadFile(`${basePath}/${MANIFEST_PATH}`)
     manifest = parseManifest(text)
   } catch (e) {
+    let effectiveError = e
     if (!(e instanceof RemoteFileNotFoundError)) {
-      const msg = e instanceof Error ? e.message : String(e)
-      logger.error('Sync manifest read failed', e)
+      // ponytail: on some servers (WebDAV/CORS), a 404 for a missing manifest
+      // is reported as a connection error (TypeError: Failed to fetch) instead
+      // of a proper HTTP 404 response. If connectivity check succeeds, treat
+      // as 404.
+      try {
+        await transport.listDirectory(basePath)
+        effectiveError = new RemoteFileNotFoundError(`${basePath}/${MANIFEST_PATH}`)
+      } catch {
+        // connectivity check failed too, keep original error
+      }
+    }
+
+    if (!(effectiveError instanceof RemoteFileNotFoundError)) {
+      const msg =
+        effectiveError instanceof Error ? effectiveError.message : String(effectiveError)
+      logger.error('Sync manifest read failed', effectiveError)
       result.errors.push(t('error.syncReadManifestFailed', { message: msg }))
       return {
         result,

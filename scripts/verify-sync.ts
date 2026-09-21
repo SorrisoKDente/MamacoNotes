@@ -69,6 +69,7 @@ class FakeTransport implements Transport {
   files = new Map<string, string>()
   failManifestWrite = false
   failEnsureDirectory = false
+  failManifestDownloadWithConnectionError = false
   ensureDirCalls: string[] = []
 
   async ensureDirectory(dirPath: string): Promise<void> {
@@ -97,6 +98,9 @@ class FakeTransport implements Transport {
   }
 
   async downloadFile(filePath: string): Promise<string> {
+    if (filePath.endsWith(`/${MANIFEST_PATH}`) && this.failManifestDownloadWithConnectionError) {
+      throw new Error('TypeError: Failed to fetch')
+    }
     const content = this.files.get(filePath)
     if (content === undefined) throw new RemoteFileNotFoundError(filePath)
     return content
@@ -683,6 +687,28 @@ console.log('== runSync ==')
   assert(
     entry !== undefined && !entry.deleted,
     'restored-from-trash runSync: manifest entry back to deleted:false',
+  )
+}
+
+{
+  const transport = new FakeTransport()
+  transport.failManifestDownloadWithConnectionError = true
+  const state = makeState()
+  const out = await runSync({
+    basePath: 'MamacoNotes',
+    transport,
+    notebooks: [],
+    folders: [],
+    state,
+    getNotebook: async () => undefined,
+  })
+  assert(
+    out.result.errors.length === 0,
+    'CORS-blocked 404 (TypeError) on manifest -> recovered via connectivity check',
+  )
+  assert(
+    transport.files.has(`MamacoNotes/${MANIFEST_PATH}`),
+    'recovered runSync saved a new manifest',
   )
 }
 
