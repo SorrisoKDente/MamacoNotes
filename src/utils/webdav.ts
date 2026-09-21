@@ -2,9 +2,11 @@ import type { CloudSettings } from '../types'
 import { NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
-import { customFetch, downloadText, isConnectionError } from './http'
+import { customFetch, downloadText, isBrowserFetchError, isConnectionError } from './http'
 import { Capacitor } from '@capacitor/core'
 import { uploadFileStreaming } from './chunkedIo'
+
+let lastWebdavSuccessAt = 0
 
 
 // ponytail: deleted unused MIME_MAP
@@ -69,8 +71,21 @@ function webdavAuthError(status: number): Error {
  * the user). Non-connection errors pass through unchanged.
  */
 function rethrowConnectionError(err: unknown): never {
-  if (isConnectionError(err)) throw new Error(t('error.networkUnreachable'))
+  if (isConnectionError(err)) {
+    if (isBrowserFetchError(err) && Date.now() - lastWebdavSuccessAt < 60000) {
+      throw new Error(t('error.browserConfigIssue'))
+    }
+    throw new Error(t('error.networkUnreachable'))
+  }
   throw err
+}
+
+function markWebdavSuccess() {
+  lastWebdavSuccessAt = Date.now()
+}
+
+export function isRecentWebdavSuccess(): boolean {
+  return Date.now() - lastWebdavSuccessAt < 60000
 }
 
 /**
@@ -108,6 +123,7 @@ async function koofrFetch<T>(
     rethrowConnectionError(err)
     throw err
   }
+  markWebdavSuccess()
   if (res.status === 401 || res.status === 403) {
     throw koofrAuthError(res.status)
   }
@@ -208,9 +224,18 @@ async function directoryExists(settings: CloudSettings, dirPath: string): Promis
       },
       body: PROPFIND_BODY,
     })
-    if (res.ok || res.status === 207) return true
-    const g = await customFetch(url, { headers: { Authorization: authHeader(settings) } })
-    return g.ok || g.status === 207
+    if (res.ok || res.status === 207) {
+      markWebdavSuccess()
+      return true
+    }
+    const fallback = await customFetch(url, {
+      headers: { Authorization: authHeader(settings) },
+    })
+    if (fallback.ok || fallback.status === 207) {
+      markWebdavSuccess()
+      return true
+    }
+    return false
   } catch {
     return false
   }
@@ -241,18 +266,14 @@ async function ensureDirectory(
     headers: { Authorization: authHeader(settings) },
   })
   if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
+  if (res.ok || res.status === 405) {
+    markWebdavSuccess()
+  }
   if (res.status === 201) return
   if (res.status === 405 || res.ok) {
     if (await directoryExists(settings, dirPath)) return
-    const trailing = await customFetch(`${url}/`, {
-      method: 'MKCOL',
-      headers: { Authorization: authHeader(settings) },
-    })
-    if (trailing.status === 201 || (await directoryExists(settings, dirPath))) return
-    throw new Error(
-      t('error.remoteFolderCreateFailed', { dirPath, basePath: settings.webdavPath }),
-    )
   }
+  throw new Error(t('error.createDirFailed', { dirPath, status: res.status }))
   throw new Error(t('error.createDirFailed', { dirPath, status: res.status }))
 }
 
@@ -291,6 +312,7 @@ async function listDirectory(
   })
   if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
   if (!res.ok) return []
+  markWebdavSuccess()
   const text = await res.text()
   const names: string[] = []
   const re = /<d:displayname[^>]*>([^<]*)<\/d:displayname>/g
@@ -338,6 +360,7 @@ async function uploadFile(
             )
           }
         }
+        markWebdavSuccess()
         return
       }
       if (status === 401 || status === 403) throw webdavAuthError(status)
@@ -363,6 +386,7 @@ async function uploadFile(
       }
       throw new Error(t('error.uploadFailed', { filePath, status: res.status }))
     }
+    markWebdavSuccess()
   } catch (err) {
     logger.error(`Upload failed: ${filePath}`, err)
     rethrowConnectionError(err)
@@ -386,6 +410,7 @@ async function downloadFile(
         if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
         throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
       }
+      markWebdavSuccess()
       return res.text
     }
     const res = await customFetch(url, { headers })
@@ -394,6 +419,7 @@ async function downloadFile(
       if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
       throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
     }
+    markWebdavSuccess()
     return res.text()
   } catch (err) {
     logger.error(`Download failed: ${filePath}`, err)
@@ -412,6 +438,9 @@ async function deleteRemoteFile(
     headers: { Authorization: authHeader(settings) },
   })
   if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
+  if (res.ok || res.status === 404) {
+    markWebdavSuccess()
+  }
   if (!res.ok && res.status !== 404) {
     throw new Error(t('error.deleteFailed', { filePath, status: res.status }))
   }
@@ -426,6 +455,7 @@ export async function testWebdavConnection(
       // For Koofr, test via API to avoid PROPFIND on Android
       await koofrInfo(settings)
       const basePathExists = await koofrFileExists(settings, settings.webdavPath)
+      if (basePathExists) lastWebdavSuccessAt = Date.now()
       return {
         ok: true,
         message: basePathExists
@@ -454,6 +484,7 @@ export async function testWebdavConnection(
         message: t('error.webdavAccessFailed', { status: res.status }),
       }
     }
+    lastWebdavSuccessAt = Date.now()
     const basePathExists = await directoryExists(settings, settings.webdavPath)
     return {
       ok: true,

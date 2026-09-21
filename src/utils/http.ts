@@ -17,6 +17,7 @@ export function isConnectionError(err: unknown): boolean {
     lower.includes('network error') ||
     lower.includes('network unreachable') ||
     lower.includes('failed to fetch') ||
+    lower.includes('unexpected end of stream') ||
     lower.includes('socketexception') ||
     lower.includes('socket timeout') ||
     lower.includes('the request timed out') ||
@@ -35,9 +36,20 @@ export function isConnectionError(err: unknown): boolean {
 }
 
 /**
+ * Detects if an error is likely a browser-level CORS or Mixed Content failure.
+ * These usually arrive as a generic "Failed to fetch" TypeError.
+ */
+export function isBrowserFetchError(err: unknown): boolean {
+  if (Capacitor.isNativePlatform() || (window as any).inkfolioDesktop) return false
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('load failed')
+}
+
+/**
  * Retries `fn` on connection errors only (3 attempts, backoff 500ms -> 1s).
  * HTTP 4xx/5xx and authentication failures never reach the retry path: they
  * are returned by fetch as responses (not thrown), so `fn` resolves normally.
+ * Browser-level fetch errors (CORS) are NOT retried to avoid long hangs.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -51,6 +63,7 @@ export async function withRetry<T>(
     } catch (err) {
       lastErr = err
       if (attempt < retries && isConnectionError(err)) {
+        if (isBrowserFetchError(err)) break // Don't retry CORS/Mixed Content errors
         await new Promise((resolve) => setTimeout(resolve, delays[attempt]))
         continue
       }
@@ -97,12 +110,19 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
       }),
     )
 
+    const responseHeaders = new Headers()
+    if (res.headers) {
+      for (const [key, value] of Object.entries(res.headers)) {
+        responseHeaders.append(key, value as string)
+      }
+    }
+
     return {
       ok: res.status >= 200 && res.status < 300,
       status: res.status,
       statusText: '',
       url,
-      headers: new Headers(res.headers),
+      headers: responseHeaders,
       text: () => Promise.resolve(typeof res.data === 'string' ? res.data : JSON.stringify(res.data)),
       json: () => Promise.resolve(res.data),
       blob: () => Promise.resolve(new Blob([res.data])),

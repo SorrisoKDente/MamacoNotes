@@ -512,6 +512,7 @@ export const ptBRMessages: Record<string, string> = {
   'error.koofrAuthFailed': 'Falha de autenticação com o Koofr ({{status}}). Confira se o "usuário" é o e-mail da conta e se a "senha" é um App Password válido criado em app.koofr.net → Configurações → App Passwords.',
   'error.webdavAuthFailed': 'Falha de autenticação ({{status}}). Verifique o usuário e a senha (app password) do servidor WebDAV.',
   'error.networkUnreachable': 'Sem conexão com o servidor. Verifique sua conexão com a internet e tente novamente.',
+  'error.browserConfigIssue': 'Erro de conexão no navegador. Se o "Testar conexão" funcionou, este erro pode ser causado por políticas de CORS (o servidor WebDAV precisa permitir localhost) ou Mixed Content. Tente usar o App Desktop ou Android, onde essas restrições não existem.',
   'error.trashRestoreCloudFailed': 'Não foi possível restaurar "{{name}}" da nuvem. A cópia pode não existir mais no servidor.',
   'error.connectionOkBaseExists': 'Conexão OK: servidor acessível e pasta base existente.',
   'error.connectionOkBaseMissing': 'Conexão OK: servidor acessível, mas a pasta "{{path}}" ainda não existe. Clique em "Criar pastas" antes de sincronizar.',

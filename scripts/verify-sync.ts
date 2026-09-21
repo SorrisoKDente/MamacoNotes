@@ -704,7 +704,7 @@ console.log('== runSync ==')
   })
   assert(
     out.result.errors.length === 0,
-    'CORS-blocked 404 (TypeError) on manifest -> recovered via connectivity check',
+    'CORS-blocked 404 (TypeError) on manifest -> assumed missing (recovered)',
   )
   assert(
     transport.files.has(`MamacoNotes/${MANIFEST_PATH}`),

@@ -14,6 +14,7 @@ import { t } from '../i18n'
 import { RemoteFileNotFoundError } from './webdav'
 import type { Transport } from './webdav'
 import { logger } from './logger'
+import { isBrowserFetchError } from './http'
 
 export const MANIFEST_PATH = 'manifest.json'
 export const FOLDERS_PATH = `${FOLDERS_DIR}/folders.json`
@@ -443,22 +444,23 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     manifest = parseManifest(text)
   } catch (e) {
     let effectiveError = e
-    if (!(e instanceof RemoteFileNotFoundError)) {
+    const isRemoteNotFound =
+      e instanceof RemoteFileNotFoundError || (e as any).name === 'RemoteFileNotFoundError'
+
+    if (!isRemoteNotFound && isBrowserFetchError(e)) {
       // ponytail: on some servers (WebDAV/CORS), a 404 for a missing manifest
       // is reported as a connection error (TypeError: Failed to fetch) instead
-      // of a proper HTTP 404 response. If connectivity check succeeds, treat
-      // as 404.
-      try {
-        await transport.listDirectory(basePath)
-        effectiveError = new RemoteFileNotFoundError(`${basePath}/${MANIFEST_PATH}`)
-      } catch {
-        // connectivity check failed too, keep original error
-      }
+      // of a proper HTTP 404 response. If we just successfully created/verified
+      // directories above, we assume the manifest is missing (404).
+      logger.warn('Manifest download failed with browser fetch error (CORS likely), assuming missing (404)', e)
+      effectiveError = new RemoteFileNotFoundError(`${basePath}/${MANIFEST_PATH}`)
     }
 
-    if (!(effectiveError instanceof RemoteFileNotFoundError)) {
-      const msg =
-        effectiveError instanceof Error ? effectiveError.message : String(effectiveError)
+    if (
+      !(effectiveError instanceof RemoteFileNotFoundError) &&
+      (effectiveError as any).name !== 'RemoteFileNotFoundError'
+    ) {
+      const msg = effectiveError instanceof Error ? effectiveError.message : String(effectiveError)
       logger.error('Sync manifest read failed', effectiveError)
       result.errors.push(t('error.syncReadManifestFailed', { message: msg }))
       return {
