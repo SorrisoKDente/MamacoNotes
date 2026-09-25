@@ -1594,12 +1594,14 @@ export function Editor() {
     }
   }
 
-  const isPanShortcutActive = useCallback((e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
+  const isPanShortcutActive = useCallback((e?: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
     const panShortcut = settings.shortcuts.pan
     if (!panShortcut) return false
-    if (panShortcut === 'alt') return e.altKey
-    if (panShortcut === 'ctrl') return e.ctrlKey || e.metaKey
-    if (panShortcut === 'shift') return e.shiftKey
+    if (e) {
+      if (panShortcut === 'alt') return Boolean(e.altKey)
+      if (panShortcut === 'ctrl') return Boolean(e.ctrlKey || e.metaKey)
+      if (panShortcut === 'shift') return Boolean(e.shiftKey)
+    }
     return pressedKeysRef.current.has(panShortcut)
   }, [settings.shortcuts.pan])
 
@@ -2256,7 +2258,12 @@ export function Editor() {
       const el = toolCursorRef.current
       if (!el) return
       const t = toolRef.current
-      if (t !== 'pen' && t !== 'highlighter' && t !== 'eraser' || !visible || mx < 0) {
+      if (
+        (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') ||
+        !visible ||
+        mx < 0 ||
+        isPanShortcutActive()
+      ) {
         el.style.opacity = '0'
         return
       }
@@ -2267,7 +2274,13 @@ export function Editor() {
       el.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
       el.style.background = t === 'highlighter' ? 'rgba(255,255,255,0.1)' : 'transparent'
     },
-    [settings.eraserMode, settings.lastEraserSize, settings.lastPenSize, settings.lastHighlighterSize],
+    [
+      settings.eraserMode,
+      settings.lastEraserSize,
+      settings.lastPenSize,
+      settings.lastHighlighterSize,
+      isPanShortcutActive,
+    ],
   )
 
   function onPointerMove(e: React.PointerEvent) {
@@ -2284,6 +2297,17 @@ export function Editor() {
       const mx = e.clientX - rect.left
       const my = e.clientY - rect.top
       mousePosRef.current = { x: mx, y: my }
+      if (dragRef.current?.kind === 'pan') {
+        canvas.style.cursor = 'grabbing'
+      } else if (isPanShortcutActive(e) || tool === 'pan') {
+        canvas.style.cursor = 'grab'
+      } else if (!dragRef.current) {
+        if (tool === 'select') {
+          updateSelectCursor(engine.toPageCoords(mx, my))
+        } else {
+          canvas.style.cursor = ''
+        }
+      }
       updateCursorDOM(mx, my, pointerPressureRef.current)
     } else if (toolCursorRef.current) {
       toolCursorRef.current.style.opacity = '0'
@@ -2799,10 +2823,13 @@ export function Editor() {
         }
       }
     }
-    if (drag?.kind === 'pan') {
+    if (isPanShortcutActive(e) || tool === 'pan') {
       canvas.style.cursor = 'grab'
     } else {
       canvas.style.cursor = ''
+      if (e.pointerType === 'mouse') {
+        updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+      }
     }
 
     // Hide cursor on touch end to avoid "ghost" circle on top of the last point
@@ -3068,6 +3095,12 @@ export function Editor() {
 
       if (isTyping) return
 
+      // Update cursor when Pan shortcut key is pressed
+      if (isPanShortcutActive(e) && !dragRef.current) {
+        if (canvasRef.current) canvasRef.current.style.cursor = 'grab'
+        if (toolCursorRef.current) toolCursorRef.current.style.opacity = '0'
+      }
+
       // If no page is selected, we don't handle shortcuts in the Editor.
       if (!pageRef.current) return
 
@@ -3106,6 +3139,32 @@ export function Editor() {
     const onKeyUp = (e: KeyboardEvent) => {
       const normalized = normalizeKey(e)
       if (normalized) pressedKeysRef.current.delete(normalized)
+
+      const canvas = canvasRef.current
+      if (canvas && !dragRef.current) {
+        if (isPanShortcutActive(e) || toolRef.current === 'pan') {
+          canvas.style.cursor = 'grab'
+        } else {
+          canvas.style.cursor = ''
+          if (mousePosRef.current.x >= 0) {
+            updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+          }
+        }
+      }
+    }
+    const onBlur = () => {
+      pressedKeysRef.current.clear()
+      const canvas = canvasRef.current
+      if (canvas && !dragRef.current) {
+        if (toolRef.current === 'pan') {
+          canvas.style.cursor = 'grab'
+        } else {
+          canvas.style.cursor = ''
+          if (mousePosRef.current.x >= 0) {
+            updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+          }
+        }
+      }
     }
     window.addEventListener('ink:zoom', onZoom)
     window.addEventListener('ink:recenter', onRecenter)
@@ -3119,6 +3178,7 @@ export function Editor() {
     window.addEventListener('ink:text-delete', onTextDelete)
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
     window.addEventListener('ink:esc', onInkEsc)
     const onResize = () => {
       if (resizeTimerRef.current) window.clearTimeout(resizeTimerRef.current)
@@ -3163,6 +3223,7 @@ export function Editor() {
       window.removeEventListener('ink:text-delete', onTextDelete)
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
       window.removeEventListener('ink:esc', onInkEsc)
       window.removeEventListener('resize', onResize)
       window.visualViewport?.removeEventListener('resize', onResize)

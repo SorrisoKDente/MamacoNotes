@@ -15,7 +15,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser.
 - [ ] **Eraser Mask Overlap Issue**: Erasing content and then dragging an element over the erased region causes the dragged element to disappear underneath (as if the eraser drew a solid background mask over lower layers).
 - [ ] **Intermittent Text Blurring After Erase**: Erasing strokes occasionally causes existing text elements on the page to render blurry (hard to reproduce).
-- [ ] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.
+- [x] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.
 - [ ] **Missing Fullscreen Option in Web**: The fullscreen toggle button is missing in the browser version (Web/PWA) on both the Dashboard and Editor views.
 
 ## ✨ Planned Features & Improvements
