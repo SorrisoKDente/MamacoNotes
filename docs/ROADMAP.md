@@ -6,7 +6,6 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 
 - [x] **Editor Navigation**: Zoom in/out and Recenter buttons are currently unresponsive on Desktop and Web versions (working only on Android).
 - [x] **Drawing Engine**: Single-click drawing is currently not registered; the cursor requires a minimum drag distance to begin a stroke.
-- [ ] **Sync Manifest Failure**: Sincronização falha com erro de "sem conexão" quando o arquivo `manifest.json` não existe no servidor, mesmo que a conexão esteja funcionando (pastas criadas com sucesso).
 - [/] **Critical Performance (Android)**: Severe lag reported in specific notes. Currently unable to reproduce consistently; waiting for further occurrences to gather more data for testing.
 - [x] **Cloud Sync Status False Positive**: When importing a backup from a device that was cloud-connected, the app reported as "Connected" even though the password was missing. Now automatically disconnects if the password is absent after import.
 - [x] **Multi-touch Drawing Artifacts**: Depending on how two fingers touch the screen on mobile, stray lines may be created connecting the two points.
@@ -14,11 +13,18 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Premature Stroke Deletion**: Some strokes were being intermittently deleted or discarded before completion. Fixed by preventing engine resets during active gestures.
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 - [x] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser.
+- [ ] **Eraser Mask Overlap Issue**: Erasing content and then dragging an element over the erased region causes the dragged element to disappear underneath (as if the eraser drew a solid background mask over lower layers).
+- [ ] **Intermittent Text Blurring After Erase**: Erasing strokes occasionally causes existing text elements on the page to render blurry (hard to reproduce).
+- [ ] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.
+- [ ] **Missing Fullscreen Option in Web**: The fullscreen toggle button is missing in the browser version (Web/PWA) on both the Dashboard and Editor views.
 
 ## ✨ Planned Features & Improvements
 
 - [x] **Navigation Flow**: Returning from the Editor now brings the user back to the exact subfolder they were in.
 - [x] **Auto-follow Page Preview**: The page list now automatically scrolls to keep the current page in view and opens at the correct position when expanded.
+- [ ] **Toolbar Submenu Toggle Logic**: Switching tools in the sidebar toolbar should only select the tool without opening its configuration submenu. Clicking an already active tool icon toggles its submenu open/closed.
+- [ ] **Solid Pen Cursor**: Change the pen tool cursor from semi-opaque to a solid color for better visibility.
+- [ ] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
 - [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
   - **Page Preview**: Select all pages.
   - **Canvas**: Select all strokes, images, and text.

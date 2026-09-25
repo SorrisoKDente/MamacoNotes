@@ -13,11 +13,18 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [x] **Exclusão Prematura de Traços**: Alguns traços estavam sendo excluídos ou descartados de forma intermitente antes de o usuário terminar de desenhá-los. Corrigido bloqueando o reset do motor gráfico durante gestos ativos.
 - [x] **Geração de Thumbnails**: As prévias dos cadernos no Dashboard estão com zoom incorreto, exibindo apenas o centro da página em vez de ajustar o conteúdo ao quadro.
 - [x] **Preview de Atualização no Celular**: O modal de atualização de software no celular agora renderiza corretamente as notas de versão usando um parser Markdown leve.
+- [ ] **Sobreposição de Máscara da Borracha**: Ao apagar algo e tentar arrastar um elemento para a área apagada, o elemento desaparece por baixo (como se a borracha estivesse desenhando uma máscara com a cor do fundo sobre as camadas inferiores).
+- [ ] **Desfocamento Intermitente de Texto Pós-Borracha**: Apagar traços ocasionalmente deixa as outras letras e textos da página borrados (bug aleatório e de difícil reprodução).
+- [ ] **Restauração do Cursor de Pan/Mover**: Ao soltar a tecla de atalho de Pan/Mover, o cursor permanece com o ícone de Pan/Mover até um clique ser feito, em vez de retornar imediatamente ao ícone da ferramenta selecionada.
+- [ ] **Opção de Tela Cheia Ausente na Web**: A opção de alternar para tela cheia não aparece na versão de navegador (Web/PWA), nem no Dashboard e nem no Editor.
 
 ## ✨ Funcionalidades e Melhorias Planejadas
 
 - [x] **Fluxo de Navegação**: Ao voltar do Editor, o usuário agora retorna exatamente para a subpasta onde estava.
 - [x] **Auto-follow no Preview de Páginas**: O preview de páginas agora rola automaticamente para seguir a página atual e abre na posição correta ao ser expandido.
+- [ ] **Lógica de Submenu na Barra de Ferramentas**: Trocar de ferramenta no menu lateral deve apenas selecioná-la sem abrir o submenu de configuração. Clicar em uma ferramenta que já está selecionada deve alternar a abertura/fechamento do seu submenu.
+- [ ] **Cursor da Caneta Sólido**: Alterar o cursor da caneta de opaco/translúcido para uma cor sólida para melhorar a visualização.
+- [ ] **Padronização do Nome de Backup no Desktop**: Utilizar a data e hora atual no nome do arquivo de backup exportado no computador (`mamaco-notes-backup-AAAA-MM-DD-HHMMSS.json`), seguindo o padrão já utilizado no celular.
 - [ ] **Atalhos Contextuais (Ctrl+A)**: 
   - **Preview de Páginas**: Selecionar todas as páginas.
   - **Canvas**: Selecionar todos os traços, imagens e textos.
@@ -31,7 +38,7 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 ## 💡 Ideias Futuras (Backlog)
 
 ### Dashboard e UX
-- [ ] **Tooltips de Hover**: Mostrar o nome completo de pastas e cadernos ao passar o mouse sobre eles por um curto período (Sidebar e Grade).
+- [ ] **Hover Tooltips**: Mostrar o nome completo de pastas e cadernos ao passar o mouse sobre eles por um curto período (Sidebar e Grade).
 - [ ] **Diff Visual de Sync**: Mostrar uma prévia lado a lado das diferenças entre as versões local e na nuvem quando houver conflito de sincronização.
 - [ ] **Interface Desktop Minimalista**: Opção para remover a barra de menu nativa padrão (Arquivo, Editar, Exibir) na versão Electron para uma experiência mais imersiva.
 

@@ -113,23 +113,54 @@ export function Editor() {
 
   const page = notebook?.pages[currentPageIndex]
 
-  const pageRef = useRef<Page | undefined>(undefined)
-  pageRef.current = page
-  const notebookRef = useRef(notebook)
-  notebookRef.current = notebook
+  const dirtyRef = useRef(false)
+  const dragRef = useRef<{
+    kind: 'pan' | 'draw' | 'erase' | 'select-move' | 'select-resize' | 'select-rotate' | 'region-draw' | 'region-move' | 'text-rotate' | 'text-resize' | 'page-rotate' | 'group-resize' | 'group-rotate' | 'scroll-v' | 'scroll-h'
+    startX: number
+    startY: number
+    lastX: number
+    lastY: number
+    imageId: string | null
+    handle: string | null
+    startPan: { x: number; y: number }
+    multiTouch?: boolean
+    startImage?: ImageElement
+    startRotation?: number
+    startPagePt?: Pt
+    textTarget?: { type: 'existing'; id: string } | { type: 'draft' }
+    lastErasePage?: Pt
+    startBox?: Rect
+    snapshotStrokes?: Stroke[]
+    snapshotImages?: ImageElement[]
+    snapshotTexts?: TextElement[]
+    startAngle?: number
+  } | null>(null)
 
   const viewMode = settings.pageViewMode
   const offsets = useMemo<PageOffset[]>(
     () => computePageOffsets(notebook?.pages ?? [], viewMode),
     [notebook, viewMode, dataVersion],
   )
-
   const viewModeRef = useRef(viewMode)
   viewModeRef.current = viewMode
   const offsetsRef = useRef(offsets)
   offsetsRef.current = offsets
+
+  const pageRef = useRef<Page | undefined>(undefined)
+  const notebookRef = useRef(notebook)
   const pagesRef = useRef<Page[]>(notebook?.pages ?? [])
-  pagesRef.current = notebook?.pages ?? []
+
+  // ponytail: only update refs if NOT currently drawing or dirty (unsaved changes),
+  // unless the notebook ID or page ID changed (e.g. user switched notes/pages).
+  if (
+    notebook?.id !== notebookRef.current?.id ||
+    page?.id !== pageRef.current?.id ||
+    (!dragRef.current && !dirtyRef.current)
+  ) {
+    pageRef.current = page
+    notebookRef.current = notebook
+    pagesRef.current = notebook?.pages ?? []
+  }
   const currentPageIndexRef = useRef(currentPageIndex)
   currentPageIndexRef.current = currentPageIndex
 
@@ -182,43 +213,16 @@ export function Editor() {
   const lastClickRef = useRef<{ x: number; y: number; time: number; type: string; id: string } | null>(null)
   const pressedKeysRef = useRef<Set<string>>(new Set())
 
-  const dirtyRef = useRef(false)
-
-  const dragRef = useRef<{
-    kind: 'pan' | 'draw' | 'erase' | 'select-move' | 'select-resize' | 'select-rotate' | 'region-draw' | 'region-move' | 'text-rotate' | 'text-resize' | 'page-rotate' | 'group-resize' | 'group-rotate' | 'scroll-v' | 'scroll-h'
-    startX: number
-    startY: number
-    lastX: number
-    lastY: number
-    imageId: string | null
-    handle: string | null
-    startPan: { x: number; y: number }
-    multiTouch?: boolean
-    startImage?: ImageElement
-    startRotation?: number
-    startPagePt?: Pt
-    textTarget?: { type: 'existing'; id: string } | { type: 'draft' }
-    lastErasePage?: Pt
-    startBox?: Rect
-    snapshotStrokes?: Stroke[]
-    snapshotImages?: ImageElement[]
-    snapshotTexts?: TextElement[]
-    startAngle?: number
-  } | null>(null)
-
   function schedulePersist(nbArg?: Notebook) {
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
     const source = nbArg ?? notebookRef.current
+    if (!source) return
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null
-      if (!source) return
       const live = useAppStore.getState().activeNotebook
-      // ponytail: object reference check! A sync pull replaces the notebook object.
-      // Do not let a persistence timer created before that pull write stale local
-      // edits back. Persisting the current live notebook instead of a snapshot
-      // keeps the same object reference in the store so the canvas engine is not
-      // torn down after every stroke.
-      if (live !== source) return
+      if (!live || live.id !== source.id) return
+      if (!dirtyRef.current) return
+      dirtyRef.current = false
       void persistNotebook(source)
     }, isMobileNow() ? 1500 : 400)
   }
@@ -446,6 +450,20 @@ export function Editor() {
     return () => cancelAnimationFrame(requestRenderIdRef.current)
   }, [performRender])
 
+  // ponytail: ensure unsaved changes are flushed when Editor unmounts (e.g. exiting note / returning to dashboard).
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current)
+        persistTimerRef.current = null
+      }
+      if (dirtyRef.current && notebookRef.current) {
+        dirtyRef.current = false
+        void persistNotebook(notebookRef.current)
+      }
+    }
+  }, [])
+
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
   const notebookObjectRef = useRef<Notebook | undefined>(undefined)
@@ -537,9 +555,10 @@ export function Editor() {
       return
     }
     if (notebookObjectRef.current !== undefined && notebookObjectRef.current !== notebook) {
-      // ponytail: only reset engine if NOT currently drawing or dragging.
-      // resetting during an active gesture causes the current stroke to be lost (disappear).
-      if (!dragRef.current) {
+      // ponytail: only reset engine if NOT currently drawing or dirty (unsaved changes).
+      // resetting during an active gesture or while we have local changes causes
+      // the current stroke to be lost (disappear).
+      if (!dragRef.current && !dirtyRef.current) {
         engineRef.current = null
       }
     }
@@ -547,7 +566,7 @@ export function Editor() {
     if (!engineRef.current || engineRef.current.canvas !== canvas) {
       engineRef.current = new PageCanvas({
         canvas,
-        page,
+        page: pageRef.current || page, // Use ref if available to keep local changes
         zoom: zoomRef.current,
         panX: panRef.current.x,
         panY: panRef.current.y,
@@ -558,12 +577,17 @@ export function Editor() {
       })
     }
     const engine = engineRef.current
-    engine.page = page
+    // ponytail: use pageRef.current if we are dirty to keep local changes visible.
+    // if we switch to 'page' (from props), we might show a stale store version.
+    engine.page = (dirtyRef.current || dragRef.current) ? (pageRef.current || page) : page
     if (notebookIdRef.current !== notebook?.id) {
       notebookIdRef.current = notebook?.id ?? null
       fitPage()
     }
     if (pageIdRef.current !== page.id) {
+      if (pageIdRef.current !== null && dirtyRef.current) {
+        void persistNow()
+      }
       pageIdRef.current = page.id
       delimitedSnapshotRef.current = null
       if (!dragRef.current) {
@@ -1115,6 +1139,8 @@ export function Editor() {
   }
 
   async function persistNow() {
+    if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = null
     const nb = notebookRef.current
     if (!nb) return
     dirtyRef.current = false
@@ -2734,7 +2760,6 @@ export function Editor() {
     }
 
     if (dirtyRef.current) {
-      dirtyRef.current = false
       // Debounced persist (400ms): a drawing burst commits strokes at ~RAF
       // speed, and persisting the whole notebook + backup on every single
       // stroke freezes the UI right after each pointer release. The stroke is
