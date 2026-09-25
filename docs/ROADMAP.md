@@ -23,8 +23,9 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Navigation Flow**: Returning from the Editor now brings the user back to the exact subfolder they were in.
 - [x] **Auto-follow Page Preview**: The page list now automatically scrolls to keep the current page in view and opens at the correct position when expanded.
 - [ ] **Toolbar Submenu Toggle Logic**: Switching tools in the sidebar toolbar should only select the tool without opening its configuration submenu. Clicking an already active tool icon toggles its submenu open/closed.
-- [ ] **Solid Pen Cursor**: Change the pen tool cursor from semi-opaque to a solid color for better visibility.
-- [ ] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
+- [x] **Solid Pen Cursor**: Change the pen tool cursor from semi-opaque to a solid color for better visibility.
+- [ ] **Granular Tool Cursor Hiding**: Split the "Hide tool cursor" setting into independent options to hide pen cursor, hide eraser cursor, or hide all cursors.
+- [x] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
 - [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
   - **Page Preview**: Select all pages.
   - **Canvas**: Select all strokes, images, and text.

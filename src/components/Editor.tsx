@@ -790,7 +790,7 @@ export function Editor() {
     panRef.current = clampPan(nextPan)
     showScrollbarsTemporarily()
     setZoomDisplay(Math.round(z * 100))
-    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+    updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
     requestRender()
   }
 
@@ -822,7 +822,7 @@ export function Editor() {
 
     pointerPressureRef.current = 1
     mousePosRef.current = { x: mx, y: my }
-    updateCursorDOM(mx, my, 1)
+    updateCursorRef.current(mx, my, 1)
   }
 
   function getPointerPos(e: PointerEvent) {
@@ -2267,21 +2267,44 @@ export function Editor() {
         el.style.opacity = '0'
         return
       }
-      const diameter = cursorDisplaySize(t, settings, zoomRef.current, pressure)
+      const currentSettings = useAppStore.getState().settings
+      const isDrawing = dragRef.current?.kind === 'draw'
+      const activePressure = isDrawing ? pressure : 1
+      const diameter = cursorDisplaySize(t, currentSettings, zoomRef.current, activePressure)
       el.style.opacity = '1'
       el.style.width = `${diameter}px`
       el.style.height = `${diameter}px`
       el.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
-      el.style.background = t === 'highlighter' ? 'rgba(255,255,255,0.1)' : 'transparent'
+      if (t === 'pen') {
+        const c = cursorColor(t, currentSettings)
+        el.style.borderColor = c
+        if (diameter <= 6) {
+          el.style.borderWidth = '1px'
+          el.style.background = c
+          el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.5)'
+        } else {
+          el.style.borderWidth = '2px'
+          el.style.background = 'transparent'
+          el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.6)'
+        }
+      } else if (t === 'highlighter') {
+        const c = cursorColor(t, currentSettings)
+        el.style.borderColor = c
+        el.style.borderWidth = diameter <= 6 ? '1px' : '2px'
+        el.style.background = 'rgba(255,255,255,0.15)'
+        el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35)'
+      } else {
+        el.style.borderColor = '#9a9ab0'
+        el.style.borderWidth = diameter <= 6 ? '1px' : '2px'
+        el.style.background = 'transparent'
+        el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35)'
+      }
     },
-    [
-      settings.eraserMode,
-      settings.lastEraserSize,
-      settings.lastPenSize,
-      settings.lastHighlighterSize,
-      isPanShortcutActive,
-    ],
+    [isPanShortcutActive],
   )
+
+  const updateCursorRef = useRef(updateCursorDOM)
+  updateCursorRef.current = updateCursorDOM
 
   function onPointerMove(e: React.PointerEvent) {
     const engine = engineRef.current
@@ -2308,7 +2331,7 @@ export function Editor() {
           canvas.style.cursor = ''
         }
       }
-      updateCursorDOM(mx, my, pointerPressureRef.current)
+      updateCursorRef.current(mx, my, pointerPressureRef.current)
     } else if (toolCursorRef.current) {
       toolCursorRef.current.style.opacity = '0'
     }
@@ -2828,13 +2851,13 @@ export function Editor() {
     } else {
       canvas.style.cursor = ''
       if (e.pointerType === 'mouse') {
-        updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+        updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
       }
     }
 
     // Hide cursor on touch end to avoid "ghost" circle on top of the last point
     if (e.pointerType !== 'mouse') {
-      updateCursorDOM(-1, -1, 1, false)
+      updateCursorRef.current(-1, -1, 1, false)
     }
 
     requestRender()
@@ -2856,7 +2879,7 @@ export function Editor() {
       showScrollbarsTemporarily()
       requestRender()
     }
-    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+    updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
     scheduleFollowPage()
   }
 
@@ -2909,12 +2932,14 @@ export function Editor() {
   }, [page])
 
   useEffect(() => {
-    updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+    updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
   }, [
+    tool,
     settings.lastPenSize,
     settings.lastHighlighterSize,
     settings.lastEraserSize,
-    settings.lastTextFontSize,
+    settings.lastPenColor,
+    settings.lastHighlighterColor,
     updateCursorDOM,
   ])
 
@@ -3147,7 +3172,7 @@ export function Editor() {
         } else {
           canvas.style.cursor = ''
           if (mousePosRef.current.x >= 0) {
-            updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+            updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
           }
         }
       }
@@ -3161,7 +3186,7 @@ export function Editor() {
         } else {
           canvas.style.cursor = ''
           if (mousePosRef.current.x >= 0) {
-            updateCursorDOM(mousePosRef.current.x, mousePosRef.current.y)
+            updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y)
           }
         }
       }
@@ -3489,9 +3514,7 @@ const ToolCursor = React.forwardRef<
       ref={ref}
       className="tool-cursor"
       style={{
-        transform: `translate(-100px, -100px)`,
         borderColor: color,
-        opacity: 0,
       }}
     />
   )

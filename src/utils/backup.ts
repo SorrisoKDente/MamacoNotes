@@ -5,8 +5,6 @@ import { logger } from './logger'
 import { triggerDownload } from './download'
 import { isDesktop } from './platform'
 
-const BACKUP_FILENAME = 'mamaco-notes-backup.json'
-
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
@@ -70,9 +68,11 @@ export async function exportBackup(
   const payload = JSON.stringify(buildBackupPayload(folders, notebooks, settings))
   logger.info(`Exporting backup... Platform: ${Capacitor.getPlatform()}, Native: ${Capacitor.isNativePlatform()}`)
 
+  const filename = buildBackupFilename()
+
   if (desktop().saveFile) {
     try {
-      return await desktop().saveFile!(BACKUP_FILENAME, payload)
+      return await desktop().saveFile!(filename, payload)
     } catch {
       return false
     }
@@ -81,11 +81,11 @@ export async function exportBackup(
   // Mobile (Android / iOS): open the system "Save As" picker and write the
   // content in chunks via the native plugin to avoid the bridge OOM.
   if (Capacitor.isNativePlatform()) {
-    return await saveBackupFile(buildBackupFilename(), payload)
+    return await saveBackupFile(filename, payload)
   }
 
   const blob = new Blob([payload], { type: 'application/json' })
-  triggerDownload(blob, BACKUP_FILENAME)
+  triggerDownload(blob, filename)
   return true
 }
 

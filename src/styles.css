@@ -1865,11 +1865,14 @@ body {
   top: 0;
   left: 0;
   border-radius: 50%;
-  border: 2px solid var(--fg-muted);
-  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid #000;
+  background: transparent;
   pointer-events: none;
   z-index: 5;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  box-sizing: border-box;
+  opacity: 0;
+  transform: translate(-100px, -100px);
 }
 
 .inline-text-input {

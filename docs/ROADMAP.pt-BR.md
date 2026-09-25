@@ -23,8 +23,9 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [x] **Fluxo de Navegação**: Ao voltar do Editor, o usuário agora retorna exatamente para a subpasta onde estava.
 - [x] **Auto-follow no Preview de Páginas**: O preview de páginas agora rola automaticamente para seguir a página atual e abre na posição correta ao ser expandido.
 - [ ] **Lógica de Submenu na Barra de Ferramentas**: Trocar de ferramenta no menu lateral deve apenas selecioná-la sem abrir o submenu de configuração. Clicar em uma ferramenta que já está selecionada deve alternar a abertura/fechamento do seu submenu.
-- [ ] **Cursor da Caneta Sólido**: Alterar o cursor da caneta de opaco/translúcido para uma cor sólida para melhorar a visualização.
-- [ ] **Padronização do Nome de Backup no Desktop**: Utilizar a data e hora atual no nome do arquivo de backup exportado no computador (`mamaco-notes-backup-AAAA-MM-DD-HHMMSS.json`), seguindo o padrão já utilizado no celular.
+- [x] **Cursor da Caneta Sólido**: Alterar o cursor da caneta de opaco/translúcido para uma cor sólida para melhorar a visualização.
+- [ ] **Ocultação Granular de Cursores**: Dividir a opção de "Ocultar cursor de ferramentas" em opções separadas para ocultar o cursor da caneta, ocultar o cursor da borracha e ocultar todos os cursores.
+- [x] **Padronização do Nome de Backup no Desktop**: Utilizar a data e hora atual no nome do arquivo de backup exportado no computador (`mamaco-notes-backup-AAAA-MM-DD-HHMMSS.json`), seguindo o padrão já utilizado no celular.
 - [ ] **Atalhos Contextuais (Ctrl+A)**: 
   - **Preview de Páginas**: Selecionar todas as páginas.
   - **Canvas**: Selecionar todos os traços, imagens e textos.
