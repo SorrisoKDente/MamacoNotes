@@ -18,6 +18,7 @@ Estas regras se aplicam a **qualquer tarefa**. Ignorar estas regras é considera
 8.  **Protocolo de Roadmap:** Nunca remova um item do `docs/ROADMAP.md` até que o usuário confirme explicitamente a implementação/correção.
 9.  **Fluxo de Plano Antecipado:** Para qualquer tarefa não trivial, apresente um plano de implementação conciso para aprovação **antes** de modificar qualquer código.
 10. **Filosofia Ponytail:** Sempre favoreça a solução mais simples e mínima que funcione. Evite excessos, complexidade desnecessária (over-engineering) e dependências supérfluas. Esta regra é obrigatória, a menos que o usuário peça explicitamente para "parar ponytail".
+11. **Testes Automatizados de Regressão:** Sempre que um bug for corrigido e validado pelo usuário, um teste automatizado ou script de verificação de regressão DEVE ser criado ou atualizado para validar se a correção se mantém e evitar regredimentos.
 
 ## 📚 Base de Conhecimento e Habilidades
 

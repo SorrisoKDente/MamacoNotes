@@ -141,14 +141,14 @@ export function drawLayer(
 ) {
   ctx.save()
   ctx.globalAlpha = layer.opacity
+  for (const stroke of layer.strokes) {
+    drawStroke(ctx, stroke, scale)
+  }
   for (const img of layer.images) {
     if (drawImage) drawImage(img, scale)
   }
   for (const textEl of layer.texts) {
     drawTextOnCanvas(ctx, textEl, scale)
-  }
-  for (const stroke of layer.strokes) {
-    drawStroke(ctx, stroke, scale)
   }
   ctx.restore()
 }

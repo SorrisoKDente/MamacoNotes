@@ -264,13 +264,13 @@ export class PageCanvas {
       if (!layer.visible) continue
       ctx.save()
       ctx.globalAlpha = layer.opacity
+      this.renderMaskedStrokes(ctx, page, layer.strokes, layer.strokeErasures ?? [])
       for (const img of layer.images) {
         this.renderImage(ctx, img)
       }
       for (const textEl of layer.texts) {
         this.renderText(ctx, textEl)
       }
-      this.renderMaskedStrokes(ctx, page, layer.strokes, layer.strokeErasures ?? [])
       ctx.restore()
     }
     if (drawCurrentStroke && this.currentStroke) {

@@ -202,6 +202,7 @@ Fluxo de inicialização:
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) e o script NSIS customizado `installer.nsh` (atalho na Área de Trabalho, limpeza do atalho na desinstalação, uma **`customCheckAppRunning` robusta** que substitui a detecção padrão do electron-builder, e hooks de migração que ignoram/toleram desinstaladores legados que retornam erro 2) |
 | `docs/architecture/` | Documentos de design aprovados (sincronização bidirecional; camadas; desenho; i18n) |
 | `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transporte fake em memória (recuperação de baseline local obsoleta, rollback em falha de escrita de manifesto, execução idempotente, exibição de erro de auth, **regressão de tombstone do Bug A**: um caderno com tombstone nunca é re-baixado; **restauração da lixeira**: um caderno que reapareceu localmente após deleção remota é re-enviado e a entrada do manifesto volta para `deleted:false`). Rode com `npx tsx scripts/verify-sync.ts`; checado via `tsconfig.json` |
+| `scripts/verify-drawing.ts` | Verificação de regressão do motor de desenho standalone: exercita traços rápidos consecutivos, traços de ponto único e ordem de renderização das camadas. Rode com `npm test` ou `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-download.ts` | Verificação independente da correção de download no Android... |
 
 ---

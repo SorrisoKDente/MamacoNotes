@@ -40,7 +40,7 @@ export function isConnectionError(err: unknown): boolean {
  * These usually arrive as a generic "Failed to fetch" TypeError.
  */
 export function isBrowserFetchError(err: unknown): boolean {
-  if (Capacitor.isNativePlatform() || (window as any).inkfolioDesktop) return false
+  if (Capacitor.isNativePlatform() || (typeof window !== 'undefined' && (window as any).inkfolioDesktop)) return false
   const msg = err instanceof Error ? err.message : String(err)
   return msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('load failed')
 }

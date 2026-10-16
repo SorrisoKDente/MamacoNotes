@@ -18,6 +18,7 @@ These rules apply to **every task**, regardless of the platform or feature. Fail
 8.  **Roadmap Protocol:** Never remove an item from `docs/ROADMAP.md` until the user explicitly confirms the implementation/fix.
 9.  **Plan-First Workflow:** For any non-trivial task, present a concise implementation plan for approval **before** modifying any code.
 10. **Ponytail Philosophy:** Always favor the simplest, most minimal solution that works. Avoid bloat, over-engineering, and unnecessary dependencies. This rule is mandatory unless the user explicitly asks to "stop ponytail".
+11. **Automated Regression Testing:** Whenever a bug is fixed and validated, an automated test or verification script MUST be created or updated to verify that the fix remains valid and prevent regressions.
 
 ## 📚 Knowledge Base & Skills
 

@@ -39,12 +39,12 @@ export async function renderThumbnail(
     if (!layer.visible) continue
     ctx.save()
     ctx.globalAlpha = layer.opacity
+    for (const stroke of layer.strokes) {
+      drawStroke(ctx, stroke, 1)
+    }
     await loadLayerImages(ctx, layer, 1)
     for (const textEl of layer.texts) {
       drawTextOnCanvas(ctx, textEl, 1)
-    }
-    for (const stroke of layer.strokes) {
-      drawStroke(ctx, stroke, 1)
     }
     ctx.restore()
   }

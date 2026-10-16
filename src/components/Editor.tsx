@@ -1729,6 +1729,12 @@ export function Editor() {
       return
     }
 
+    // ponytail: if a previous stroke/erase gesture was still active when the new pointerdown arrived
+    // (e.g. rapid consecutive strokes), cleanly commit the in-progress stroke first so it is not lost.
+    if (dragRef.current && (dragRef.current.kind === 'draw' || dragRef.current.kind === 'erase')) {
+      abortForPan()
+    }
+
     dragOwnerIdRef.current = e.pointerId
     dragInterruptedByTouchRef.current = false
     multiTouchDownAtRef.current = 0

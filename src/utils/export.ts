@@ -17,14 +17,14 @@ async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanv
     if (!layer.visible) continue
     ctx.save()
     ctx.globalAlpha = layer.opacity
+    for (const stroke of layer.strokes) {
+      drawStroke(ctx, stroke, outputScale)
+    }
     for (const imgEl of layer.images) {
       await loadAndDrawImage(ctx, imgEl, outputScale)
     }
     for (const textEl of layer.texts) {
       drawTextOnCanvas(ctx, textEl, outputScale)
-    }
-    for (const stroke of layer.strokes) {
-      drawStroke(ctx, stroke, outputScale)
     }
     ctx.restore()
   }

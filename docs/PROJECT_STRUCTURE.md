@@ -202,6 +202,7 @@ Initialization flow:
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (stale local baseline recovery, rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
+| `scripts/verify-drawing.ts` | Standalone drawing engine regression verification: exercises consecutive rapid strokes, dot strokes, and layer rendering order. Run with `npm test` or `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
 
 ---

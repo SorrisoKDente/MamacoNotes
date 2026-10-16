@@ -22,7 +22,8 @@
     "build:android": "tsc --noEmit && vite build && cap sync android",
     "android:sync": "cap sync android",
     "android:open": "cap open android",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npx tsx scripts/verify-sync.ts && npx tsx scripts/verify-drawing.ts && npx tsx scripts/verify-undo-redo.ts && npx tsx scripts/verify-trash.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
