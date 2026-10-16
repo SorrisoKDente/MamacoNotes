@@ -326,14 +326,16 @@ export class PageCanvas {
       const points = erasure.points
       if (points.length === 0) continue
       maskCtx.lineWidth = erasure.radius * 2
-      maskCtx.beginPath()
-      maskCtx.moveTo(points[0].x, points[0].y)
       if (points.length === 1) {
+        maskCtx.beginPath()
         maskCtx.arc(points[0].x, points[0].y, erasure.radius, 0, Math.PI * 2)
+        maskCtx.fill()
       } else {
+        maskCtx.beginPath()
+        maskCtx.moveTo(points[0].x, points[0].y)
         for (let i = 1; i < points.length; i++) maskCtx.lineTo(points[i].x, points[i].y)
+        maskCtx.stroke()
       }
-      maskCtx.stroke()
     }
     maskCtx.restore()
     ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
@@ -357,11 +359,16 @@ export class PageCanvas {
       const points = erasure.points
       if (points.length === 0) continue
       maskCtx.lineWidth = erasure.radius * 2
-      maskCtx.beginPath()
-      maskCtx.moveTo(points[0].x, points[0].y)
-      if (points.length === 1) maskCtx.arc(points[0].x, points[0].y, erasure.radius, 0, Math.PI * 2)
-      else for (let i = 1; i < points.length; i++) maskCtx.lineTo(points[i].x, points[i].y)
-      maskCtx.stroke()
+      if (points.length === 1) {
+        maskCtx.beginPath()
+        maskCtx.arc(points[0].x, points[0].y, erasure.radius, 0, Math.PI * 2)
+        maskCtx.fill()
+      } else {
+        maskCtx.beginPath()
+        maskCtx.moveTo(points[0].x, points[0].y)
+        for (let i = 1; i < points.length; i++) maskCtx.lineTo(points[i].x, points[i].y)
+        maskCtx.stroke()
+      }
     }
     maskCtx.restore()
     ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
