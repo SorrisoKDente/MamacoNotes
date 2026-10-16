@@ -69,7 +69,7 @@ export function Toolbar() {
       }
     } else {
       setTool(t)
-      setPanelOpen(true)
+      setPanelOpen(false)
     }
   }
 
