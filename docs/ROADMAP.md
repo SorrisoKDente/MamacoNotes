@@ -19,7 +19,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [ ] **Intermittent Text Blurring After Erase**: Erasing strokes occasionally causes existing text elements on the page to render blurry (hard to reproduce).
 - [x] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.
 - [ ] **Missing Fullscreen Option in Web**: The fullscreen toggle button is missing in the browser version (Web/PWA) on both the Dashboard and Editor views.
-- [ ] **Layer Element Z-Ordering (Images/Strokes/Text)**: Within a single layer, images render in a fixed order relative to strokes and text, making it impossible to write or place text over an image without creating a new layer.
+- [x] **Layer Element Z-Ordering (Images/Strokes/Text)**: Within a single layer, images render in a fixed order relative to strokes and text, making it impossible to write or place text over an image without creating a new layer. Fixed with a per-element `order` (new content lands on top) plus bring-to-front/forward/backward/send-to-back actions in the Select panel.
 
 ## ✨ Planned Features & Improvements
 

@@ -19,7 +19,7 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [ ] **Desfocamento Intermitente de Texto Pós-Borracha**: Apagar traços ocasionalmente deixa as outras letras e textos da página borrados (bug aleatório e de difícil reprodução).
 - [x] **Restauração do Cursor de Pan/Mover**: Ao soltar a tecla de atalho de Pan/Mover, o cursor permanece com o ícone de Pan/Mover até um clique ser feito, em vez de retornar imediatamente ao ícone da ferramenta selecionada.
 - [ ] **Opção de Tela Cheia Ausente na Web**: A opção de alternar para tela cheia não aparece na versão de navegador (Web/PWA), nem no Dashboard e nem no Editor.
-- [ ] **Z-Order de Elementos na Camada (Imagens/Traços/Textos)**: Dentro de uma mesma camada, imagens ficam em uma ordem fixa em relação a traços e textos, impedindo escrever ou colocar textos sobre uma imagem sem criar uma nova camada.
+- [x] **Z-Order de Elementos na Camada (Imagens/Traços/Textos)**: Dentro de uma mesma camada, imagens ficam em uma ordem fixa em relação a traços e textos, impedindo escrever ou colocar textos sobre uma imagem sem criar uma nova camada. Corrigido com um `order` por elemento (novo conteúdo entra no topo) e ações de trazer para frente/avançar/recuar/enviar para trás no painel de Seleção.
 
 ## ✨ Funcionalidades e Melhorias Planejadas
 
