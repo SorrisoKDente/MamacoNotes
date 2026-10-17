@@ -633,6 +633,24 @@ body {
   margin-top: 8px;
 }
 
+.selection-actions--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.selection-actions--stacked button {
+  width: 100%;
+  justify-content: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.selection-actions--stacked .btn-label {
+  display: none;
+}
+
 .selection-actions button {
   background: var(--bg-4);
   border: 1px solid var(--border);

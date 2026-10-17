@@ -620,7 +620,7 @@ function SelectPanel() {
         </button>
       </div>
       <div className="panel-label">{t('tool.arrange')}</div>
-      <div className="selection-actions">
+      <div className="selection-actions selection-actions--stacked">
         <button className="btn small" onClick={() => dispatch('front')} title={t('tool.bringToFrontTitle')}>
           <IconBringToFront />
           {t('tool.bringToFront')}
