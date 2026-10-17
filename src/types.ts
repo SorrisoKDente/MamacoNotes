@@ -39,6 +39,8 @@ export interface TextElement {
   marker: TextMarker
   direction: TextDirection
   createdAt: number
+  /** Z-order inside the layer; see `Stroke.order`. */
+  order?: number
 }
 
 export type SelectMode = 'click' | 'free' | 'circle' | 'rect'
@@ -57,6 +59,12 @@ export interface Stroke {
   color: string
   size: number
   points: StrokePoint[]
+  /**
+   * Z-order of the element inside its layer (bottom = lower). Optional for
+   * backward compatibility: elements without it keep the legacy group order
+   * (strokes -> images -> texts), see `layerItems`.
+   */
+  order?: number
 }
 
 export interface StrokeErasure {
@@ -76,6 +84,8 @@ export interface ImageElement {
   width: number
   height: number
   rotation: number
+  /** Z-order inside the layer; see `Stroke.order`. */
+  order?: number
 }
 
 export interface PdfBackground {
@@ -501,6 +511,105 @@ export function normalizePage(
 export function getActiveLayer(page: Page): Layer {
   const layer = page.layers.find((l) => l.id === page.activeLayerId)
   return layer ?? page.layers[page.layers.length - 1]
+}
+
+/** One entry of a layer's merged draw list; see `layerItems`. */
+export type LayerItem =
+  | { kind: 'stroke'; item: Stroke; order: number }
+  | { kind: 'image'; item: ImageElement; order: number }
+  | { kind: 'text'; item: TextElement; order: number }
+
+export type ArrangeMode = 'front' | 'back' | 'forward' | 'backward'
+
+export interface LayerSelection {
+  strokes: Set<string>
+  images: Set<string>
+  texts: Set<string>
+}
+
+// Fallback bands used for elements created before z-ordering existed (no
+// explicit `order`). They preserve the legacy within-layer order:
+// strokes -> images -> texts. Values are far apart so a freshly assigned
+// explicit order (see `nextLayerOrder`) always dominates them.
+const ORDER_BAND = { stroke: 0, image: 1_000_000, text: 2_000_000 } as const
+
+/**
+ * Bottom -> top draw list of a layer, interleaving strokes, images and texts by
+ * their explicit `order`. Elements without `order` fall back to the legacy
+ * group order, so pages saved before z-ordering render exactly as before.
+ */
+export function layerItems(layer: Layer): LayerItem[] {
+  const items: LayerItem[] = []
+  layer.strokes.forEach((item, i) =>
+    items.push({ kind: 'stroke', item, order: item.order ?? ORDER_BAND.stroke + i }),
+  )
+  layer.images.forEach((item, i) =>
+    items.push({ kind: 'image', item, order: item.order ?? ORDER_BAND.image + i }),
+  )
+  layer.texts.forEach((item, i) =>
+    items.push({ kind: 'text', item, order: item.order ?? ORDER_BAND.text + i }),
+  )
+  // Array.prototype.sort is stable (ES2019+), so equal orders keep the push
+  // order above (strokes -> images -> texts).
+  items.sort((a, b) => a.order - b.order)
+  return items
+}
+
+/**
+ * Z-order that places a newly created element on top of everything already in
+ * the layer. Assigned on creation so drawing/importing always lands above the
+ * existing content (this is what lets you write over an image).
+ */
+export function nextLayerOrder(layer: Layer): number {
+  const items = layerItems(layer)
+  return items.length > 0 ? items[items.length - 1].order + 1 : 0
+}
+
+/**
+ * Moves the selected elements to the front/back (or one step forward/backward)
+ * of the layer. The current visible order is materialized to explicit 0..n-1
+ * values first, which makes the result stable and independent of the legacy
+ * bands. Returns true only when the visible order actually changed.
+ */
+export function arrangeLayer(
+  layer: Layer,
+  selected: LayerSelection,
+  mode: ArrangeMode,
+): boolean {
+  const items = layerItems(layer)
+  if (items.length < 2) return false
+  const isSelected = (it: LayerItem): boolean =>
+    it.kind === 'stroke'
+      ? selected.strokes.has(it.item.id)
+      : it.kind === 'image'
+        ? selected.images.has(it.item.id)
+        : selected.texts.has(it.item.id)
+
+  const before = items.map((it) => it.item.id).join('|')
+  const list = [...items]
+  if (mode === 'front' || mode === 'back') {
+    const sel = list.filter(isSelected)
+    const rest = list.filter((it) => !isSelected(it))
+    list.length = 0
+    list.push(...(mode === 'front' ? [...rest, ...sel] : [...sel, ...rest]))
+  } else if (mode === 'forward') {
+    for (let i = list.length - 2; i >= 0; i--) {
+      if (isSelected(list[i]) && !isSelected(list[i + 1])) {
+        ;[list[i], list[i + 1]] = [list[i + 1], list[i]]
+      }
+    }
+  } else {
+    for (let i = 1; i < list.length; i++) {
+      if (isSelected(list[i]) && !isSelected(list[i - 1])) {
+        ;[list[i], list[i - 1]] = [list[i - 1], list[i]]
+      }
+    }
+  }
+  if (list.map((it) => it.item.id).join('|') === before) return false
+  list.forEach((it, index) => {
+    it.item.order = index
+  })
+  return true
 }
 
 /**

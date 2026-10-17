@@ -5,14 +5,15 @@
  *  1. Consecutive rapid strokes: stroke 2 started before stroke 1 finishes
  *     commits stroke 1 safely instead of losing/overwriting it.
  *  2. Single-point (dot) strokes: a 1-point tap is preserved.
- *  3. Layer element rendering order: strokes -> images -> texts.
+ *  3. Layer element z-order: legacy fallback order (strokes -> images -> texts)
+ *     plus explicit per-element `order` interleaving and arrange (front/back).
  *  4. Erasure masks follow transformed strokes (move/resize/rotate) and split
  *     when shared with strokes that stayed in place (eraser mask overlap bug).
  *
  * Run: npx tsx scripts/verify-drawing.ts
  */
 import type { Layer, Page, Stroke, StrokeErasure } from '../src/types'
-import { makePage, makeLayer, transformStrokeErasures } from '../src/types'
+import { arrangeLayer, layerItems, makePage, makeLayer, nextLayerOrder, transformStrokeErasures } from '../src/types'
 
 let passed = 0
 let failed = 0
@@ -126,7 +127,8 @@ console.log('== Drawing & Stroke Regression Verification ==')
 }
 
 {
-  // Test 3: Layer elements array structures and ordering guarantees
+  // Test 3: Layer elements render with the legacy group order when no explicit
+  // z-order is set: strokes (bottom) -> images (middle) -> texts (top).
   const layer: Layer = makeLayer('Test Layer')
   layer.strokes.push({
     id: 'str-1',
@@ -166,17 +168,147 @@ console.log('== Drawing & Stroke Regression Verification ==')
     createdAt: Date.now(),
   })
 
-  // Verify render sequence contract: strokes (bottom) -> images (middle) -> texts (top)
-  const renderSequence: string[] = []
-  for (const s of layer.strokes) renderSequence.push(`stroke:${s.id}`)
-  for (const img of layer.images) renderSequence.push(`image:${img.id}`)
-  for (const txt of layer.texts) renderSequence.push(`text:${txt.id}`)
+  const ids = layerItems(layer).map((it) => `${it.kind}:${it.item.id}`)
+  assert(
+    ids[0] === 'stroke:str-1' && ids[1] === 'image:img-1' && ids[2] === 'text:txt-1',
+    'legacy layer order: strokes (bottom) -> images (middle) -> texts (top)',
+  )
+}
+
+{
+  // Test 3b: an explicit `order` interleaves strokes/images/texts freely (the
+  // z-ordering feature), and `nextLayerOrder` puts new content on top.
+  const layer: Layer = makeLayer('Z-order')
+  layer.strokes.push({
+    id: 's1',
+    kind: 'pen',
+    color: '#000',
+    size: 2,
+    points: [{ x: 0, y: 0, pressure: 1 }],
+    order: 2,
+  })
+  layer.images.push({
+    id: 'i1',
+    name: 'i.png',
+    dataUrl: 'data:image/png;base64,fake',
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    rotation: 0,
+    order: 1,
+  })
+  layer.texts.push({
+    id: 't1',
+    text: 'Hi',
+    x: 0,
+    y: 0,
+    width: 50,
+    rotation: 0,
+    fontSize: 16,
+    fontFamily: 'sans-serif',
+    bold: false,
+    italic: false,
+    underline: false,
+    strikethrough: false,
+    color: '#000',
+    backgroundColor: null,
+    align: 'left',
+    marker: 'none',
+    direction: 'horizontal',
+    createdAt: Date.now(),
+    order: 3,
+  })
 
   assert(
-    renderSequence[0] === 'stroke:str-1' &&
-      renderSequence[1] === 'image:img-1' &&
-      renderSequence[2] === 'text:txt-1',
-    'layer render order: strokes (bottom) -> images (middle) -> texts (top)',
+    layerItems(layer).map((it) => it.item.id).join(',') === 'i1,s1,t1',
+    'text over stroke over image: explicit order interleaves all three kinds',
+  )
+  assert(
+    nextLayerOrder(layer) === 4,
+    'nextLayerOrder returns a z-order above everything existing',
+  )
+
+  // The point of the feature: a stroke drawn after an image ends up on top of it.
+  const fresh: Layer = makeLayer('fresh')
+  fresh.images.push({
+    id: 'i1',
+    name: 'i.png',
+    dataUrl: 'data:image/png;base64,fake',
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    rotation: 0,
+    order: 5,
+  })
+  const drawn: Stroke = {
+    id: 's1',
+    kind: 'pen',
+    color: '#000',
+    size: 2,
+    points: [{ x: 0, y: 0, pressure: 1 }],
+  }
+  drawn.order = nextLayerOrder(fresh)
+  fresh.strokes.push(drawn)
+  assert(
+    layerItems(fresh).map((it) => it.item.id).join(',') === 'i1,s1',
+    'a stroke created after the image is ordered on top (writing over an image)',
+  )
+}
+
+{
+  // Test 3c: arrangeLayer moves the selection within the layer.
+  const make = (...ids: string[]): Layer => {
+    const l: Layer = makeLayer('arrange')
+    ids.forEach((id, i) =>
+      l.strokes.push({
+        id,
+        kind: 'pen',
+        color: '#000',
+        size: 2,
+        points: [{ x: 0, y: 0, pressure: 1 }],
+        order: i,
+      }),
+    )
+    return l
+  }
+  const sel = (id: string) => ({ strokes: new Set([id]), images: new Set<string>(), texts: new Set<string>() })
+  const order = (l: Layer) => layerItems(l).map((it) => it.item.id).join(',')
+
+  const front = make('a', 'b', 'c')
+  assert(arrangeLayer(front, sel('a'), 'front') && order(front) === 'b,c,a', 'arrange front')
+
+  const back = make('a', 'b', 'c')
+  assert(arrangeLayer(back, sel('c'), 'back') && order(back) === 'c,a,b', 'arrange back')
+
+  const fwd = make('a', 'b', 'c')
+  assert(arrangeLayer(fwd, sel('a'), 'forward') && order(fwd) === 'b,a,c', 'arrange forward')
+
+  const bwd = make('a', 'b', 'c')
+  assert(arrangeLayer(bwd, sel('c'), 'backward') && order(bwd) === 'a,c,b', 'arrange backward')
+
+  // No-op: already on top -> reports no change and leaves order untouched.
+  const noop = make('a', 'b', 'c')
+  assert(!arrangeLayer(noop, sel('c'), 'front') && order(noop) === 'a,b,c', 'arrange no-op is a no-change')
+
+  // Multi-selection keeps the relative order of the selected elements.
+  const multi = make('a', 'b', 'c', 'd')
+  multi.images.push({
+    id: 'i',
+    name: 'i.png',
+    dataUrl: 'd',
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    rotation: 0,
+    order: 10,
+  })
+  const multiSel = { strokes: new Set(['a', 'b']), images: new Set<string>(), texts: new Set<string>() }
+  assert(
+    arrangeLayer(multi, multiSel, 'front') && order(multi) === 'c,d,i,a,b',
+    'arrange front with a multi-selection keeps selected order',
   )
 }
 

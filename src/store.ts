@@ -24,12 +24,14 @@ import type {
 import {
   DEFAULT_SETTINGS,
   getActiveLayer,
+  layerItems,
   makeFolder,
   makeLayer,
   makeNotebook,
   makePage,
   makeTextElement,
   newId,
+  nextLayerOrder,
   normalizePage,
   uid,
   NOTEBOOKS_DIR,
@@ -1889,11 +1891,17 @@ export const useAppStore = create<AppState>((set, get) => {
         images: [],
         texts: [],
       }
+      let order = 0
       for (const i of sel) {
         const l = page.layers[i]
-        merged.strokes.push(...l.strokes)
-        merged.images.push(...l.images)
-        merged.texts.push(...l.texts)
+        // Materialize an explicit order per element so the merged layer keeps
+        // each source layer's internal z-order (and interleaving).
+        for (const it of layerItems(l)) {
+          it.item.order = order++
+          if (it.kind === 'stroke') merged.strokes.push(it.item)
+          else if (it.kind === 'image') merged.images.push(it.item)
+          else merged.texts.push(it.item)
+        }
       }
       for (let i = sel.length - 1; i >= 0; i--) {
         page.layers.splice(sel[i], 1)
@@ -2096,6 +2104,7 @@ export const useAppStore = create<AppState>((set, get) => {
         width: w,
         height: h,
         rotation: 0,
+        order: nextLayerOrder(layer),
       }
       layer.images.push(el)
       page.updatedAt = Date.now()
@@ -2115,6 +2124,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const cx = center?.x ?? page.width / 2
       const cy = center?.y ?? page.height / 2
       const el = makeTextElement(text, cx, cy, st)
+      el.order = nextLayerOrder(layer)
       layer.texts.push(el)
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()

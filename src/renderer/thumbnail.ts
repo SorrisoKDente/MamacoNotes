@@ -1,5 +1,5 @@
-import type { ImageElement, Layer, Page } from '../types'
-import { drawTemplate, drawStroke, drawTextOnCanvas } from './drawUtils'
+import type { Layer, Page } from '../types'
+import { drawLayer, drawTemplate, loadImageElement } from './drawUtils'
 
 export async function renderThumbnail(
   page: Page,
@@ -37,28 +37,20 @@ export async function renderThumbnail(
 
   for (const layer of page.layers) {
     if (!layer.visible) continue
-    ctx.save()
-    ctx.globalAlpha = layer.opacity
-    for (const stroke of layer.strokes) {
-      drawStroke(ctx, stroke, 1)
-    }
-    await loadLayerImages(ctx, layer, 1)
-    for (const textEl of layer.texts) {
-      drawTextOnCanvas(ctx, textEl, 1)
-    }
-    ctx.restore()
+    drawLayer(ctx, layer, 1, await loadLayerImages(layer))
   }
   ctx.restore()
 
   return canvas.toDataURL('image/jpeg', 0.8)
 }
 
-function loadLayerImages(
-  ctx: CanvasRenderingContext2D,
-  layer: Layer,
-  scale: number,
-): Promise<void> {
-  return loadImagesSequentially(ctx, layer.images, scale)
+async function loadLayerImages(layer: Layer): Promise<Map<string, HTMLImageElement>> {
+  const images = new Map<string, HTMLImageElement>()
+  for (const imgEl of layer.images) {
+    const img = await loadImageElement(imgEl.dataUrl)
+    if (img) images.set(imgEl.id, img)
+  }
+  return images
 }
 
 function loadPdfImage(
@@ -88,46 +80,5 @@ function loadPdfImage(
     }
     img.onerror = () => resolve()
     img.src = dataUrl
-  })
-}
-
-function loadImagesSequentially(
-  ctx: CanvasRenderingContext2D,
-  imageEls: ImageElement[],
-  scale: number,
-): Promise<void> {
-  let i = 0
-  return new Promise((resolve) => {
-    function next() {
-      if (i >= imageEls.length) {
-        resolve()
-        return
-      }
-      const imgEl = imageEls[i]
-      i += 1
-      const img = new Image()
-      img.onload = () => {
-        ctx.save()
-        ctx.imageSmoothingEnabled = true
-        ctx.imageSmoothingQuality = 'high'
-        ctx.translate(
-          Math.floor((imgEl.x + imgEl.width / 2) * scale),
-          Math.floor((imgEl.y + imgEl.height / 2) * scale),
-        )
-        ctx.rotate((imgEl.rotation * Math.PI) / 180)
-        ctx.drawImage(
-          img,
-          Math.floor((-imgEl.width / 2) * scale),
-          Math.floor((-imgEl.height / 2) * scale),
-          Math.floor(imgEl.width * scale),
-          Math.floor(imgEl.height * scale),
-        )
-        ctx.restore()
-        next()
-      }
-      img.onerror = () => next()
-      img.src = imgEl.dataUrl
-    }
-    next()
   })
 }

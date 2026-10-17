@@ -1,5 +1,5 @@
 import type { Page, Stroke, ToolKind, ImageElement, TextElement, PageViewMode, Rect, StrokeErasure } from '../types'
-import { newId } from '../types'
+import { layerItems, newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
 import { drawTemplate } from './drawUtils'
@@ -264,13 +264,24 @@ export class PageCanvas {
       if (!layer.visible) continue
       ctx.save()
       ctx.globalAlpha = layer.opacity
-      this.renderMaskedStrokes(ctx, page, layer.strokes, layer.strokeErasures ?? [])
-      for (const img of layer.images) {
-        this.renderImage(ctx, img)
+      // Draw the layer's elements interleaved by z-order. Consecutive strokes are
+      // batched so the erasure-mask pass stays a single scratch-canvas draw.
+      const strokeRun: Stroke[] = []
+      const flushStrokes = () => {
+        if (strokeRun.length === 0) return
+        this.renderMaskedStrokes(ctx, page, strokeRun, layer.strokeErasures ?? [])
+        strokeRun.length = 0
       }
-      for (const textEl of layer.texts) {
-        this.renderText(ctx, textEl)
+      for (const item of layerItems(layer)) {
+        if (item.kind === 'stroke') {
+          strokeRun.push(item.item)
+          continue
+        }
+        flushStrokes()
+        if (item.kind === 'image') this.renderImage(ctx, item.item)
+        else this.renderText(ctx, item.item)
       }
+      flushStrokes()
       ctx.restore()
     }
     if (drawCurrentStroke && this.currentStroke) {

@@ -12,7 +12,7 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
 - **Z-Order (Ordem de Profundidade)**:
   1. **Nível da Página**: O fundo (template) e o PDF são desenhados primeiro.
   2. **Nível de Camadas**: Itera `page.layers` da base (índice 0) para o topo.
-  3. **Nível de Conteúdo**: Para cada camada visível, desenha **Imagens -> Textos -> Traços** nesta ordem específica.
+  3. **Nível de Conteúdo**: Para cada camada visível, traços/imagens/textos são desenhados na ordem z por elemento (`order`; sem ele, o fallback legado **Traços -> Imagens -> Textos**). Veja `layerItems` em `src/types.ts`. Traços consecutivos são agrupados para a passada de máscara de borracha.
 - **Traço Ativo**: O traço em andamento é desenhado por cima de tudo para feedback imediato.
 
 ## 3. Sistemas de Coordenadas

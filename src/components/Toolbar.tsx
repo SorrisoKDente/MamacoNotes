@@ -619,6 +619,26 @@ function SelectPanel() {
           {t('tool.delete')}
         </button>
       </div>
+      <div className="panel-label">{t('tool.arrange')}</div>
+      <div className="selection-actions">
+        <button className="btn small" onClick={() => dispatch('front')} title={t('tool.bringToFrontTitle')}>
+          <IconBringToFront />
+          {t('tool.bringToFront')}
+        </button>
+        <button className="btn small" onClick={() => dispatch('forward')} title={t('tool.bringForwardTitle')}>
+          <IconBringForward />
+          {t('tool.bringForward')}
+        </button>
+        <button className="btn small" onClick={() => dispatch('backward')} title={t('tool.sendBackwardTitle')}>
+          <IconSendBackward />
+          {t('tool.sendBackward')}
+        </button>
+        <button className="btn small" onClick={() => dispatch('back')} title={t('tool.sendToBackTitle')}>
+          <IconSendToBack />
+          {t('tool.sendToBack')}
+        </button>
+      </div>
+      <div className="panel-hint">{t('tool.arrangeHint')}</div>
       <div className="panel-label">{t('tool.rotateSelection')}</div>
       <div className="rotate-stepper">
         <button
@@ -1267,6 +1287,42 @@ function IconTrash() {
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       <line x1="10" y1="11" x2="10" y2="17" />
       <line x1="14" y1="11" x2="14" y2="17" />
+    </Svg>
+  )
+}
+
+function IconBringToFront() {
+  return (
+    <Svg>
+      <rect x="8" y="8" width="13" height="13" rx="2" />
+      <path d="M4 16H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1" opacity="0.45" />
+    </Svg>
+  )
+}
+
+function IconSendToBack() {
+  return (
+    <Svg>
+      <rect x="3" y="3" width="13" height="13" rx="2" opacity="0.45" />
+      <path d="M20 8h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-1" />
+    </Svg>
+  )
+}
+
+function IconBringForward() {
+  return (
+    <Svg>
+      <rect x="8" y="8" width="13" height="13" rx="2" />
+      <path d="M5 5h.01M3 8h.01M5 2h3" opacity="0.45" />
+    </Svg>
+  )
+}
+
+function IconSendBackward() {
+  return (
+    <Svg>
+      <rect x="3" y="3" width="13" height="13" rx="2" opacity="0.45" />
+      <path d="M16 16h3M19 13h.01M19 19h.01" />
     </Svg>
   )
 }

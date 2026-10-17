@@ -1,5 +1,5 @@
-import type { ImageElement, Page } from '../types'
-import { drawTemplate, drawStroke, drawTextOnCanvas } from '../renderer/drawUtils'
+import type { Layer, Page } from '../types'
+import { drawLayer, drawTemplate, loadImageElement } from '../renderer/drawUtils'
 import { triggerDownload } from './download'
 
 async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanvasElement> {
@@ -15,20 +15,18 @@ async function renderPageToCanvas(page: Page, outputScale = 2): Promise<HTMLCanv
 
   for (const layer of page.layers) {
     if (!layer.visible) continue
-    ctx.save()
-    ctx.globalAlpha = layer.opacity
-    for (const stroke of layer.strokes) {
-      drawStroke(ctx, stroke, outputScale)
-    }
-    for (const imgEl of layer.images) {
-      await loadAndDrawImage(ctx, imgEl, outputScale)
-    }
-    for (const textEl of layer.texts) {
-      drawTextOnCanvas(ctx, textEl, outputScale)
-    }
-    ctx.restore()
+    drawLayer(ctx, layer, outputScale, await loadLayerImages(layer))
   }
   return canvas
+}
+
+async function loadLayerImages(layer: Layer): Promise<Map<string, HTMLImageElement>> {
+  const images = new Map<string, HTMLImageElement>()
+  for (const imgEl of layer.images) {
+    const img = await loadImageElement(imgEl.dataUrl)
+    if (img) images.set(imgEl.id, img)
+  }
+  return images
 }
 
 function loadAndDrawPdf(ctx: CanvasRenderingContext2D, page: Page, scale: number): Promise<void> {
@@ -53,34 +51,6 @@ function loadAndDrawPdf(ctx: CanvasRenderingContext2D, page: Page, scale: number
     }
     img.onerror = () => resolve()
     img.src = page.pdf!.dataUrl
-  })
-}
-
-function loadAndDrawImage(
-  ctx: CanvasRenderingContext2D,
-  el: ImageElement,
-  scale: number,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      ctx.save()
-      ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'high'
-      ctx.translate(Math.floor((el.x + el.width / 2) * scale), Math.floor((el.y + el.height / 2) * scale))
-      ctx.rotate((el.rotation * Math.PI) / 180)
-      ctx.drawImage(
-        img,
-        Math.floor((-el.width / 2) * scale),
-        Math.floor((-el.height / 2) * scale),
-        Math.floor(el.width * scale),
-        Math.floor(el.height * scale),
-      )
-      ctx.restore()
-      resolve()
-    }
-    img.onerror = () => resolve()
-    img.src = el.dataUrl
   })
 }
 

@@ -12,7 +12,7 @@ This document describes the design and implementation of the drawing and renderi
 - **Z-Order**:
   1. **Page Level**: Background template and PDF are drawn first.
   2. **Layer Level**: Iterates `page.layers` from bottom (index 0) to top.
-  3. **Content Level**: For each visible layer, it draws **Images -> Texts -> Strokes** in that specific order.
+  3. **Content Level**: For each visible layer, its strokes/images/texts are drawn in per-element z-order (`order`; without it, the legacy fallback **Strokes -> Images -> Texts**). See `layerItems` in `src/types.ts`. Consecutive strokes are batched for the erasure-mask pass.
 - **Active Stroke**: The current in-progress stroke is drawn on top of everything for immediate feedback.
 
 ## 3. Coordinate Systems

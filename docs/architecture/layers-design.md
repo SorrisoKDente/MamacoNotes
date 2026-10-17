@@ -12,7 +12,12 @@ Drawing content is organized into a hierarchy:
 Layers are stored in an array within the `Page` object:
 - **Index 0**: The bottom-most layer (rendered first).
 - **Last Index**: The top-most layer (rendered last).
-Inside each layer, the rendering order is: **Images -> Texts -> Strokes**.
+Inside each layer, strokes, images and texts are interleaved by a per-element
+`order` (optional number, bottom = lower). Elements without `order` fall back to
+the legacy group order **Strokes -> Images -> Texts**; newly created elements are
+given an explicit order on top of the layer, and the Select panel's "Order"
+buttons (bring to front / forward / backward / send to back) reassign it. See
+`layerItems` / `nextLayerOrder` / `arrangeLayer` in `src/types.ts`.
 
 ## 3. Layer Properties
 Each layer has the following properties:

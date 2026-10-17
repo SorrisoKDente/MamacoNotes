@@ -1,4 +1,5 @@
 import type { ImageElement, Layer, Page, Stroke, TextElement } from '../types'
+import { layerItems } from '../types'
 import { drawTextElement } from '../utils/drawText'
 import { clamp } from '../utils/math'
 
@@ -133,22 +134,57 @@ export function drawTextOnCanvas(
   drawTextElement(ctx, textEl, scale)
 }
 
+export function loadImageElement(dataUrl: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => resolve(null)
+    img.src = dataUrl
+  })
+}
+
+export function drawImageElement(
+  ctx: CanvasRenderingContext2D,
+  imgEl: ImageElement,
+  image: CanvasImageSource,
+  scale = 1,
+) {
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.translate(
+    Math.floor((imgEl.x + imgEl.width / 2) * scale),
+    Math.floor((imgEl.y + imgEl.height / 2) * scale),
+  )
+  ctx.rotate((imgEl.rotation * Math.PI) / 180)
+  ctx.drawImage(
+    image,
+    Math.floor((-imgEl.width / 2) * scale),
+    Math.floor((-imgEl.height / 2) * scale),
+    Math.floor(imgEl.width * scale),
+    Math.floor(imgEl.height * scale),
+  )
+  ctx.restore()
+}
+
+/**
+ * Draws a whole layer in z-order. Images must be preloaded by the caller
+ * (`loadImageElement`) and keyed by element id; missing ones are skipped.
+ */
 export function drawLayer(
   ctx: CanvasRenderingContext2D,
   layer: Layer,
   scale = 1,
-  drawImage?: (img: ImageElement, s: number) => void,
+  images?: Map<string, HTMLImageElement>,
 ) {
   ctx.save()
   ctx.globalAlpha = layer.opacity
-  for (const stroke of layer.strokes) {
-    drawStroke(ctx, stroke, scale)
-  }
-  for (const img of layer.images) {
-    if (drawImage) drawImage(img, scale)
-  }
-  for (const textEl of layer.texts) {
-    drawTextOnCanvas(ctx, textEl, scale)
+  for (const item of layerItems(layer)) {
+    if (item.kind === 'stroke') drawStroke(ctx, item.item, scale)
+    else if (item.kind === 'image') {
+      const image = images?.get(item.item.id)
+      if (image) drawImageElement(ctx, item.item, image, scale)
+    } else drawTextOnCanvas(ctx, item.item, scale)
   }
   ctx.restore()
 }

@@ -12,7 +12,12 @@ O conteúdo do desenho é organizado em uma hierarquia:
 As camadas são armazenadas em um array dentro do objeto `Page`:
 - **Índice 0**: A camada mais ao fundo (renderizada primeiro).
 - **Último Índice**: A camada mais ao topo (renderizada por último).
-Dentro de cada camada, a ordem de renderização é: **Imagens -> Textos -> Traços**.
+Dentro de cada camada, traços, imagens e textos são intercalados por um `order`
+por elemento (número opcional, menor = mais atrás). Elementos sem `order` seguem
+a ordem legada de grupos **Traços -> Imagens -> Textos**; elementos novos recebem
+um order explícito no topo da camada, e os botões "Ordem" do painel de Seleção
+(trazer para frente / avançar / recuar / enviar para trás) o reatribuem. Veja
+`layerItems` / `nextLayerOrder` / `arrangeLayer` em `src/types.ts`.
 
 ## 3. Propriedades da Camada
 Cada camada possui as seguintes propriedades:

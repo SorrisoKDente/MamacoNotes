@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
-import type { ImageElement, Notebook, Page, Rect, Stroke, StrokeErasure, StrokePoint, TextElement, ToolKind } from '../types'
-import { getActiveLayer, makeTextElement, newId, transformStrokeErasures } from '../types'
+import type { ArrangeMode, ImageElement, Notebook, Page, Rect, Stroke, StrokeErasure, StrokePoint, TextElement, ToolKind } from '../types'
+import { arrangeLayer, getActiveLayer, layerItems, makeTextElement, newId, nextLayerOrder, transformStrokeErasures } from '../types'
 import { ImageEraseSession } from '../utils/imageErase'
 import { computePageOffsets, pageUnderPoint, pageVisualBox, pageVisualRect } from '../utils/layout'
 import type { PageOffset } from '../utils/layout'
@@ -544,7 +544,9 @@ export function Editor() {
             draft.y = clamp(draft.y, 0, Math.max(0, pg.height - 20))
           }
           pushUndo()
-          getActiveLayer(pg).texts.push(draft)
+          const draftLayer = getActiveLayer(pg)
+          draft.order = nextLayerOrder(draftLayer)
+          draftLayer.texts.push(draft)
           pg.updatedAt = Date.now()
           notebookRef.current!.updatedAt = Date.now()
           dirtyRef.current = true
@@ -918,24 +920,31 @@ export function Editor() {
     const pg = pageRef.current
     if (!pg) return null
     const layer = getActiveLayer(pg)
-    for (let i = layer.strokes.length - 1; i >= 0; i--) {
-      const s = layer.strokes[i]
-      const b = strokeBounds(s)
-      if (b && p.x >= b.x - 3 && p.x <= b.x + b.w + 3 && p.y >= b.y - 3 && p.y <= b.y + b.h + 3) {
-        return { type: 'stroke', id: s.id }
-      }
-    }
-    for (let i = layer.images.length - 1; i >= 0; i--) {
-      const img = layer.images[i]
-      if (pointInPolygon(p.x, p.y, imageCorners(img))) {
-        return { type: 'image', id: img.id }
-      }
-    }
-    for (let i = layer.texts.length - 1; i >= 0; i--) {
-      const t = layer.texts[i]
-      if (!t.text || !t.text.trim()) continue
-      if (pointInPolygon(p.x, p.y, textCorners(t))) {
-        return { type: 'text', id: t.id }
+    // Test top-most first so the click picks the element the user actually sees.
+    const items = layerItems(layer)
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'stroke') {
+        const b = strokeBounds(it.item)
+        if (
+          b &&
+          p.x >= b.x - 3 &&
+          p.x <= b.x + b.w + 3 &&
+          p.y >= b.y - 3 &&
+          p.y <= b.y + b.h + 3
+        ) {
+          return { type: 'stroke', id: it.item.id }
+        }
+      } else if (it.kind === 'image') {
+        if (pointInPolygon(p.x, p.y, imageCorners(it.item))) {
+          return { type: 'image', id: it.item.id }
+        }
+      } else {
+        const t = it.item
+        if (!t.text || !t.text.trim()) continue
+        if (pointInPolygon(p.x, p.y, textCorners(t))) {
+          return { type: 'text', id: t.id }
+        }
       }
     }
     return null
@@ -1182,6 +1191,10 @@ export function Editor() {
     }))
     const newImages = clip.images.map((i) => ({ ...i, id: newId(), x: i.x + dx, y: i.y + dy }))
     const newTexts = clip.texts.map((t) => ({ ...t, id: newId(), x: t.x + dx, y: t.y + dy }))
+    let order = nextLayerOrder(layer)
+    for (const s of newStrokes) s.order = order++
+    for (const i of newImages) i.order = order++
+    for (const t of newTexts) t.order = order++
     layer.strokes.push(...newStrokes)
     layer.images.push(...newImages)
     layer.texts.push(...newTexts)
@@ -1213,6 +1226,10 @@ export function Editor() {
     }))
     const newImages = snap.images.map((i) => ({ ...i, id: newId(), x: i.x + dx, y: i.y + dy }))
     const newTexts = snap.texts.map((t) => ({ ...t, id: newId(), x: t.x + dx, y: t.y + dy }))
+    let order = nextLayerOrder(layer)
+    for (const s of newStrokes) s.order = order++
+    for (const i of newImages) i.order = order++
+    for (const t of newTexts) t.order = order++
     layer.strokes.push(...newStrokes)
     layer.images.push(...newImages)
     layer.texts.push(...newTexts)
@@ -1222,6 +1239,30 @@ export function Editor() {
       images: new Set(newImages.map((i) => i.id)),
       texts: new Set(newTexts.map((t) => t.id)),
     }
+    dirtyRef.current = true
+    requestRender()
+    void persistNow()
+  }
+
+  function arrangeSelection(mode: ArrangeMode) {
+    const pg = pageRef.current
+    if (!pg) return
+    const layer = getActiveLayer(pg)
+    if (layer.locked) return
+    const sel = selectionRef.current
+    if (sel.strokes.size + sel.images.size + sel.texts.size === 0) return
+    // Dry-run on copies so a no-op (already in front) does not push an undo entry.
+    const probe = {
+      ...layer,
+      strokes: layer.strokes.map((s) => ({ ...s })),
+      images: layer.images.map((i) => ({ ...i })),
+      texts: layer.texts.map((t) => ({ ...t })),
+    }
+    if (!arrangeLayer(probe, sel, mode)) return
+    pushUndo()
+    arrangeLayer(layer, sel, mode)
+    pg.updatedAt = Date.now()
+    notebookRef.current!.updatedAt = Date.now()
     dirtyRef.current = true
     requestRender()
     void persistNow()
@@ -1324,19 +1365,23 @@ export function Editor() {
     const toLayer = getActiveLayer(to)
     if (toLayer.locked) return
     const sel = selectionRef.current
+    let order = nextLayerOrder(toLayer)
     if (sel.strokes.size) {
       const moving = fromLayer.strokes.filter((s) => sel.strokes.has(s.id))
       fromLayer.strokes = fromLayer.strokes.filter((s) => !sel.strokes.has(s.id))
+      for (const s of moving) s.order = order++
       toLayer.strokes.push(...moving)
     }
     if (sel.images.size) {
       const moving = fromLayer.images.filter((i) => sel.images.has(i.id))
       fromLayer.images = fromLayer.images.filter((i) => !sel.images.has(i.id))
+      for (const i of moving) i.order = order++
       toLayer.images.push(...moving)
     }
     if (sel.texts.size) {
       const moving = fromLayer.texts.filter((t) => sel.texts.has(t.id))
       fromLayer.texts = fromLayer.texts.filter((t) => !sel.texts.has(t.id))
+      for (const t of moving) t.order = order++
       toLayer.texts.push(...moving)
     }
     currentPageIndexRef.current = targetIdx
@@ -1367,6 +1412,7 @@ export function Editor() {
       el.x = clamp(el.x, 0, Math.max(0, pg.width - 20))
       el.y = clamp(el.y, 0, Math.max(0, pg.height - 20))
     }
+    el.order = nextLayerOrder(layer)
     layer.texts.push(el)
     pg.updatedAt = Date.now()
     notebookRef.current!.updatedAt = Date.now()
@@ -1576,7 +1622,10 @@ export function Editor() {
         // ponytail: always commit if it has at least 1 point.
         // Even a single point (dot) is a valid intentional mark.
         pushUndo()
-        getActiveLayer(pg).strokes.push(stroke as Stroke)
+        const commitLayer = getActiveLayer(pg)
+        const committed = stroke as Stroke
+        committed.order = nextLayerOrder(commitLayer)
+        commitLayer.strokes.push(committed)
         pg.updatedAt = Date.now()
         notebookRef.current!.updatedAt = Date.now()
         dirtyRef.current = true
@@ -1858,7 +1907,13 @@ export function Editor() {
         }
       }
 
-      const hit = engine.hitTestTexts(getActiveLayer(page).texts, pagePt.x, pagePt.y)
+      const hit = engine.hitTestTexts(
+        layerItems(getActiveLayer(page))
+          .filter((it) => it.kind === 'text')
+          .map((it) => it.item) as TextElement[],
+        pagePt.x,
+        pagePt.y,
+      )
       if (hit) {
         openInlineText(hit)
         return
@@ -2765,7 +2820,10 @@ export function Editor() {
 
         if (!shouldDiscard && stroke && stroke.points.length >= 1 && drawPage) {
           pushUndo()
-          getActiveLayer(drawPage).strokes.push(stroke as Stroke)
+          const commitLayer = getActiveLayer(drawPage)
+          const committed = stroke as Stroke
+          committed.order = nextLayerOrder(commitLayer)
+          commitLayer.strokes.push(committed)
           drawPage.updatedAt = Date.now()
           notebookRef.current!.updatedAt = Date.now()
           dirtyRef.current = true
@@ -2929,6 +2987,8 @@ export function Editor() {
   deleteSelectionRef.current = deleteSelection
   const cutSelectionRef = useRef(cutSelection)
   cutSelectionRef.current = cutSelection
+  const arrangeSelectionRef = useRef(arrangeSelection)
+  arrangeSelectionRef.current = arrangeSelection
   const finalizeRegionRef = useRef(finalizeRegion)
   finalizeRegionRef.current = finalizeRegion
 
@@ -3001,6 +3061,14 @@ export function Editor() {
       else if (action === 'paste') pasteSelectionRef.current()
       else if (action === 'duplicate') duplicateSelectionRef.current()
       else if (action === 'delete') deleteSelectionRef.current()
+      else if (
+        action === 'front' ||
+        action === 'back' ||
+        action === 'forward' ||
+        action === 'backward'
+      ) {
+        arrangeSelectionRef.current(action)
+      }
     }
     const onSelectionRotate = (e: Event) => {
       const { delta } = (e as CustomEvent).detail as { delta: number }
