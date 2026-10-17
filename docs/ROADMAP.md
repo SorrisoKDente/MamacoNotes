@@ -14,6 +14,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Thumbnail Generation**: Dashboard notebook previews are incorrectly zoomed in, displaying only the center of the page instead of a proper fit-to-box preview.
 - [x] **Mobile Update Preview**: The software update modal on mobile now correctly renders release notes using a lightweight Markdown parser.
 - [x] **Single-Click Eraser Area Bug**: Erasing with a single click (tap) erases an area much larger than the eraser size. Dragging works correctly.
+- [ ] **Writing Fails After Undo**: Undoing an action (Ctrl+Z) and writing or drawing immediately afterwards results in nothing being written due to internal editor state desynchronization.
 - [ ] **Eraser Mask Overlap Issue**: Erasing content and then dragging an element over the erased region causes the dragged element to disappear underneath (as if the eraser drew a solid background mask over lower layers).
 - [ ] **Intermittent Text Blurring After Erase**: Erasing strokes occasionally causes existing text elements on the page to render blurry (hard to reproduce).
 - [x] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.

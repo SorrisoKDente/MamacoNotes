@@ -82,6 +82,8 @@ export function Editor() {
 
   const notebook = useAppStore((s) => s.activeNotebook)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
+  const lastUndoRedo = useAppStore((s) => s.lastUndoRedo)
+  const lastUndoRedoRef = useRef(lastUndoRedo)
   const tool = useAppStore((s) => s.tool)
   const setTool = useAppStore((s) => s.setTool)
   const settings = useAppStore((s) => s.settings)
@@ -151,15 +153,20 @@ export function Editor() {
   const pagesRef = useRef<Page[]>(notebook?.pages ?? [])
 
   // ponytail: only update refs if NOT currently drawing or dirty (unsaved changes),
-  // unless the notebook ID or page ID changed (e.g. user switched notes/pages).
+  // unless the notebook ID or page ID changed (e.g. user switched notes/pages) or an undo/redo occurred.
   if (
     notebook?.id !== notebookRef.current?.id ||
     page?.id !== pageRef.current?.id ||
+    lastUndoRedo !== lastUndoRedoRef.current ||
     (!dragRef.current && !dirtyRef.current)
   ) {
     pageRef.current = page
     notebookRef.current = notebook
     pagesRef.current = notebook?.pages ?? []
+    if (lastUndoRedo !== lastUndoRedoRef.current) {
+      lastUndoRedoRef.current = lastUndoRedo
+      dirtyRef.current = false
+    }
   }
   const currentPageIndexRef = useRef(currentPageIndex)
   currentPageIndexRef.current = currentPageIndex

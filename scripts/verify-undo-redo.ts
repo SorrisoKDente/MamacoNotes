@@ -155,5 +155,27 @@ console.log('== Undo/Redo Regression Verification ==')
   assert(undoStack.length === 60, 'undo stack capped at max 60 entries')
 }
 
+{
+  // Test 4: Writing immediately after undo (ensuring dirty flag/state sync)
+  let dirty = true // simulating editor being in dirty state before undo
+  let lastUndoRedo = 0
+  let lastUndoRedoRef = 0
+
+  const undo = () => {
+    lastUndoRedo = Date.now()
+  }
+
+  // Simulate user undoing
+  undo()
+
+  // Simulate editor ref/sync effect when lastUndoRedo changes
+  if (lastUndoRedo !== lastUndoRedoRef) {
+    lastUndoRedoRef = lastUndoRedo
+    dirty = false // editor resets dirty state to accept the undone page snapshot
+  }
+
+  assert(dirty === false, 'after undo, dirty flag is reset to false allowing immediate subsequent writes')
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

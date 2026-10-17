@@ -453,6 +453,7 @@ interface AppState {
   redo: () => Promise<void>
   canUndo: boolean
   canRedo: boolean
+  lastUndoRedo: number
   addImageToPage: (dataUrl: string, name: string, center?: { x: number; y: number }) => Promise<string | undefined>
   addTextToPage: (text: string, center?: { x: number; y: number }) => Promise<string | undefined>
   importPdfNotebook: (
@@ -675,6 +676,7 @@ export const useAppStore = create<AppState>((set, get) => {
     layersOpen: false,
     canUndo: false,
     canRedo: false,
+    lastUndoRedo: 0,
 
     async init() {
       try {
@@ -2046,7 +2048,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (current) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
       notebook.pages[entry.pageIndex] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, lastUndoRedo: Date.now() })
       // ponytail: force state refresh to update UI and notify observers
       await updateNotebookStorage({ ...notebook })
     },
@@ -2060,7 +2062,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (current) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
       notebook.pages[entry.pageIndex] = entry.pageSnapshot
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+      set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, lastUndoRedo: Date.now() })
       // ponytail: force state refresh to update UI and notify observers
       await updateNotebookStorage({ ...notebook })
     },
