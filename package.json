@@ -44,7 +44,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.5",
     "cross-env": "^7.0.3",
-    "electron": "^43.4.0",
+    "electron": "^43.5.0",
     "electron-builder": "^26.15.3",
     "fake-indexeddb": "^6.2.5",
     "tsx": "^4.23.12",
