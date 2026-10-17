@@ -15,7 +15,7 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [x] **Preview de Atualização no Celular**: O modal de atualização de software no celular agora renderiza corretamente as notas de versão usando um parser Markdown leve.
 - [x] **Área Excessiva da Borracha no Clique Único**: Ao apagar com apenas um clique (tap), a borracha apaga uma área muito maior do que o seu tamanho real. Ao arrastar (drag), o tamanho funciona corretamente.
 - [ ] **Falha ao Escrever após Desfazer**: Ao desfazer uma ação (Ctrl+Z) e tentar desenhar ou escrever logo em seguida, a escrita/traço não é registrada na página devido a um dessincronismo de estado interno no editor.
-- [ ] **Sobreposição de Máscara da Borracha**: Ao apagar algo e tentar arrastar um elemento para a área apagada, o elemento desaparece por baixo (como se a borracha estivesse desenhando uma máscara com a cor do fundo sobre as camadas inferiores).
+- [x] **Sobreposição de Máscara da Borracha**: Ao apagar algo e tentar arrastar um elemento para a área apagada, o elemento desaparece por baixo (como se a borracha estivesse desenhando uma máscara com a cor do fundo sobre as camadas inferiores).
 - [ ] **Desfocamento Intermitente de Texto Pós-Borracha**: Apagar traços ocasionalmente deixa as outras letras e textos da página borrados (bug aleatório e de difícil reprodução).
 - [x] **Restauração do Cursor de Pan/Mover**: Ao soltar a tecla de atalho de Pan/Mover, o cursor permanece com o ícone de Pan/Mover até um clique ser feito, em vez de retornar imediatamente ao ícone da ferramenta selecionada.
 - [ ] **Opção de Tela Cheia Ausente na Web**: A opção de alternar para tela cheia não aparece na versão de navegador (Web/PWA), nem no Dashboard e nem no Editor.
