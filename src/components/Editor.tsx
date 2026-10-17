@@ -3,7 +3,7 @@ import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
 import type { ImageElement, Notebook, Page, Rect, Stroke, StrokeErasure, StrokePoint, TextElement, ToolKind } from '../types'
-import { getActiveLayer, makeTextElement, newId } from '../types'
+import { getActiveLayer, makeTextElement, newId, transformStrokeErasures } from '../types'
 import { ImageEraseSession } from '../utils/imageErase'
 import { computePageOffsets, pageUnderPoint, pageVisualBox, pageVisualRect } from '../utils/layout'
 import type { PageOffset } from '../utils/layout'
@@ -135,6 +135,7 @@ export function Editor() {
     snapshotStrokes?: Stroke[]
     snapshotImages?: ImageElement[]
     snapshotTexts?: TextElement[]
+    snapshotErasures?: StrokeErasure[]
     startAngle?: number
   } | null>(null)
 
@@ -191,6 +192,8 @@ export function Editor() {
     snapshotStrokes: Stroke[]
     snapshotImages: ImageElement[]
     snapshotTexts: TextElement[]
+    snapshotErasures: StrokeErasure[]
+    startPageIndex: number
   } | null>(null)
 
   const draftRef = useRef<TextElement | null>(null)
@@ -1290,6 +1293,15 @@ export function Editor() {
       if (!sel.texts.has(t.id) || !src) return t
       return { ...src, x: src.x + dx, y: src.y + dy }
     })
+    // Keep erasure masks glued to the strokes they scope (same absolute delta as
+    // the strokes). Skipped after a mid-drag page transfer: the masks stay in the
+    // source layer, so the target layer must not be rewritten from that snapshot.
+    if (drag.startPageIndex === currentPageIndexRef.current) {
+      transformStrokeErasures(layer, drag.snapshotErasures, sel.strokes, (p) => ({
+        x: p.x + dx,
+        y: p.y + dy,
+      }))
+    }
     pg.updatedAt = Date.now()
     dirtyRef.current = true
     requestRender()
@@ -1879,6 +1891,7 @@ export function Editor() {
             snapshotStrokes: snap.strokes,
             snapshotImages: snap.images,
             snapshotTexts: snap.texts,
+            snapshotErasures: [...(getActiveLayer(page).strokeErasures ?? [])],
             startAngle:
               (Math.atan2(
                 pagePt.y - (transformHit.box.y + transformHit.box.h / 2),
@@ -1903,6 +1916,7 @@ export function Editor() {
             startBox: { ...transformHit.box },
             snapshotStrokes: [{ ...stroke, points: stroke.points.map((p) => ({ ...p })) }],
             snapshotTexts: [],
+            snapshotErasures: [...(getActiveLayer(page).strokeErasures ?? [])],
             startAngle:
               (Math.atan2(
                 pagePt.y - (transformHit.box.y + transformHit.box.h / 2),
@@ -1995,6 +2009,8 @@ export function Editor() {
               snapshotStrokes: snap.strokes,
               snapshotImages: snap.images,
               snapshotTexts: snap.texts,
+              snapshotErasures: [...(getActiveLayer(page).strokeErasures ?? [])],
+              startPageIndex: currentPageIndexRef.current,
             }
             dragRef.current = {
               kind: 'region-move',
@@ -2050,6 +2066,8 @@ export function Editor() {
               snapshotStrokes: snap.strokes,
               snapshotImages: snap.images,
               snapshotTexts: snap.texts,
+              snapshotErasures: [...(getActiveLayer(page).strokeErasures ?? [])],
+              startPageIndex: currentPageIndexRef.current,
             }
             dragRef.current = {
               kind: 'region-move',
@@ -2138,6 +2156,8 @@ export function Editor() {
           snapshotStrokes: snap.strokes,
           snapshotImages: snap.images,
           snapshotTexts: snap.texts,
+          snapshotErasures: [...(getActiveLayer(page).strokeErasures ?? [])],
+          startPageIndex: currentPageIndexRef.current,
         }
         dragRef.current = {
           kind: 'region-move',
@@ -2642,6 +2662,7 @@ export function Editor() {
         drag.snapshotStrokes,
         drag.snapshotImages ?? [],
         drag.snapshotTexts,
+        drag.snapshotErasures,
         engine.toPageCoords(pos.x, pos.y),
         (t) => engine.textLayout(t),
       )
@@ -2660,6 +2681,7 @@ export function Editor() {
         drag.snapshotStrokes,
         drag.snapshotImages ?? [],
         drag.snapshotTexts,
+        drag.snapshotErasures,
         engine.toPageCoords(pos.x, pos.y),
         drag.startAngle ?? 0,
         (t) => engine.textLayout(t),
@@ -2992,8 +3014,15 @@ export function Editor() {
       if (sel.strokes.size + sel.images.size + sel.texts.size === 0) return
       const snap = snapshotSelected()
       pushUndo()
-      rotateGroupBy(pg, box, snap.strokes, snap.images, snap.texts, delta, (t) =>
-        engine.textLayout(t),
+      rotateGroupBy(
+        pg,
+        box,
+        snap.strokes,
+        snap.images,
+        snap.texts,
+        [...(getActiveLayer(pg).strokeErasures ?? [])],
+        delta,
+        (t) => engine.textLayout(t),
       )
       pg.updatedAt = Date.now()
       nb.updatedAt = Date.now()
@@ -3805,6 +3834,7 @@ function applyGroupResize(
   snapshotStrokes: Stroke[],
   snapshotImages: ImageElement[],
   snapshotTexts: TextElement[],
+  snapshotErasures: StrokeErasure[] | undefined,
   cur: Pt,
   measure: (t: TextElement) => TextLayout,
 ) {
@@ -3863,6 +3893,12 @@ function applyGroupResize(
       width: Math.max(1, Math.round(t.width * scale)),
     }
   })
+
+  // Erasure masks must scale with the strokes they scope (same formula).
+  transformStrokeErasures(liveLayer, snapshotErasures, new Set(snapshotStrokes.map((s) => s.id)), (p) => ({
+    x: fixedX + (p.x - fixedX) * scale,
+    y: fixedY + (p.y - fixedY) * scale,
+  }))
 }
 
 function applyGroupRotation(
@@ -3871,6 +3907,7 @@ function applyGroupRotation(
   strokes: Stroke[],
   images: ImageElement[],
   texts: TextElement[],
+  erasures: StrokeErasure[] | undefined,
   cur: Pt,
   startAngle: number,
   measure: (t: TextElement) => TextLayout,
@@ -3879,7 +3916,7 @@ function applyGroupRotation(
   const cy = startBox.y + startBox.h / 2
   const curAngle = (Math.atan2(cur.y - cy, cur.x - cx) * 180) / Math.PI
   const delta = ((curAngle - startAngle) % 360 + 540) % 360 - 180
-  rotateGroupBy(pg, startBox, strokes, images, texts, delta, measure)
+  rotateGroupBy(pg, startBox, strokes, images, texts, erasures, delta, measure)
 }
 
 function rotateGroupBy(
@@ -3888,6 +3925,7 @@ function rotateGroupBy(
   snapshotStrokes: Stroke[],
   snapshotImages: ImageElement[],
   snapshotTexts: TextElement[],
+  snapshotErasures: StrokeErasure[] | undefined,
   delta: number,
   measure: (t: TextElement) => TextLayout,
 ) {
@@ -3947,6 +3985,11 @@ function rotateGroupBy(
       rotation: Math.round(((t.rotation + delta) % 360 + 360) % 360),
     }
   })
+
+  // Erasure masks must rotate with the strokes they scope (same formula).
+  transformStrokeErasures(liveLayer, snapshotErasures, new Set(snapshotStrokes.map((s) => s.id)), (p) =>
+    rotatePointAround(p, cx, cy, delta),
+  )
 }
 
 function pointAt(

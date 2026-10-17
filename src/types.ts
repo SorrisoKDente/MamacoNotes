@@ -503,6 +503,38 @@ export function getActiveLayer(page: Page): Layer {
   return layer ?? page.layers[page.layers.length - 1]
 }
 
+/**
+ * Rebuilds a layer's erasure masks after the strokes they scope were transformed
+ * (drag/move, resize, rotate). `sourceErasures` is the snapshot taken when the
+ * gesture started and `mapPoint` must be the SAME absolute transform applied to
+ * the stroke points, so rebuilding from the snapshot on every frame is
+ * idempotent. Erasures shared between transformed and non-transformed strokes
+ * are split: a mapped clone follows the transformed strokes while the original
+ * keeps punching the strokes that stayed in place. Without this, the mask stays
+ * fixed in page coordinates and clipped transformed strokes at the old hole —
+ * the "dragged element disappears over the erased region" bug.
+ */
+export function transformStrokeErasures(
+  layer: Layer,
+  sourceErasures: StrokeErasure[] | undefined,
+  transformedStrokeIds: Set<string>,
+  mapPoint: (p: { x: number; y: number }) => { x: number; y: number },
+): void {
+  if (!sourceErasures || transformedStrokeIds.size === 0) return
+  const next: StrokeErasure[] = []
+  for (const erasure of sourceErasures) {
+    // Legacy erasures without strokeIds applied to every stroke; scope them on split.
+    const ids = erasure.strokeIds ?? layer.strokes.map((s) => s.id)
+    const kept = ids.filter((id) => !transformedStrokeIds.has(id))
+    const moved = ids.filter((id) => transformedStrokeIds.has(id))
+    if (kept.length > 0) next.push({ ...erasure, strokeIds: kept })
+    if (moved.length > 0) {
+      next.push({ ...erasure, points: erasure.points.map((p) => mapPoint(p)), strokeIds: moved })
+    }
+  }
+  layer.strokeErasures = next
+}
+
 export function makePage(
   template: TemplateId,
   opts?: { width?: number; height?: number },
