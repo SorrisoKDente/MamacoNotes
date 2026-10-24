@@ -9,11 +9,14 @@
  *     plus explicit per-element `order` interleaving and arrange (front/back).
  *  4. Erasure masks follow transformed strokes (move/resize/rotate) and split
  *     when shared with strokes that stayed in place (eraser mask overlap bug).
+ *  5. Pressure strokes are batched: a 200-sample pen stroke must issue a
+ *     handful of stroke() calls, not one per sample (frame-time regression).
  *
  * Run: npx tsx scripts/verify-drawing.ts
  */
 import type { Layer, Page, Stroke, StrokeErasure } from '../src/types'
 import { arrangeLayer, layerItems, makePage, makeLayer, nextLayerOrder, transformStrokeErasures } from '../src/types'
+import { drawStroke } from '../src/renderer/drawUtils'
 
 let passed = 0
 let failed = 0
@@ -387,6 +390,60 @@ console.log('== Drawing & Stroke Regression Verification ==')
     JSON.stringify(layer.strokeErasures) === JSON.stringify(legacyResult),
     'empty transformed set leaves masks untouched',
   )
+}
+
+{
+  // Test 5: pressure batching. A stylus changes pressure on nearly every
+  // sample; drawing one path per sample made the page redraw cost grow with
+  // the whole note (measured: 59.700 stroke() calls/frame on 300 strokes).
+  // The width is bucketed, so the same stroke needs a handful of calls.
+  const makeCtx = () => {
+    let calls = 0
+    const noop = () => {}
+    const ctx = {
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: () => {
+        calls++
+      },
+      lineCap: 'round',
+      lineJoin: 'round',
+      strokeStyle: '#000',
+      fillStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+    }
+    return { ctx, calls: () => calls }
+  }
+
+  const penStroke = (pointCount: number, varying: boolean): Stroke => ({
+    id: 'pressure-1',
+    kind: 'pen',
+    color: '#000000',
+    size: 4,
+    points: Array.from({ length: pointCount }, (_, i) => ({
+      x: 20 + i * 2,
+      y: 40 + Math.sin(i / 5) * 20,
+      pressure: varying ? 0.2 + ((i % 11) / 12) : 1,
+    })),
+  })
+
+  const varying = makeCtx()
+  drawStroke(varying.ctx as unknown as CanvasRenderingContext2D, penStroke(200, true))
+  assert(varying.calls() >= 2, 'pressure batching: varying width still renders multiple widths')
+  assert(
+    varying.calls() <= 32,
+    `pressure batching: 200-sample pen stroke uses <=32 stroke() calls (got ${varying.calls()})`,
+  )
+
+  const constant = makeCtx()
+  drawStroke(constant.ctx as unknown as CanvasRenderingContext2D, penStroke(200, false))
+  assert(constant.calls() === 1, 'pressure batching: constant width is a single stroke() call')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

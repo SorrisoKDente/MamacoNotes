@@ -144,7 +144,7 @@ Fluxo de inicialização:
 | Arquivo | Responsabilidade |
 |---|---|
 | `canvas.ts` | Classe `PageCanvas`: renderiza páginas (contínuo/separado), camadas (visibilidade/opacidade), traços, imagens, textos, PDF, templates, seleção; conversão de coordenadas; hit tests |
-| `drawUtils.ts` | Funções puras de desenho reutilizadas por thumbnail/export: `drawTemplate`, `drawLayer` (desenha a camada inteira em z-order, imagens pré-carregadas pelo chamador), `drawStroke` (totalmente sincronizado com o motor principal do canvas para suportar sensibilidade à pressão e suavização por curvas quadráticas), `drawTextOnCanvas`, `loadImageElement`, `drawImageElement` |
+| `drawUtils.ts` | Funções puras de desenho reutilizadas por thumbnail/export: `drawTemplate`, `drawLayer` (desenha a camada inteira em z-order, imagens pré-carregadas pelo chamador), `drawStroke` + `tracePressurePolyline` (compartilhada com o motor principal; larguras por pressão são agrupadas em faixas para limitar o número de `stroke()` por traço), `drawTextOnCanvas`, `loadImageElement`, `drawImageElement` |
 | `thumbnail.ts` | Gera miniaturas das páginas (usado no PageList e nos modelos personalizados), renderizadas na resolução do `devicePixelRatio` (limitada a 3×) com qualidade JPEG 0.8 — mantendo o tamanho CSS (160×207) para os previews ficarem nítidos em celulares retina |
 
 #### `src/utils/` — lógica de apoio
@@ -202,7 +202,7 @@ Fluxo de inicialização:
 | `build-resources/` | Ícones do empacotamento desktop (icon.ico, icon.png) e o script NSIS customizado `installer.nsh` (atalho na Área de Trabalho, limpeza do atalho na desinstalação, uma **`customCheckAppRunning` robusta** que substitui a detecção padrão do electron-builder, e hooks de migração que ignoram/toleram desinstaladores legados que retornam erro 2) |
 | `docs/architecture/` | Documentos de design aprovados (sincronização bidirecional; camadas; desenho; i18n) |
 | `scripts/verify-sync.ts` | Verificação de regressão de sync standalone: exercita `buildPlan`/`runSync` contra um transporte fake em memória (recuperação de baseline local obsoleta, rollback em falha de escrita de manifesto, execução idempotente, exibição de erro de auth, **regressão de tombstone do Bug A**: um caderno com tombstone nunca é re-baixado; **restauração da lixeira**: um caderno que reapareceu localmente após deleção remota é re-enviado e a entrada do manifesto volta para `deleted:false`). Rode com `npx tsx scripts/verify-sync.ts`; checado via `tsconfig.json` |
-| `scripts/verify-drawing.ts` | Verificação de regressão do motor de desenho standalone: exercita traços rápidos consecutivos, traços de ponto único e a **regressão de sobreposição da máscara da borracha** (as máscaras acompanham traços transformados e se dividem quando compartilhadas com traços que ficaram no lugar). Rode com `npm test` ou `npx tsx scripts/verify-drawing.ts` |
+| `scripts/verify-drawing.ts` | Verificação de regressão do motor de desenho standalone: exercita traços rápidos consecutivos, traços de ponto único, o **agrupamento por pressão** (traço de caneta com 200 amostras deve ficar limitado a ≤32 chamadas de `stroke()`) e a **regressão de sobreposição da máscara da borracha** (as máscaras acompanham traços transformados e se dividem quando compartilhadas com traços que ficaram no lugar). Rode com `npm test` ou `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-zorder.ts` | Verificação de regressão end-to-end do **Z-Order de Elementos na Camada**: fallback legado (traços→imagens→textos), `order` explícito por elemento, `nextLayerOrder`, `arrangeLayer` (frente/trás/avançar/recuar/multi-seleção/no-op), sequência de renderização com z-aware, hit-test com z-aware e `normalizePage` preservando `order`. Rode com `npm test` ou `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-eraser.ts` | Verificação de regressão da borracha standalone: tamanho/raio do apagamento com clique único, matemática da máscara de interseção e o fluxo completo da **sobreposição de máscara da borracha** (apagar → arrastar um traço no escopo para a área apagada → a máscara acompanha o traço, então nada desaparece). Rode com `npm test` ou `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-download.ts` | Verificação independente da correção de download no Android... |
@@ -464,7 +464,9 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
 
 - **Renderização**: `render()` → `renderSinglePage()` (modo `separate`) ou
   `renderContinuous()` (vertical/horizontal). O fundo/template e o PDF são desenhados no
-  **nível da página** (abaixo de tudo). Depois `renderPageContent()` itera `page.layers` em
+  **nível da página** (abaixo de tudo). O template + cor de fundo são rasterizados uma vez
+  em um canvas offscreen (`getBackgroundCanvas`) e apenas "blitados" a cada frame — o
+  template pontilhado sozinho recriaria ~800 arcos por frame. Depois `renderPageContent()` itera `page.layers` em
   ordem (base → topo) e, para cada camada **visível**, aplica `ctx.globalAlpha =
   layer.opacity` e desenha os traços/imagens/textos daquela camada intercalados por
   z-order via `layerItems` (ordem de fallback sem `order`: **traços → imagens → textos**;
@@ -479,7 +481,10 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   (ex: 60px) além das bordas do documento. Os limites são recalculados no zoom/resize, 
   garantindo que o "vazio infinito" não aumente ao tirar o zoom.
 - **Coordenadas**: conversões `toPageCoords` / `toDocumentCoords` / `toPageCoordsAt` /
-  `toScreenCoords` (aplica pan, zoom, offset da página e rotação da página).
+  `toScreenCoords` (aplica pan, zoom, offset da página e rotação da página). O
+  `getBoundingClientRect()` do canvas é **cacheado** (`updateRect` / `invalidateRect` /
+  `getRect`) e atualizado no máximo uma vez por frame (ou no início do gesto), então nenhum
+  evento de ponteiro força um layout flush.
 - **Interação**: `Editor.tsx` implementa todos os gestos via handlers de `PointerEvent`
   no container principal (para capturar drags de scrollbar). Inclui `pan | draw | erase | 
   select-move | select-resize | select-rotate | region-draw | region-move | 
@@ -566,10 +571,23 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
 - **Miniaturas/exportação** não usam o `PageCanvas`; usam `renderer/drawUtils.ts`
   (funções puras) para desenhar a página de novo em outro canvas — `drawLayer` aplica
   `globalAlpha` da camada e desenha imagens→textos→traços, respeitando visibilidade e
-  opacidade por camada. A função `drawStroke` implementa a mesma lógica de sensibilidade
-  à pressão e suavização do editor principal, garantindo que as miniaturas e exportações
-  PDF/PNG correspondam fielmente à aparência das anotações reais.
-- **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** otimizado com uma flag `isDirtyRef` para evitar desenhos desnecessários quando o canvas está ocioso, garantindo alta performance em dispositivos móveis. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs para evitar re-renders do React. Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
+  opacidade por camada. A função `drawStroke` usa a mesma `tracePressurePolyline`
+  compartilhada (`drawUtils.ts`) do editor principal: as larguras por pressão são
+  agrupadas em faixas (quantum de 0,5px com histerese e no máximo ~32 mudanças de largura
+  por traço), então um traço de caneta com 200 amostras precisa de ~29 chamadas de
+  `stroke()` em vez de uma por amostra. Miniaturas e exportações PDF/PNG continuam
+  correspondendo à aparência das anotações reais.
+- **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** otimizado com uma flag `isDirtyRef` para evitar desenhos desnecessários quando o canvas está ocioso, garantindo alta performance em dispositivos móveis. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs, **limitadas a uma escrita por frame** e só escrevendo propriedades que mudaram (sem layout thrash); existe um único handler `onPointerMove` (sem `onMouseMove` duplicado). Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
+  - **Cache de tinta durante o desenho** (`contentCache`/`getContentCache` em `canvas.ts`):
+    as camadas da página sem o traço em andamento são renderizadas uma vez em um bitmap
+    offscreen e blitadas a cada frame do traço, então cada frame desenha só o traço vivo.
+    O cache é invalidado por qualquer render completo fora de um traço (commit, desfazer,
+    troca de página, sync) e é reconstruído no primeiro frame do próximo traço. A resolução
+    segue `zoom × DPR` (limitada à escala 2 e a um orçamento de 4 megapixels) — uma leve
+    suavidade durante o desenho é trocada por um re-render nítido no commit. Gestos de
+    borracha não usam o cache (as máscaras mudam a página a cada frame).
+  - **Cache de fundo/template** (`bgCache`): o template também é mantido como bitmap
+    offscreen (LRU pequena, no máximo 4 entradas).
 
 ---
 
@@ -704,7 +722,7 @@ Fluxo e arquivos envolvidos:
 | Modos de seleção (clique/laço/círculo/quadrado) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicar em qualquer lugar dentro da caixa de seleção permite o arraste. |
 | Barras de Rolagem (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). Design de alto contraste, interativo e com auto-hide de 1.5s. |
 | Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. Restrito por `getPanLimits` e `clampPan`. |
-| Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
+| Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getContentCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, compartilhada com miniaturas/export) |
 | Borracha de traços | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`); as máscaras de apagamento parcial acompanham traços transformados via `src/types.ts` (`transformStrokeErasures`) |
 | Borracha de imagens | `src/utils/imageErase.ts` + `Editor.tsx` |
 | Modos de seleção (clique/laço/círculo/retângulo) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx` |

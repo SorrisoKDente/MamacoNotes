@@ -2,7 +2,7 @@ import type { Page, Stroke, ToolKind, ImageElement, TextElement, PageViewMode, R
 import { layerItems, newId } from '../types'
 import { drawTextElement, measureTextElement, textElementCorners } from '../utils/drawText'
 import { pageVisualRect, type PageOffset } from '../utils/layout'
-import { drawTemplate } from './drawUtils'
+import { drawTemplate, tracePressurePolyline } from './drawUtils'
 import { clamp } from '../utils/math'
 
 interface RendererCallbacks {
@@ -54,6 +54,8 @@ export class PageCanvas {
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
   private scratchCanvas: HTMLCanvasElement | null = null
   private scratchCtx: CanvasRenderingContext2D | null = null
+  private bgCache = new Map<string, HTMLCanvasElement>()
+  private contentCache: { page: Page; canvas: HTMLCanvasElement; scale: number } | null = null
 
   constructor(props: CanvasProps) {
     this.canvas = props.canvas
@@ -84,12 +86,33 @@ export class PageCanvas {
     return this.offsets[this.currentPageIndex] ?? { x: 0, y: 0 }
   }
 
-  updateRect() {
+  /**
+   * Re-reads the canvas rect. The value is cached: pointer handlers call this on
+   * every event, and an uncached getBoundingClientRect() there forces a layout
+   * flush per event (the main cause of the cursor stutter).
+   */
+  updateRect(force = false) {
+    if (!force && this.lastRect) return
     this.lastRect = this.canvas.getBoundingClientRect()
   }
 
+  /** Drop the cached rect after any layout change (resize, panels, scroll). */
+  invalidateRect() {
+    this.lastRect = null
+  }
+
+  private rect(): DOMRect {
+    if (!this.lastRect) this.lastRect = this.canvas.getBoundingClientRect()
+    return this.lastRect
+  }
+
+  /** Cached canvas rect (no layout read after the first call). */
+  getRect(): DOMRect {
+    return this.rect()
+  }
+
   toPageCoords(px: number, py: number): { x: number; y: number } {
-    const rect = this.lastRect || this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     const off = this.currentOffset
     let x = (px - rect.left - this.panX) / this.zoom - off.x
     let y = (py - rect.top - this.panY) / this.zoom - off.y
@@ -109,7 +132,7 @@ export class PageCanvas {
   }
 
   toDocumentCoords(px: number, py: number): { x: number; y: number } {
-    const rect = this.lastRect || this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     return {
       x: (px - rect.left - this.panX) / this.zoom,
       y: (py - rect.top - this.panY) / this.zoom,
@@ -117,7 +140,7 @@ export class PageCanvas {
   }
 
   toPageCoordsAt(px: number, py: number, pageIndex: number): { x: number; y: number } {
-    const rect = this.lastRect || this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     const off = this.offsets[pageIndex] ?? { x: 0, y: 0 }
     const pg = this.pages[pageIndex]
     if (!pg) return { x: 0, y: 0 }
@@ -139,7 +162,7 @@ export class PageCanvas {
   }
 
   toScreenCoords(px: number, py: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     const off = this.currentOffset
     const rot = ((this.page.rotation % 360) + 360) % 360
     let x = px
@@ -203,7 +226,7 @@ export class PageCanvas {
   }
 
   resize() {
-    const rect = this.lastRect || this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     if (rect.width === 0 || rect.height === 0) return
     const dpr = this.devicePixelRatio
     const w = Math.max(1, Math.round(rect.width * dpr))
@@ -215,6 +238,11 @@ export class PageCanvas {
   }
 
   render() {
+    // One layout read per frame (never per pointer event).
+    this.updateRect(true)
+    // A full render outside a stroke reflects committed content: the ink cache
+    // (layers without the in-progress stroke) is stale from now on.
+    if (!this.drawing) this.contentCache = null
     this.resize()
     const { ctx } = this
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -260,6 +288,17 @@ export class PageCanvas {
     page: Page,
     drawCurrentStroke: boolean,
   ) {
+    // While ink is being drawn the page content does not change — only the
+    // in-progress stroke does. Blit a cached bitmap of the layers and draw just
+    // that stroke, instead of re-tracing the whole page history every frame.
+    if (drawCurrentStroke && this.currentStroke) {
+      const cache = this.getContentCache(page)
+      if (cache) {
+        ctx.drawImage(cache, 0, 0, page.width, page.height)
+        this.renderStroke(ctx, this.currentStroke)
+        return
+      }
+    }
     for (const layer of page.layers) {
       if (!layer.visible) continue
       ctx.save()
@@ -287,6 +326,43 @@ export class PageCanvas {
     if (drawCurrentStroke && this.currentStroke) {
       this.renderStroke(ctx, this.currentStroke)
     }
+  }
+
+  /**
+   * Ink cache used while drawing: the page layers rendered without the
+   * in-progress stroke. Built lazily on the first frame of a stroke and dropped
+   * by the next full render after the stroke is committed. Resolution follows
+   * the current zoom/DPR (capped by a total-pixel budget so a big page at high
+   * DPR cannot balloon memory); a slight softness while drawing is traded for a
+   * crisp re-render on commit.
+   */
+  private getContentCache(page: Page): HTMLCanvasElement | null {
+    let scale = Math.min(2, Math.max(0.5, this.zoom * this.devicePixelRatio))
+    const MAX_PIXELS = 4_000_000
+    const pagePixels = page.width * page.height
+    if (pagePixels > 0 && pagePixels * scale * scale > MAX_PIXELS) {
+      scale = Math.max(0.5, Math.sqrt(MAX_PIXELS / pagePixels))
+    }
+    const w = Math.max(1, Math.round(page.width * scale))
+    const h = Math.max(1, Math.round(page.height * scale))
+    const cached = this.contentCache
+    if (cached && cached.page === page && cached.canvas.width === w && cached.canvas.height === h) {
+      return cached.canvas
+    }
+
+    const canvas = cached?.canvas ?? document.createElement('canvas')
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+    const cctx = canvas.getContext('2d')
+    if (!cctx) return null
+    cctx.setTransform(1, 0, 0, 1, 0, 0)
+    cctx.clearRect(0, 0, w, h)
+    cctx.scale(scale, scale)
+    this.renderPageContent(cctx, page, false)
+    this.contentCache = { page, canvas, scale }
+    return canvas
   }
 
   private renderMaskedStrokes(
@@ -408,7 +484,7 @@ export class PageCanvas {
 
   private renderContinuous() {
     const { ctx } = this
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.rect()
     ctx.save()
     ctx.scale(this.devicePixelRatio, this.devicePixelRatio)
     ctx.translate(this.panX, this.panY)
@@ -483,8 +559,36 @@ export class PageCanvas {
 
   renderBackground(ctx: CanvasRenderingContext2D, page: Page = this.page) {
     ctx.save()
-    drawTemplate(ctx, page, 1)
+    ctx.drawImage(this.getBackgroundCanvas(page), 0, 0, page.width, page.height)
     ctx.restore()
+  }
+
+  /**
+   * Template + background color are static per page, but the dot template draws
+   * ~800-1.200 arcs. Rasterize them once into an offscreen canvas and blit it
+   * every frame instead of re-creating thousands of paths. A tiny LRU map keeps
+   * mixed templates in continuous mode from thrashing the cache.
+   */
+  private getBackgroundCanvas(page: Page): HTMLCanvasElement {
+    const resolution = Math.min(2, Math.max(1, Math.round(this.devicePixelRatio * this.zoom * 2) / 2))
+    const key = `${page.width}x${page.height}|${page.template}|${page.backgroundColor ?? ''}|${resolution}`
+    const cached = this.bgCache.get(key)
+    if (cached) return cached
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(page.width * resolution))
+    canvas.height = Math.max(1, Math.round(page.height * resolution))
+    const bctx = canvas.getContext('2d')
+    if (bctx) {
+      bctx.scale(resolution, resolution)
+      drawTemplate(bctx, page, 1)
+    }
+    this.bgCache.set(key, canvas)
+    if (this.bgCache.size > 4) {
+      const oldest = this.bgCache.keys().next().value
+      if (oldest !== undefined) this.bgCache.delete(oldest)
+    }
+    return canvas
   }
 
   private getImage(dataUrl: string): HTMLImageElement | null {
@@ -586,11 +690,14 @@ export class PageCanvas {
   }
 
   renderImage(ctx: CanvasRenderingContext2D, imgEl: ImageElement) {
+    // Low-quality smoothing while drawing/erasing keeps frames cheap; the
+    // stroke commit triggers one high-quality render right after.
+    const quality = this.drawing || this.eraserActive ? 'low' : 'high'
     const ov = this.imageOverrides.get(imgEl.id)
     if (ov && ov.dataUrl === imgEl.dataUrl) {
       ctx.save()
       ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'high'
+      ctx.imageSmoothingQuality = quality
       ctx.translate(Math.floor(imgEl.x + imgEl.width / 2), Math.floor(imgEl.y + imgEl.height / 2))
       ctx.rotate((imgEl.rotation * Math.PI) / 180)
       ctx.drawImage(
@@ -608,7 +715,7 @@ export class PageCanvas {
     if (!img) return
     ctx.save()
     ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
+    ctx.imageSmoothingQuality = quality
     ctx.translate(Math.floor(imgEl.x + imgEl.width / 2), Math.floor(imgEl.y + imgEl.height / 2))
     ctx.rotate((imgEl.rotation * Math.PI) / 180)
     ctx.drawImage(
@@ -759,7 +866,7 @@ export class PageCanvas {
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       ctx.strokeStyle = stroke.color
-      this.tracePressurePolyline(ctx, pts, stroke.size)
+      tracePressurePolyline(ctx, pts, stroke.size)
     }
     ctx.restore()
   }
@@ -774,27 +881,6 @@ export class PageCanvas {
     }
     ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y)
     ctx.stroke()
-  }
-
-  tracePressurePolyline(ctx: CanvasRenderingContext2D, pts: Stroke['points'], baseSize: number) {
-    let lastSize = -1
-    let started = false
-
-    for (let i = 1; i < pts.length; i++) {
-      const p1 = pts[i]
-      const size = Math.max(0.6, baseSize * clamp(p1.pressure, 0.15, 1))
-
-      if (Math.abs(size - lastSize) > 0.01 || !started) {
-        if (started) ctx.stroke()
-        ctx.lineWidth = size
-        ctx.beginPath()
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
-        started = true
-        lastSize = size
-      }
-      ctx.lineTo(p1.x, p1.y)
-    }
-    if (started) ctx.stroke()
   }
 
   pointInStroke(stroke: Stroke, px: number, py: number, hitRadius: number): boolean {

@@ -198,6 +198,10 @@ export function Editor() {
 
   const draftRef = useRef<TextElement | null>(null)
   const persistTimerRef = useRef<number | null>(null)
+  const cursorRafRef = useRef(0)
+  const cursorPendingRef = useRef({ mx: 0, my: 0, pressure: 1, visible: true })
+  const cursorWrittenRef = useRef<Record<string, string>>({})
+  const cursorWrittenElRef = useRef<HTMLElement | null>(null)
 
   const toolRef = useRef<ToolKind>(tool)
   toolRef.current = tool
@@ -460,9 +464,28 @@ export function Editor() {
     return () => cancelAnimationFrame(requestRenderIdRef.current)
   }, [performRender])
 
+  // Cached canvas rect must be dropped whenever the element moves/resizes
+  // (window resize, panels, scroll) — otherwise pointer coords drift.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const invalidate = () => {
+      engineRef.current?.invalidateRect()
+      requestRenderRef.current()
+    }
+    const observer = new ResizeObserver(invalidate)
+    observer.observe(canvas)
+    window.addEventListener('scroll', invalidate, true)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('scroll', invalidate, true)
+    }
+  }, [page?.id])
+
   // ponytail: ensure unsaved changes are flushed when Editor unmounts (e.g. exiting note / returning to dashboard).
   useEffect(() => {
     return () => {
+      if (cursorRafRef.current) cancelAnimationFrame(cursorRafRef.current)
       if (persistTimerRef.current) {
         window.clearTimeout(persistTimerRef.current)
         persistTimerRef.current = null
@@ -1690,6 +1713,8 @@ export function Editor() {
 
     if (e.pointerType !== 'mouse') e.preventDefault()
     const pos = getPointerPos(e.nativeEvent)
+    // One layout read per gesture start keeps the cached rect honest.
+    engine.updateRect(true)
     trackMouse(e)
     activePointersRef.current.set(e.pointerId, pos)
     pointerDownPosRef.current.set(e.pointerId, pos)
@@ -2341,52 +2366,70 @@ export function Editor() {
     canvas.style.cursor = 'default'
   }
 
+  // Cursor painting is throttled to one write per frame and only touches the
+  // properties that actually changed. Writing width/height/transform on every
+  // pointer event invalidated layout between two getBoundingClientRect()
+  // reads (layout thrash), which is what made the cursor feel laggy.
   const updateCursorDOM = useCallback(
     (mx: number, my: number, pressure = pointerPressureRef.current, visible = true) => {
-      const el = toolCursorRef.current
-      if (!el) return
-      const t = toolRef.current
-      if (
-        (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') ||
-        !visible ||
-        mx < 0 ||
-        isPanShortcutActive()
-      ) {
-        el.style.opacity = '0'
-        return
-      }
-      const currentSettings = useAppStore.getState().settings
-      const isDrawing = dragRef.current?.kind === 'draw'
-      const activePressure = isDrawing ? pressure : 1
-      const diameter = cursorDisplaySize(t, currentSettings, zoomRef.current, activePressure)
-      el.style.opacity = '1'
-      el.style.width = `${diameter}px`
-      el.style.height = `${diameter}px`
-      el.style.transform = `translate(${mx - diameter / 2}px, ${my - diameter / 2}px)`
-      if (t === 'pen') {
-        const c = cursorColor(t, currentSettings)
-        el.style.borderColor = c
-        if (diameter <= 6) {
-          el.style.borderWidth = '1px'
-          el.style.background = c
-          el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.5)'
-        } else {
-          el.style.borderWidth = '2px'
-          el.style.background = 'transparent'
-          el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.6)'
+      cursorPendingRef.current = { mx, my, pressure, visible }
+      if (cursorRafRef.current) return
+      cursorRafRef.current = requestAnimationFrame(() => {
+        cursorRafRef.current = 0
+        const el = toolCursorRef.current
+        if (!el) return
+        const { mx: x, my: y, pressure: p, visible: vis } = cursorPendingRef.current
+        const t = toolRef.current
+        // A different element (tool switched) has default styles: forget the
+        // "already written" cache or the cursor would stay invisible.
+        if (cursorWrittenElRef.current !== el) {
+          cursorWrittenElRef.current = el
+          cursorWrittenRef.current = {}
         }
-      } else if (t === 'highlighter') {
-        const c = cursorColor(t, currentSettings)
-        el.style.borderColor = c
-        el.style.borderWidth = diameter <= 6 ? '1px' : '2px'
-        el.style.background = 'rgba(255,255,255,0.15)'
-        el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35)'
-      } else {
-        el.style.borderColor = '#9a9ab0'
-        el.style.borderWidth = diameter <= 6 ? '1px' : '2px'
-        el.style.background = 'transparent'
-        el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35)'
-      }
+        const apply = (prop: string, value: string) => {
+          const written = cursorWrittenRef.current
+          if (written[prop] === value) return
+          written[prop] = value
+          el.style.setProperty(prop, value)
+        }
+        if (
+          (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') ||
+          !vis ||
+          x < 0 ||
+          isPanShortcutActive()
+        ) {
+          apply('opacity', '0')
+          return
+        }
+        const currentSettings = useAppStore.getState().settings
+        const isDrawing = dragRef.current?.kind === 'draw'
+        const diameter = cursorDisplaySize(t, currentSettings, zoomRef.current, isDrawing ? p : 1)
+        apply('opacity', '1')
+        apply('width', `${diameter}px`)
+        apply('height', `${diameter}px`)
+        apply('transform', `translate(${x - diameter / 2}px, ${y - diameter / 2}px)`)
+        if (t === 'pen') {
+          apply('border-color', cursorColor(t, currentSettings))
+          apply('border-width', diameter <= 6 ? '1px' : '2px')
+          apply('background', diameter <= 6 ? cursorColor(t, currentSettings) : 'transparent')
+          apply(
+            'box-shadow',
+            diameter <= 6
+              ? '0 0 0 1px rgba(0, 0, 0, 0.5)'
+              : '0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.6)',
+          )
+        } else if (t === 'highlighter') {
+          apply('border-color', cursorColor(t, currentSettings))
+          apply('border-width', diameter <= 6 ? '1px' : '2px')
+          apply('background', 'rgba(255,255,255,0.15)')
+          apply('box-shadow', '0 0 0 1px rgba(0, 0, 0, 0.35)')
+        } else {
+          apply('border-color', '#9a9ab0')
+          apply('border-width', diameter <= 6 ? '1px' : '2px')
+          apply('background', 'transparent')
+          apply('box-shadow', '0 0 0 1px rgba(0, 0, 0, 0.35)')
+        }
+      })
     },
     [isPanShortcutActive],
   )
@@ -2404,7 +2447,7 @@ export function Editor() {
     pointerPressureRef.current = isMouse ? 1 : (e.pressure || 0.5)
 
     if (isMouse) {
-      const rect = canvas.getBoundingClientRect()
+      const rect = engine.getRect()
       const mx = e.clientX - rect.left
       const my = e.clientY - rect.top
       mousePosRef.current = { x: mx, y: my }
@@ -3316,6 +3359,9 @@ export function Editor() {
     window.addEventListener('blur', onBlur)
     window.addEventListener('ink:esc', onInkEsc)
     const onResize = () => {
+      // The canvas element moved/resized: drop the cached rect immediately so
+      // the next pointer event maps to the right page coordinates.
+      engineRef.current?.invalidateRect()
       if (resizeTimerRef.current) window.clearTimeout(resizeTimerRef.current)
       resizeTimerRef.current = window.setTimeout(() => {
         resizeTimerRef.current = null
@@ -3506,7 +3552,6 @@ export function Editor() {
     <div
       ref={editorRef}
       className={`editor ${cursorClass}`}
-      onMouseMove={trackMouse}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

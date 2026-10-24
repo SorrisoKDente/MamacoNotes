@@ -146,7 +146,7 @@ Initialization flow:
 | File | Responsibility |
 |---|---|
 | `canvas.ts` | `PageCanvas` class: renders pages (continuous/separate), layers (visibility/opacity), strokes, images, texts, PDF, templates, selection; coordinate conversion; hit tests |
-| `drawUtils.ts` | Pure drawing functions reused by thumbnail/export: `drawTemplate`, `drawLayer` (draws a whole layer in z-order, images preloaded by the caller), `drawStroke` (fully synchronized with the main canvas engine to support pressure sensitivity and quadratic curve smoothing), `drawTextOnCanvas`, `loadImageElement`, `drawImageElement` |
+| `drawUtils.ts` | Pure drawing functions reused by thumbnail/export: `drawTemplate`, `drawLayer` (draws a whole layer in z-order, images preloaded by the caller), `drawStroke` + `tracePressurePolyline` (shared with the main canvas engine; pressure widths are bucketed so a stroke needs a bounded number of `stroke()` calls), `drawTextOnCanvas`, `loadImageElement`, `drawImageElement` |
 | `thumbnail.ts` | Generates page thumbnails (used in PageList and custom templates), rendered at `devicePixelRatio` resolution (capped at 3×) with JPEG quality 0.8 — keeping the CSS size (160×207) so previews stay sharp on retina phones |
 
 #### `src/utils/` — support logic
@@ -202,7 +202,7 @@ Initialization flow:
 | `assets/` | Marketing and documentation assets (screenshots, QR codes) |
 | `build-resources/` | Desktop packaging icons (icon.ico, icon.png) and the custom NSIS script `installer.nsh` (desktop shortcut on finish, shortcut cleanup on uninstall, a **robust `customCheckAppRunning`** that replaces electron-builder's default app-detection, and update migration hooks that skip/tolerate legacy uninstallers returning error 2) |
 | `scripts/verify-sync.ts` | Standalone sync regression verification: exercises `buildPlan`/`runSync` against a fake in-memory transport (stale local baseline recovery, rollback on manifest write failure, idempotent re-run, auth error surfacing, **Bug A tombstone regression**: a tombstoned notebook is never re-pulled; **restore-from-trash**: a notebook that reappeared locally after remote deletion is re-pushed and the manifest entry flips back to `deleted:false`). Run with `npx tsx scripts/verify-sync.ts`; typechecked via `tsconfig.json` |
-| `scripts/verify-drawing.ts` | Standalone drawing engine regression verification: exercises consecutive rapid strokes, dot strokes, and the **eraser mask overlap regression** (masks follow transformed strokes and split when shared with strokes that stayed in place). Run with `npm test` or `npx tsx scripts/verify-drawing.ts` |
+| `scripts/verify-drawing.ts` | Standalone drawing engine regression verification: exercises consecutive rapid strokes, dot strokes, **pressure batching** (200-sample pen stroke must stay bounded to ≤32 `stroke()` calls), and the **eraser mask overlap regression** (masks follow transformed strokes and split when shared with strokes that stayed in place). Run with `npm test` or `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-zorder.ts` | End-to-end regression for **Layer Element Z-Ordering**: legacy fallback (strokes→images→texts), explicit per-element `order`, `nextLayerOrder`, `arrangeLayer` (front/back/forward/backward/multi-select/no-op), z-aware render sequence, z-aware hit-testing, and `normalizePage` preserving `order`. Run with `npm test` or `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-eraser.ts` | Standalone eraser regression verification: single-click erasure size/radius, intersection mask math, and the end-to-end **eraser mask overlap** flow (erase → drag a scoped stroke over the erased region → the mask travels with the stroke, so nothing disappears). Run with `npm test` or `npx tsx scripts/verify-eraser.ts` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
@@ -463,7 +463,10 @@ Key points:
 
 - **Rendering**: `render()` → `renderSinglePage()` (`separate` mode) or
   `renderContinuous()` (vertical/horizontal). The background/template and PDF are drawn at
-  **page level** (below everything). Then `renderPageContent()` iterates `page.layers` in
+  **page level** (below everything). The template + background color are rasterized once
+  into an offscreen canvas (`getBackgroundCanvas`) and blitted every frame — the dot
+  template alone would otherwise rebuild ~800 arcs per frame. Then `renderPageContent()`
+  iterates `page.layers` in
   order (bottom → top) and, for each **visible** layer, applies `ctx.globalAlpha =
   layer.opacity` and draws that layer's strokes/images/texts interleaved by z-order via
   `layerItems` (fallback order without `order`: **strokes → images → texts**; consecutive
@@ -478,7 +481,10 @@ Key points:
   (e.g., 60px) beyond document edges. Limits are recalculated on zoom/resize, ensuring
   the "infinite void" doesn't grow when zooming out.
 - **Coordinates**: `toPageCoords` / `toDocumentCoords` / `toPageCoordsAt` / `toScreenCoords`
-  conversions (apply pan, zoom, page offset, and page rotation).
+  conversions (apply pan, zoom, page offset, and page rotation). The canvas
+  `getBoundingClientRect()` is **cached** (`updateRect` / `invalidateRect` / `getRect`) and
+  refreshed at most once per frame (or at gesture start), so pointer events never force a
+  layout flush.
 - **Interaction**: `Editor.tsx` implements all gestures via `PointerEvent` handlers
   on the main container (to capture scrollbar drags). Includes `pan | draw | erase |
   select-move | select-resize | select-rotate | region-draw | region-move |
@@ -556,10 +562,22 @@ Key points:
 - **Thumbnails/exporting** do not use `PageCanvas`; they use `renderer/drawUtils.ts` (pure
   functions) to redraw the page in another canvas — `drawLayer` applies the layer's
   `globalAlpha` and draws images→texts→strokes, respecting per-layer visibility and
-  opacity. The `drawStroke` function implements identical pressure sensitivity and
-  smoothing logic as the main editor, ensuring that thumbnails and PDF/PNG exports
+  opacity. The `drawStroke` function uses the same shared `tracePressurePolyline`
+  (`drawUtils.ts`) as the main editor: pressure widths are bucketed (0.5px quantum with
+  hysteresis and a max of ~32 width changes per stroke), so a 200-sample pen stroke needs
+  ~29 `stroke()` calls instead of one per sample. Thumbnails and PDF/PNG exports therefore
   match the appearance of the live notes.
-- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs to avoid React re-renders. High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
+- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unnecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs, **throttled to one write per frame** and only writing properties that changed (layout-thrash free); there is a single `onPointerMove` handler (no duplicate `onMouseMove`). High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
+  - **Ink cache while drawing** (`contentCache`/`getContentCache` in `canvas.ts`): the page
+    layers without the in-progress stroke are rendered once into an offscreen bitmap and
+    blitted on every frame of the stroke, so each frame draws only the live stroke. The
+    cache is invalidated by any full render outside a stroke (commit, undo, page change,
+    sync) and rebuilt on the first frame of the next stroke. Resolution follows
+    `zoom × DPR` (capped at scale 2 and a 4-megapixel budget) — a slight softness while
+    drawing is traded for a crisp re-render on commit. Eraser gestures bypass the cache
+    (their masks change the page every frame).
+  - **Background/template cache** (`bgCache`): the template is also kept as an offscreen
+    bitmap (small LRU, max 4 entries).
 
 ---
 
@@ -705,7 +723,7 @@ Flow and files involved:
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicking anywhere inside a selection bounding box allows dragging. |
 | Scrollbars (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). High-contrast design, interactive, and auto-hides after 1.5s. |
 | Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Restricted by `getPanLimits` and `clampPan`. |
-| Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `tracePressurePolyline`) |
+| Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getContentCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, shared with thumbnails/export) |
 | Stroke eraser | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`); partial-erase masks follow transformed strokes via `src/types.ts` (`transformStrokeErasures`) |
 | Image eraser | `src/utils/imageErase.ts` + `Editor.tsx` |
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx` |

@@ -20,6 +20,8 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Shortcut Cursor Restoration (Pan/Move)**: Releasing the Pan (`Alt`) or Move shortcut key leaves the Pan/Move cursor visible until clicked, instead of dynamically restoring the active tool cursor.
 - [ ] **Missing Fullscreen Option in Web**: The fullscreen toggle button is missing in the browser version (Web/PWA) on both the Dashboard and Editor views.
 - [x] **Layer Element Z-Ordering (Images/Strokes/Text)**: Within a single layer, images render in a fixed order relative to strokes and text, making it impossible to write or place text over an image without creating a new layer. Fixed with a per-element `order` (new content lands on top) plus bring-to-front/forward/backward/send-to-back actions in the Select panel.
+- [ ] **Intermittent Missing Stroke**: sometimes a stroke drawn right after another one does not appear / is not kept (the "second stroke" disappears). Reported on desktop; no deterministic reproduction yet — needs instrumentation to capture the engine → layer → persist path before a fix.
+- [ ] **Desktop Cursor Stutter**: moving the pointer over the canvas stutters when the tool cursor (pen/highlighter/eraser) is visible; with the cursor hidden the input feels smooth. Likely cause: layout thrashing in the pointer hot path (`getBoundingClientRect()` interleaved with cursor style writes, doubled because both `onMouseMove` and `onPointerMove` run for a mouse).
 
 ## ✨ Planned Features & Improvements
 

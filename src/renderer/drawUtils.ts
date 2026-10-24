@@ -59,6 +59,57 @@ export function drawTemplate(
   }
 }
 
+/**
+ * Width quantum (device px) used to bucket pressure-derived stroke widths.
+ * Pen pressure changes on almost every sample, so without bucketing we issue
+ * one `stroke()` per point — thousands per frame on ink-heavy pages. Bucketing
+ * merges neighbouring samples into the same path: at most ~32 `stroke()` calls
+ * per stroke (instead of one per sample), with no visible seam (round caps
+ * overlap).
+ */
+const PRESSURE_SIZE_QUANTUM = 0.5
+
+export function tracePressurePolyline(
+  ctx: CanvasRenderingContext2D,
+  pts: Stroke['points'],
+  baseSize: number,
+  scale = 1,
+) {
+  const bucket = PRESSURE_SIZE_QUANTUM * scale
+  const minSize = 0.6 * scale
+  // Two bounds keep the call count linear-ish and small regardless of how
+  // noisy the pressure samples are:
+  //  - hysteresis: only change width when the new bucket is ~1px away, so
+  //    jitter around a bucket boundary does not flap between widths;
+  //  - stride: at most ~32 width changes per stroke, no matter its length.
+  // Round caps overlap, so the seams are invisible.
+  const HYSTERESIS = 2
+  const MAX_WIDTH_CHANGES = 32
+  const stride = Math.max(1, Math.ceil(pts.length / MAX_WIDTH_CHANGES))
+  let lastBucket = -1
+  let lastSwitch = 0
+  let started = false
+
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[i - 1]
+    const p1 = pts[i]
+    const size = Math.max(minSize, baseSize * scale * clamp(p1.pressure, 0.15, 1))
+    const q = Math.max(1, Math.round(size / bucket))
+
+    if (!started || (i - lastSwitch >= stride && Math.abs(q - lastBucket) >= HYSTERESIS)) {
+      if (started) ctx.stroke()
+      ctx.lineWidth = q * bucket
+      ctx.beginPath()
+      ctx.moveTo(p0.x * scale, p0.y * scale)
+      started = true
+      lastBucket = q
+      lastSwitch = i
+    }
+    ctx.lineTo(p1.x * scale, p1.y * scale)
+  }
+  if (started) ctx.stroke()
+}
+
 // ponytail: removed local clamp
 export function drawStroke(
   ctx: CanvasRenderingContext2D,
@@ -101,26 +152,7 @@ export function drawStroke(
     ctx.lineTo(pts[pts.length - 1].x * scale, pts[pts.length - 1].y * scale)
     ctx.stroke()
   } else {
-    // Normal pen with pressure sensitivity: batch segments with same pressure to reduce stroke() calls
-    let lastSize = -1
-    let started = false
-
-    for (let i = 1; i < pts.length; i++) {
-      const p1 = pts[i]
-      const size = Math.max(0.6 * scale, stroke.size * scale * clamp(p1.pressure, 0.15, 1))
-
-      // Using a small epsilon for pressure comparison to catch almost-identical values (like from mouse)
-      if (Math.abs(size - lastSize) > 0.01 || !started) {
-        if (started) ctx.stroke()
-        ctx.lineWidth = size
-        ctx.beginPath()
-        ctx.moveTo(pts[i - 1].x * scale, pts[i - 1].y * scale)
-        started = true
-        lastSize = size
-      }
-      ctx.lineTo(p1.x * scale, p1.y * scale)
-    }
-    if (started) ctx.stroke()
+    tracePressurePolyline(ctx, pts, stroke.size, scale)
   }
   ctx.restore()
 }

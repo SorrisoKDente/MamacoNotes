@@ -20,6 +20,8 @@ Este documento rastreia bugs atuais, melhorias planejadas e ideias de longo praz
 - [x] **Restauração do Cursor de Pan/Mover**: Ao soltar a tecla de atalho de Pan/Mover, o cursor permanece com o ícone de Pan/Mover até um clique ser feito, em vez de retornar imediatamente ao ícone da ferramenta selecionada.
 - [ ] **Opção de Tela Cheia Ausente na Web**: A opção de alternar para tela cheia não aparece na versão de navegador (Web/PWA), nem no Dashboard e nem no Editor.
 - [x] **Z-Order de Elementos na Camada (Imagens/Traços/Textos)**: Dentro de uma mesma camada, imagens ficam em uma ordem fixa em relação a traços e textos, impedindo escrever ou colocar textos sobre uma imagem sem criar uma nova camada. Corrigido com um `order` por elemento (novo conteúdo entra no topo) e ações de trazer para frente/avançar/recuar/enviar para trás no painel de Seleção.
+- [ ] **Traço Intermitente Ausente**: às vezes um traço desenhado logo após outro não aparece / não é mantido (o "segundo traço" desaparece). Relatado no desktop; sem reprodução determinística até agora — precisa de instrumentação para capturar o caminho engine → camada → persistência antes de corrigir.
+- [ ] **Travamento com o Cursor Visível (Desktop)**: mover o ponteiro sobre o canvas trava quando o cursor da ferramenta (caneta/marca-texto/borracha) está visível; com o cursor oculto a entrada flui normalmente. Causa provável: thrashing de layout no caminho quente do ponteiro (`getBoundingClientRect()` intercalado com escritas de estilo do cursor, duplicado porque `onMouseMove` e `onPointerMove` rodam para o mouse).
 
 ## ✨ Funcionalidades e Melhorias Planejadas
 
