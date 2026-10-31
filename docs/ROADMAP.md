@@ -22,6 +22,10 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Layer Element Z-Ordering (Images/Strokes/Text)**: Within a single layer, images render in a fixed order relative to strokes and text, making it impossible to write or place text over an image without creating a new layer. Fixed with a per-element `order` (new content lands on top) plus bring-to-front/forward/backward/send-to-back actions in the Select panel.
 - [ ] **Intermittent Missing Stroke**: sometimes a stroke drawn right after another one does not appear / is not kept (the "second stroke" disappears). Reported on desktop; no deterministic reproduction yet — needs instrumentation to capture the engine → layer → persist path before a fix.
 - [ ] **Desktop Cursor Stutter**: moving the pointer over the canvas stutters when the tool cursor (pen/highlighter/eraser) is visible; with the cursor hidden the input feels smooth. Likely cause: layout thrashing in the pointer hot path (`getBoundingClientRect()` interleaved with cursor style writes, doubled because both `onMouseMove` and `onPointerMove` run for a mouse).
+- [ ] **Tool Cursor Visibility and Size**: the tool cursor may not appear in the browser even when cursor hiding is disabled, and its diameter may not change smoothly while drawing.
+- [ ] **Canvas Trembling and Blurring**: the page can appear to shake slightly or become blurred while writing.
+- [ ] **PDF Background Blurring After Erase**: on pages with a PDF background, erasing a stroke can leave all page strokes blurred; investigate together with the existing text-blurring-after-erase issue.
+- [ ] **Mobile Sync Not Applying to Open Note**: on a phone, accepting a cloud conflict for one note may show no visible change in the currently open note, while other notes synchronize correctly.
 
 ## ✨ Planned Features & Improvements
 
@@ -30,6 +34,8 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Toolbar Submenu Toggle Logic**: Switching tools in the sidebar toolbar should only select the tool without opening its configuration submenu. Clicking an already active tool icon toggles its submenu open/closed.
 - [x] **Solid Pen Cursor**: Change the pen tool cursor from semi-opaque to a solid color for better visibility.
 - [ ] **Granular Tool Cursor Hiding**: Split the "Hide tool cursor" setting into independent options to hide pen cursor, hide eraser cursor, or hide all cursors.
+- [ ] **Sync Progress Details**: Show synchronization progress in the cloud tab, including percentage or estimated remaining time when available, and identify the file currently being synchronized.
+- [ ] **Dashboard Sync Button**: Add a cloud synchronization button to the Dashboard, not only to the editor/top bar.
 - [x] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
 - [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
   - **Page Preview**: Select all pages.
