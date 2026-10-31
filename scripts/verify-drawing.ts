@@ -483,6 +483,7 @@ console.log('== Drawing & Stroke Regression Verification ==')
   assert(smallPage >= 1 * 1.25 * 0.95, 'a normal-sized page stays sharp enough to cache')
   assert(!shouldUsePageCache(false, false), 'idle renders never serve the page bitmap cache')
   assert(shouldUsePageCache(true, true), 'active stroke previews may serve the page bitmap cache')
+
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

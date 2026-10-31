@@ -96,6 +96,7 @@ export function Editor() {
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
 
   const toolCursorRef = useRef<HTMLDivElement>(null)
+  const canvasCursorRef = useRef('')
   const requestRenderIdRef = useRef<number>(0)
   const isDirtyRef = useRef<boolean>(true)
 
@@ -449,6 +450,12 @@ export function Editor() {
   const requestRender = useCallback(() => {
     isDirtyRef.current = true
   }, [])
+
+  function setCanvasCursor(canvas: HTMLCanvasElement, cursor: string) {
+    if (canvasCursorRef.current === cursor) return
+    canvasCursorRef.current = cursor
+    canvas.style.cursor = cursor
+  }
 
   const requestRenderRef = useRef(requestRender)
   requestRenderRef.current = requestRender
@@ -2335,7 +2342,7 @@ export function Editor() {
     if (!engine || !canvas) return
     const tHit = transformHandleAt(pagePt)
     if (tHit) {
-      canvas.style.cursor = tHit.handle === 'rotate' ? ROTATE_CURSOR : imageResizeCursor(tHit.handle)
+      setCanvasCursor(canvas, tHit.handle === 'rotate' ? ROTATE_CURSOR : imageResizeCursor(tHit.handle))
       return
     }
     if (hitTestSelectionBounds(pagePt)) {
@@ -2345,12 +2352,12 @@ export function Editor() {
         if (img) {
           const handle = engine.hitTestImageHandles(img, pagePt.x, pagePt.y)
           if (handle) {
-            canvas.style.cursor = imageResizeCursor(handle)
+            setCanvasCursor(canvas, imageResizeCursor(handle))
             return
           }
         }
       }
-      canvas.style.cursor = 'move'
+      setCanvasCursor(canvas, 'move')
       return
     }
     const pg = pageRef.current
@@ -2359,12 +2366,12 @@ export function Editor() {
       if (img) {
         const handle = engine.hitTestImageHandles(img, pagePt.x, pagePt.y)
         if (handle) {
-          canvas.style.cursor = imageResizeCursor(handle)
+          setCanvasCursor(canvas, imageResizeCursor(handle))
           return
         }
       }
     }
-    canvas.style.cursor = 'default'
+    setCanvasCursor(canvas, 'default')
   }
 
   // Cursor painting is throttled to one write per frame and only touches the
@@ -2453,14 +2460,14 @@ export function Editor() {
       const my = e.clientY - rect.top
       mousePosRef.current = { x: mx, y: my }
       if (dragRef.current?.kind === 'pan') {
-        canvas.style.cursor = 'grabbing'
+        setCanvasCursor(canvas, 'grabbing')
       } else if (isPanShortcutActive(e) || tool === 'pan') {
-        canvas.style.cursor = 'grab'
+        setCanvasCursor(canvas, 'grab')
       } else if (!dragRef.current) {
         if (tool === 'select') {
           updateSelectCursor(engine.toPageCoords(mx, my))
         } else {
-          canvas.style.cursor = ''
+          setCanvasCursor(canvas, '')
         }
       }
       updateCursorRef.current(mx, my, pointerPressureRef.current)
