@@ -597,6 +597,10 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     de borracha, que muta máscaras a cada frame. Renders ociosos (repaint disparado pelo
     persist, seleção) usam diretamente o modelo da página e nunca reconstroem nem exibem o
     cache de prévia.
+    O cursor da ferramenta é atualizado uma vez por frame de animação e promovido com
+    `translate3d`/`will-change` para evitar repaints desnecessários do editor. Os commits
+    de traço também emitem uma checagem opt-in no frame seguinte para diagnosticar corridas
+    de página obsoleta ou de ownership.
   - **Cache de rasterização do PDF** (`pdfCache`/`getPdfCanvas`): páginas de PDF são imagens
     grandes que antes eram reamostradas a cada frame com `imageSmoothingQuality` rebaixada
     durante o desenho — essa reamostragem era cara e causava as "letras borradas" ao

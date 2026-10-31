@@ -1925,6 +1925,8 @@ body {
   border-radius: 8px;
   overflow: hidden;
   z-index: 5;
+  contain: layout paint;
+  will-change: transform, opacity;
 }
 
 .zoom-controls button {
@@ -4009,5 +4011,4 @@ body {
   backdrop-filter: blur(2px);
   display: none;
 }
-
 

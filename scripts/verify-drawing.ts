@@ -108,6 +108,11 @@ console.log('== Drawing & Stroke Regression Verification ==')
   assert(layer.strokes.length === 2, 'consecutive rapid strokes: BOTH strokes committed (neither lost)')
   assert(layer.strokes[0].id === 's1', 'consecutive rapid strokes: Stroke 1 preserved correctly')
   assert(layer.strokes[1].id === 's2', 'consecutive rapid strokes: Stroke 2 preserved correctly')
+  assert(!isDrawing && currentStroke === null, 'consecutive rapid strokes: engine is idle after both commits')
+  assert(
+    layer.strokes.every((stroke) => stroke.points.length >= 1),
+    'consecutive rapid strokes: committed strokes remain drawable on the next render',
+  )
 }
 
 {

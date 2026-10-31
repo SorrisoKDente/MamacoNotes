@@ -2408,7 +2408,7 @@ export function Editor() {
         apply('opacity', '1')
         apply('width', `${diameter}px`)
         apply('height', `${diameter}px`)
-        apply('transform', `translate(${x - diameter / 2}px, ${y - diameter / 2}px)`)
+        apply('transform', `translate3d(${x - diameter / 2}px, ${y - diameter / 2}px, 0)`)
         if (t === 'pen') {
           apply('border-color', cursorColor(t, currentSettings))
           apply('border-width', diameter <= 6 ? '1px' : '2px')
@@ -2872,6 +2872,19 @@ export function Editor() {
           drawPage.updatedAt = Date.now()
           notebookRef.current!.updatedAt = Date.now()
           dirtyRef.current = true
+          const committedPageId = drawPage.id
+          const committedLayerId = commitLayer.id
+          const committedStrokeId = committed.id
+          requestAnimationFrame(() => {
+            const currentPage = pageRef.current
+            const currentLayer = currentPage?.layers.find((layer) => layer.id === committedLayerId)
+            trace(
+              'editor.commit-check',
+              `page=${currentPage?.id === committedPageId}`,
+              `layer=${!!currentLayer}`,
+              `stroke=${!!currentLayer?.strokes.some((item) => item.id === committedStrokeId)}`,
+            )
+          })
           // Fold the finished stroke into the cached page bitmap: the render
           // after releasing the pen is a blit instead of a full page repaint.
           engine.commitStrokeToPageCache(drawPage, committed)

@@ -587,6 +587,9 @@ Key points:
     `eraserActive` and `invalidatePageCache()` cover the live eraser gesture, which mutates
     masks every frame. Idle renders (persist-triggered repaints, selection) use the page
     model directly and never rebuild or serve the preview cache.
+    The tool cursor is updated once per animation frame and promoted with
+    `translate3d`/`will-change` to avoid unnecessary editor repaints. Stroke commits also
+    emit an opt-in next-frame trace check to diagnose stale-page or ownership races.
   - **PDF raster cache** (`pdfCache`/`getPdfCanvas`): PDF pages are big images that used to
     be resampled every frame with `imageSmoothingQuality` lowered while drawing — that
     resampling was both expensive and the cause of the "blurry letters" while writing.
