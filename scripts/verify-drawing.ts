@@ -11,12 +11,15 @@
  *     when shared with strokes that stayed in place (eraser mask overlap bug).
  *  5. Pressure strokes are batched: a 200-sample pen stroke must issue a
  *     handful of stroke() calls, not one per sample (frame-time regression).
+ *  6. The page bitmap cache is built at the display scale (zoom × DPR) and is
+ *     never upscaled (that made PDF text blurry for a moment per stroke).
  *
  * Run: npx tsx scripts/verify-drawing.ts
  */
 import type { Layer, Page, Stroke, StrokeErasure } from '../src/types'
 import { arrangeLayer, layerItems, makePage, makeLayer, nextLayerOrder, transformStrokeErasures } from '../src/types'
 import { drawStroke } from '../src/renderer/drawUtils'
+import { pageRenderScale, PAGE_BITMAP_MAX_PIXELS, shouldUsePageCache } from '../src/renderer/canvas'
 
 let passed = 0
 let failed = 0
@@ -444,6 +447,37 @@ console.log('== Drawing & Stroke Regression Verification ==')
   const constant = makeCtx()
   drawStroke(constant.ctx as unknown as CanvasRenderingContext2D, penStroke(200, false))
   assert(constant.calls() === 1, 'pressure batching: constant width is a single stroke() call')
+}
+
+{
+  // Test 6: the cached page bitmap must be built at the display scale, never
+  // below it (an upscaled cache is what made PDF text look blurry for a moment
+  // after every stroke), and huge pages must fall back instead of upscaling.
+  const dpr1 = 1.25
+  const zoom = 1.4
+  // A4 rendered by the PDF importer (renderPdfPages uses scale 3.0).
+  const scale = pageRenderScale(1785, 2526, zoom, dpr1)
+  assert(
+    Math.abs(scale - zoom * dpr1) < 1e-9,
+    `page bitmap scale matches the display (${scale.toFixed(3)} = zoom × DPR), no 2× cap`,
+  )
+  assert(
+    pageRenderScale(1000, 1400, 0.22, 2.75) >= 0.22 * 2.75 * 0.95,
+    'small/normal pages are never cached below the display scale (sharp blit)',
+  )
+
+  // A page that would blow the pixel budget is capped; the renderer must then
+  // skip the cache (cacheSharpEnough -> false) instead of serving blur.
+  const huge = pageRenderScale(8000, 8000, 1, 2)
+  assert(
+    Math.abs(huge - Math.sqrt(PAGE_BITMAP_MAX_PIXELS / (8000 * 8000))) < 1e-9,
+    'huge pages are capped by the pixel budget',
+  )
+  assert(huge < 1 * 2 * 0.95, 'capped page is reported as not sharp enough for the screen')
+  const smallPage = pageRenderScale(1785, 2526, 1, 1.25)
+  assert(smallPage >= 1 * 1.25 * 0.95, 'a normal-sized page stays sharp enough to cache')
+  assert(!shouldUsePageCache(false, false), 'idle renders never serve the page bitmap cache')
+  assert(shouldUsePageCache(true, true), 'active stroke previews may serve the page bitmap cache')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

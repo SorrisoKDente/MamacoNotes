@@ -4,6 +4,7 @@ import { drawTextElement, measureTextElement, textElementCorners } from '../util
 import { pageVisualRect, type PageOffset } from '../utils/layout'
 import { drawTemplate, tracePressurePolyline } from './drawUtils'
 import { clamp } from '../utils/math'
+import { trace } from '../utils/debug'
 
 interface RendererCallbacks {
   onStrokeEnd: (stroke: Stroke) => void
@@ -23,6 +24,28 @@ interface CanvasProps {
 export interface SelectionRegion {
   type: 'rect' | 'circle' | 'free'
   points: { x: number; y: number }[]
+}
+
+/** Pixel budget shared by the page-sized bitmaps (20 MP ≈ 80 MB at 4 B/px). */
+export const PAGE_BITMAP_MAX_PIXELS = 20_000_000
+
+/**
+ * Resolution of every page-sized bitmap: the display scale (zoom × DPR) so a
+ * blit is 1:1 and nothing looks softer than a full render, lowered only when a
+ * huge page would exceed the pixel budget. `tryCachedPage` refuses the cache in
+ * that case rather than upscaling it (upscaling is what made PDF text blurry).
+ */
+export function pageRenderScale(width: number, height: number, zoom: number, dpr: number): number {
+  let scale = Math.max(0.25, zoom * dpr)
+  const pagePixels = width * height
+  if (pagePixels > 0 && pagePixels * scale * scale > PAGE_BITMAP_MAX_PIXELS) {
+    scale = Math.max(0.25, Math.sqrt(PAGE_BITMAP_MAX_PIXELS / pagePixels))
+  }
+  return scale
+}
+
+export function shouldUsePageCache(drawing: boolean, hasCurrentStroke: boolean): boolean {
+  return drawing && hasCurrentStroke
 }
 
 export class PageCanvas {
@@ -54,8 +77,11 @@ export class PageCanvas {
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
   private scratchCanvas: HTMLCanvasElement | null = null
   private scratchCtx: CanvasRenderingContext2D | null = null
-  private bgCache = new Map<string, HTMLCanvasElement>()
-  private contentCache: { page: Page; canvas: HTMLCanvasElement; scale: number } | null = null
+  private bgCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
+  private pdfCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
+  private pageCache: { page: Page; canvas: HTMLCanvasElement; scale: number; signature: string } | null = null
+  /** Last render path, only to log transitions (see `trace`). */
+  private lastPath = ''
 
   constructor(props: CanvasProps) {
     this.canvas = props.canvas
@@ -186,6 +212,10 @@ export class PageCanvas {
 
   beginStroke(tool: ToolKind, color: string, size: number, px: number, py: number, pressure = 1) {
     const p = this.toPageCoords(px, py)
+    // A new stroke starting while the previous one is still active means its
+    // pointerup was swallowed: log it, that is the "second stroke disappears" bug.
+    if (this.drawing) trace('engine.begin(stale)', `pts=${this.currentStroke?.points.length ?? 0}`)
+    trace('engine.begin', tool, `page=${this.page?.id.slice(0, 6)}`, `pts=1`)
     this.drawing = true
     this.currentStroke = {
       id: newId(),
@@ -216,8 +246,12 @@ export class PageCanvas {
   }
 
   endStroke(): Stroke | null {
-    if (!this.drawing || !this.currentStroke) return null
+    if (!this.drawing || !this.currentStroke) {
+      trace('engine.end(null)', `drawing=${this.drawing}`)
+      return null
+    }
     const stroke = this.currentStroke
+    trace('engine.end', `pts=${stroke.points.length}`)
     this.drawing = false
     this.currentStroke = null
     this.lastPoint = null
@@ -240,9 +274,17 @@ export class PageCanvas {
   render() {
     // One layout read per frame (never per pointer event).
     this.updateRect(true)
-    // A full render outside a stroke reflects committed content: the ink cache
-    // (layers without the in-progress stroke) is stale from now on.
-    if (!this.drawing) this.contentCache = null
+    // While idle, drop the cached page bitmap as soon as the page content no
+    // longer matches what was cached (undo, eraser, layer/edit operations): the
+    // next render then draws live data instead of serving stale pixels.
+    if (!this.drawing && this.pageCache && this.pageCache.signature !== this.pageSignature(this.page)) {
+      trace('cache.drop', 'signature')
+      this.pageCache = null
+    }
+    if (this.eraserActive && this.pageCache) {
+      trace('cache.drop', 'eraser')
+      this.pageCache = null
+    }
     this.resize()
     const { ctx } = this
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -267,11 +309,13 @@ export class PageCanvas {
     ctx.rect(0, 0, page.width, page.height)
     ctx.clip()
 
-    this.renderBackground(ctx, page)
-    if (page.pdf) {
-      this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
+    if (!this.tryCachedPage(ctx, page, true)) {
+      this.renderBackground(ctx, page)
+      if (page.pdf) {
+        this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
+      }
+      this.renderPageContent(ctx, page, true)
     }
-    this.renderPageContent(ctx, page, true)
 
     ctx.restore()
 
@@ -288,17 +332,6 @@ export class PageCanvas {
     page: Page,
     drawCurrentStroke: boolean,
   ) {
-    // While ink is being drawn the page content does not change — only the
-    // in-progress stroke does. Blit a cached bitmap of the layers and draw just
-    // that stroke, instead of re-tracing the whole page history every frame.
-    if (drawCurrentStroke && this.currentStroke) {
-      const cache = this.getContentCache(page)
-      if (cache) {
-        ctx.drawImage(cache, 0, 0, page.width, page.height)
-        this.renderStroke(ctx, this.currentStroke)
-        return
-      }
-    }
     for (const layer of page.layers) {
       if (!layer.visible) continue
       ctx.save()
@@ -329,26 +362,27 @@ export class PageCanvas {
   }
 
   /**
-   * Ink cache used while drawing: the page layers rendered without the
-   * in-progress stroke. Built lazily on the first frame of a stroke and dropped
-   * by the next full render after the stroke is committed. Resolution follows
-   * the current zoom/DPR (capped by a total-pixel budget so a big page at high
-   * DPR cannot balloon memory); a slight softness while drawing is traded for a
-   * crisp re-render on commit.
+   * Cached page bitmap (background + PDF + layers, everything except the stroke
+   * being drawn). Serving a blit instead of re-tracing the page is what makes a
+   * stroke follow the pen on dense pages and PDF backgrounds.
+   *
+   * It is used only while a stroke is active. Idle renders use the page model
+   * directly so a lower-resolution intermediate bitmap is never shown after
+   * the pen is released.
+   *
+   * Resolution matches the display exactly (zoom × DPR, see `renderScale`), so
+   * the blit is 1:1 and nothing looks softer than a full render.
    */
-  private getContentCache(page: Page): HTMLCanvasElement | null {
-    let scale = Math.min(2, Math.max(0.5, this.zoom * this.devicePixelRatio))
-    const MAX_PIXELS = 4_000_000
-    const pagePixels = page.width * page.height
-    if (pagePixels > 0 && pagePixels * scale * scale > MAX_PIXELS) {
-      scale = Math.max(0.5, Math.sqrt(MAX_PIXELS / pagePixels))
-    }
+  private getPageCache(page: Page): HTMLCanvasElement | null {
+    const exact = this.matchingPageCache(page)
+    if (exact) return exact
+
+    const signature = this.pageSignature(page)
+    const scale = this.renderScale(page)
     const w = Math.max(1, Math.round(page.width * scale))
     const h = Math.max(1, Math.round(page.height * scale))
-    const cached = this.contentCache
-    if (cached && cached.page === page && cached.canvas.width === w && cached.canvas.height === h) {
-      return cached.canvas
-    }
+    const cached = this.pageCache
+    if (!this.pageAssetsReady(page)) return null
 
     const canvas = cached?.canvas ?? document.createElement('canvas')
     if (canvas.width !== w || canvas.height !== h) {
@@ -357,12 +391,159 @@ export class PageCanvas {
     }
     const cctx = canvas.getContext('2d')
     if (!cctx) return null
+    const t0 = performance.now()
     cctx.setTransform(1, 0, 0, 1, 0, 0)
     cctx.clearRect(0, 0, w, h)
     cctx.scale(scale, scale)
+    this.renderBackground(cctx, page)
+    if (page.pdf) this.renderPdf(cctx, page.pdf.dataUrl, page.pdf.name, page)
     this.renderPageContent(cctx, page, false)
-    this.contentCache = { page, canvas, scale }
+    this.pageCache = { page, canvas, scale, signature }
+    trace('cache.build', `page=${page.id.slice(0, 6)}`, `scale=${scale.toFixed(2)}`, `${(performance.now() - t0).toFixed(1)}ms`)
     return canvas
+  }
+
+  /** The cached bitmap, only if it still matches the page and the current scale. */
+  private matchingPageCache(page: Page): HTMLCanvasElement | null {
+    const cached = this.pageCache
+    if (!cached || cached.page !== page) return null
+    if (cached.signature !== this.pageSignature(page)) return null
+    const scale = this.renderScale(page)
+    if (
+      cached.canvas.width !== Math.max(1, Math.round(page.width * scale)) ||
+      cached.canvas.height !== Math.max(1, Math.round(page.height * scale))
+    ) {
+      return null
+    }
+    return cached.canvas
+  }
+
+  /**
+   * The cache has to be at least as fine as the screen. A huge page that hits
+   * the pixel budget would have to be upscaled (that is what made PDF text look
+   * washed out while drawing), so those pages fall back to a sharp full render
+   * instead of being served blurry.
+   */
+  private cacheSharpEnough(page: Page): boolean {
+    const required = Math.max(0.25, this.zoom * this.devicePixelRatio)
+    return this.renderScale(page) >= required * 0.95
+  }
+
+  /**
+   * Blits the cached page and, during a stroke, only the live stroke.
+   * Idle renders (undo/selection/persist-triggered repaints) always use the page
+   * model directly. Building and blitting the cache is reserved for the active
+   * stroke preview, where it is needed to keep pointer feedback responsive.
+   */
+  private tryCachedPage(
+    ctx: CanvasRenderingContext2D,
+    page: Page,
+    drawCurrentStroke: boolean,
+  ): boolean {
+    const drawingNow = drawCurrentStroke && !!this.currentStroke
+    if (!shouldUsePageCache(this.drawing, drawingNow)) {
+      this.notePath('full(idle)')
+      return false
+    }
+    if (!this.cacheSharpEnough(page)) {
+      this.notePath('full(too-big)')
+      return false
+    }
+    const cache = this.getPageCache(page)
+    if (!cache) {
+      this.notePath('full(stroke)')
+      return false
+    }
+    this.notePath('cached(stroke)')
+    ctx.drawImage(cache, 0, 0, page.width, page.height)
+    if (this.currentStroke) this.renderStroke(ctx, this.currentStroke)
+    return true
+  }
+
+  /** Log only when the render path changes, so the trace stays readable. */
+  private notePath(path: string) {
+    if (this.lastPath === path) return
+    this.lastPath = path
+    trace('render', path)
+  }
+
+  /**
+   * Folds a just-committed stroke into the cached bitmap, so the render right
+   * after releasing the pen is a blit (no full-page repaint). Only valid when
+   * the live preview was already painted on top of everything: topmost visible
+   * layer at full opacity. Otherwise the cache is dropped and the next render
+   * repaints the page correctly.
+   */
+  commitStrokeToPageCache(page: Page, stroke: Stroke) {
+    const cached = this.pageCache
+    if (!cached || cached.page !== page) {
+      trace('cache.fold(skip)', 'no-cache')
+      return
+    }
+    const visible = page.layers.filter((layer) => layer.visible)
+    const top = visible[visible.length - 1]
+    const owner = page.layers.find((layer) => layer.strokes.includes(stroke))
+    if (!top || owner !== top || top.opacity !== 1) {
+      trace('cache.fold(drop)', 'not-top-layer')
+      this.pageCache = null
+      return
+    }
+    const cctx = cached.canvas.getContext('2d')
+    if (!cctx) {
+      this.pageCache = null
+      return
+    }
+    cctx.save()
+    // The build left the cache context scaled; `scale()` again would compound
+    // it (a 2× cache drew the stroke at 4×). Set the transform explicitly.
+    cctx.setTransform(cached.scale, 0, 0, cached.scale, 0, 0)
+    this.renderStroke(cctx, stroke)
+    cctx.restore()
+    cached.signature = this.pageSignature(page)
+    trace('cache.fold', `pts=${stroke.points.length}`)
+  }
+
+  invalidatePageCache() {
+    this.pageCache = null
+  }
+
+  /**
+   * Scale shared by every page-sized bitmap (background, PDF raster and the page
+   * composite). Using the display scale (zoom × DPR) for all of them is what
+   * keeps text sharp: a bitmap below it has to be upscaled and looks blurry
+   * while drawing. A total-pixel budget bounds memory on very large pages; when
+   * it bites, the page cache is simply not used (`tryCachedPage`) instead of
+   * being served blurry.
+   */
+  private renderScale(page: Page): number {
+    return pageRenderScale(page.width, page.height, this.zoom, this.devicePixelRatio)
+  }
+
+  /**
+   * Everything that changes the pixels of a page. Cheap (O(layers)) and used to
+   * decide whether the cached bitmap can still be served.
+   */
+  private pageSignature(page: Page): string {
+    let sig = `${page.width}x${page.height}|${page.template}|${page.backgroundColor ?? ''}|${page.rotation}|${page.pdf?.dataUrl.length ?? 0}|${page.updatedAt}`
+    for (const layer of page.layers) {
+      sig += `|${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}:${layer.strokes.length}:${layer.images.length}:${layer.texts.length}:${layer.strokeErasures?.length ?? 0}`
+    }
+    return sig
+  }
+
+  /** Never bake a not-yet-loaded PDF/image into the cache. */
+  private pageAssetsReady(page: Page): boolean {
+    if (page.pdf && !this.isImageReady(page.pdf.dataUrl)) return false
+    for (const layer of page.layers) {
+      if (!layer.visible) continue
+      for (const img of layer.images) if (!this.isImageReady(img.dataUrl)) return false
+    }
+    return true
+  }
+
+  private isImageReady(dataUrl: string): boolean {
+    const img = this.imageCache.get(dataUrl) ?? PageCanvas.globalImageCache.get(dataUrl)
+    return !!img && img.complete && img.naturalWidth > 0
   }
 
   private renderMaskedStrokes(
@@ -522,11 +703,13 @@ export class PageCanvas {
       ctx.rect(0, 0, page.width, page.height)
       ctx.clip()
 
-      this.renderBackground(ctx, page)
-      if (page.pdf) {
-        this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
+      if (!this.tryCachedPage(ctx, page, i === this.currentPageIndex)) {
+        this.renderBackground(ctx, page)
+        if (page.pdf) {
+          this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
+        }
+        this.renderPageContent(ctx, page, i === this.currentPageIndex)
       }
-      this.renderPageContent(ctx, page, i === this.currentPageIndex)
       ctx.restore()
 
       ctx.strokeStyle = 'rgba(80,80,120,0.5)'
@@ -570,11 +753,12 @@ export class PageCanvas {
    * mixed templates in continuous mode from thrashing the cache.
    */
   private getBackgroundCanvas(page: Page): HTMLCanvasElement {
-    const resolution = Math.min(2, Math.max(1, Math.round(this.devicePixelRatio * this.zoom * 2) / 2))
-    const key = `${page.width}x${page.height}|${page.template}|${page.backgroundColor ?? ''}|${resolution}`
+    const needed = this.renderScale(page)
+    const key = `${page.width}x${page.height}|${page.template}|${page.backgroundColor ?? ''}`
     const cached = this.bgCache.get(key)
-    if (cached) return cached
+    if (cached && cached.scale >= needed * 0.98) return cached.canvas
 
+    const resolution = needed
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(page.width * resolution))
     canvas.height = Math.max(1, Math.round(page.height * resolution))
@@ -583,7 +767,7 @@ export class PageCanvas {
       bctx.scale(resolution, resolution)
       drawTemplate(bctx, page, 1)
     }
-    this.bgCache.set(key, canvas)
+    this.bgCache.set(key, { canvas, scale: resolution })
     if (this.bgCache.size > 4) {
       const oldest = this.bgCache.keys().next().value
       if (oldest !== undefined) this.bgCache.delete(oldest)
@@ -664,35 +848,64 @@ export class PageCanvas {
   }
 
   renderPdf(ctx: CanvasRenderingContext2D, dataUrl: string, _name: string, pageArg?: Page) {
-    const img = this.getImage(dataUrl)
-    if (!img) return
     const pg = pageArg ?? this.page
-    const scale = Math.min(pg.width / img.width, pg.height / img.height)
-    const w = img.width * scale
-    const h = img.height * scale
+    const canvas = this.getPdfCanvas(pg, dataUrl)
+    if (!canvas) return
     ctx.save()
-
-    // Performance optimization: use low quality smoothing during active drawing/panning
-    // to keep frame rate high on Windows/Low-end devices with many PDF pages.
-    const isInteracting = this.drawing || this.eraserActive
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = isInteracting ? 'low' : 'high'
-
-    // Arredondamos para evitar borrões causados por sub-pixel rendering
-    ctx.drawImage(
-      img,
-      Math.floor((pg.width - w) / 2),
-      Math.floor((pg.height - h) / 2),
-      Math.floor(w),
-      Math.floor(h),
-    )
+    // Pre-rasterized at the device scale: a 1:1 blit, no per-frame resampling.
+    // This is what keeps PDF text sharp while drawing (the old code lowered
+    // `imageSmoothingQuality` during interaction and blurred the letters).
+    ctx.drawImage(canvas, 0, 0, pg.width, pg.height)
     ctx.restore()
   }
 
+  /**
+   * PDF pages are large images drawn every frame. Resampling them per frame was
+   * both slow and blurry (quality was lowered while drawing). Rasterize once per
+   * page/scale into a page-sized bitmap and blit it 1:1 from then on.
+   */
+  private getPdfCanvas(page: Page, dataUrl: string): HTMLCanvasElement | null {
+    const img = this.getImage(dataUrl)
+    if (!img) return null
+    const needed = this.renderScale(page)
+    const key = `${dataUrl.length}|${page.width}x${page.height}|${img.naturalWidth}x${img.naturalHeight}`
+    const cached = this.pdfCache.get(key)
+    // A larger raster can be downscaled for free (still sharp); only upscaling
+    // blurs, so rebuild when the display got finer than the cached bitmap.
+    if (cached && cached.scale >= needed * 0.98) return cached.canvas
+
+    const resolution = needed
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(page.width * resolution))
+    canvas.height = Math.max(1, Math.round(page.height * resolution))
+    const pctx = canvas.getContext('2d')
+    if (!pctx) return null
+    pctx.scale(resolution, resolution)
+    const scale = Math.min(page.width / img.width, page.height / img.height)
+    const w = img.width * scale
+    const h = img.height * scale
+    pctx.imageSmoothingEnabled = true
+    pctx.imageSmoothingQuality = 'high'
+    // Rounded to avoid blur caused by sub-pixel placement.
+    pctx.drawImage(
+      img,
+      Math.floor((page.width - w) / 2),
+      Math.floor((page.height - h) / 2),
+      Math.floor(w),
+      Math.floor(h),
+    )
+    this.pdfCache.set(key, { canvas, scale: resolution })
+    if (this.pdfCache.size > 3) {
+      const oldest = this.pdfCache.keys().next().value
+      if (oldest !== undefined) this.pdfCache.delete(oldest)
+    }
+    return canvas
+  }
+
   renderImage(ctx: CanvasRenderingContext2D, imgEl: ImageElement) {
-    // Low-quality smoothing while drawing/erasing keeps frames cheap; the
-    // stroke commit triggers one high-quality render right after.
-    const quality = this.drawing || this.eraserActive ? 'low' : 'high'
+    // Always high quality: during a stroke images come from the cached page
+    // bitmap, so anything drawn here may be baked into it.
+    const quality = 'high' as const
     const ov = this.imageOverrides.get(imgEl.id)
     if (ov && ov.dataUrl === imgEl.dataUrl) {
       ctx.save()

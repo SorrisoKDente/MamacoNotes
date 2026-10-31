@@ -37,6 +37,7 @@ import {
   NOTEBOOKS_DIR,
 } from './types'
 import { db } from './db'
+import { trace } from './utils/debug'
 import { isMobileNow } from './hooks/useIsMobile'
 import { makeTransport } from './utils/webdav'
 import {
@@ -647,7 +648,9 @@ export const useAppStore = create<AppState>((set, get) => {
     }
     const notebooks = get().notebooks.map((n) => (n.id === notebook.id ? summary : n))
     set({ notebooks, activeNotebook: { ...notebook }, dataVersion: get().dataVersion + 1 })
+    const t0 = performance.now()
     await db.putNotebook(notebook)
+    trace('db.persist', `${notebook.pages.length}p`, `${(performance.now() - t0).toFixed(1)}ms`)
   }
 
   async function saveSettings(next: AppSettings) {

@@ -568,16 +568,38 @@ Key points:
   ~29 `stroke()` calls instead of one per sample. Thumbnails and PDF/PNG exports therefore
   match the appearance of the live notes.
 - **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unnecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs, **throttled to one write per frame** and only writing properties that changed (layout-thrash free); there is a single `onPointerMove` handler (no duplicate `onMouseMove`). High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
-  - **Ink cache while drawing** (`contentCache`/`getContentCache` in `canvas.ts`): the page
-    layers without the in-progress stroke are rendered once into an offscreen bitmap and
-    blitted on every frame of the stroke, so each frame draws only the live stroke. The
-    cache is invalidated by any full render outside a stroke (commit, undo, page change,
-    sync) and rebuilt on the first frame of the next stroke. Resolution follows
-    `zoom × DPR` (capped at scale 2 and a 4-megapixel budget) — a slight softness while
-    drawing is traded for a crisp re-render on commit. Eraser gestures bypass the cache
-    (their masks change the page every frame).
+  - **Page cache** (`pageCache`/`getPageCache` in `canvas.ts`): the whole page — background
+    template, PDF and layers, everything except the stroke being drawn — is rendered once
+    into an offscreen bitmap. While a stroke is in progress each frame is a single blit plus
+    the live stroke, so the pen follows the cursor even on dense pages with a PDF.
+    the page bitmap cache is restricted to active-stroke previews; idle renders use
+    the page model directly to avoid displaying a transient blurred intermediate bitmap.
+    The bitmap is retained for the next active stroke when possible. **Resolution is
+    exactly the display scale** (`renderScale` = `zoom × DPR`, shared with the PDF and
+    background bitmaps), so the blit is 1:1 and nothing is upscaled — an upscaled cache was
+    what made PDF text look washed out for a moment on every stroke. A 20-megapixel budget
+    bounds memory; when a page exceeds it, `cacheSharpEnough` refuses the cache and the page
+    is drawn live (sharp) instead of blurry. The engine itself is **not** recreated when the
+    notebook is persisted, so the caches survive from stroke to stroke.
+  - **Cache validity** (`pageSignature`): a cheap fingerprint (`page.updatedAt`, template,
+    rotation, PDF size and per-layer id/visibility/opacity/element counts) decides whether
+    the bitmap can still be served. Undo, layer changes, edits or a page switch drop it;
+    `eraserActive` and `invalidatePageCache()` cover the live eraser gesture, which mutates
+    masks every frame. Idle renders (persist-triggered repaints, selection) use the page
+    model directly and never rebuild or serve the preview cache.
+  - **PDF raster cache** (`pdfCache`/`getPdfCanvas`): PDF pages are big images that used to
+    be resampled every frame with `imageSmoothingQuality` lowered while drawing — that
+    resampling was both expensive and the cause of the "blurry letters" while writing.
+    They are rasterized once at the page scale (`renderScale`, LRU of 3) and blitted 1:1,
+    always at high quality; a bigger raster is reused (downscaling is lossless), a smaller
+    one is rebuilt.
   - **Background/template cache** (`bgCache`): the template is also kept as an offscreen
-    bitmap (small LRU, max 4 entries).
+    bitmap at `renderScale` (small LRU, max 4 entries).
+  - **Drawing trace** (`utils/debug.ts`): a 400-entry ring buffer records stroke begin/end,
+    commit, cache build/drop/fold, render-path transitions and persist duration. It is
+    always recording but silent; `__mamacoLog()` in DevTools dumps it, and
+    `localStorage.mamaco.debug = '1'` mirrors every line to the console — used to catch
+    input bugs that are not reproducible on demand (e.g. "the second stroke disappears").
 
 ---
 
@@ -723,7 +745,7 @@ Flow and files involved:
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicking anywhere inside a selection bounding box allows dragging. |
 | Scrollbars (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). High-contrast design, interactive, and auto-hides after 1.5s. |
 | Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Restricted by `getPanLimits` and `clampPan`. |
-| Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getContentCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, shared with thumbnails/export) |
+| Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getPageCache`, `commitStrokeToPageCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, shared with thumbnails/export) |
 | Stroke eraser | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`); partial-erase masks follow transformed strokes via `src/types.ts` (`transformStrokeErasures`) |
 | Image eraser | `src/utils/imageErase.ts` + `Editor.tsx` |
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx` |
@@ -748,6 +770,7 @@ Flow and files involved:
 | IndexedDB (read/write) | `src/db.ts` |
 | Manual backup (export/import JSON, includes settings) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). On mobile, export opens the **system "Save As" picker** (`saveBackupFile`) so the user can choose the destination, always with a **date-stamped filename** so an existing backup is never overwritten; import uses the system document picker (`pickBackupFile`, chunked read). On desktop uses the Electron save/open dialog and on web triggers a download/file input. |
 | Logging System | `src/utils/logger.ts`. Stores system events and errors (like WebDAV failures) in memory. Logs are accessible via the **Logs tab** in Settings, allowing users to view, copy, and clear logs for debugging. |
+| Drawing trace (deep debugging, DevTools only) | `src/utils/debug.ts` — always-on ring buffer (400 entries), silent by default. `__mamacoLog()` dumps it; `localStorage.mamaco.debug = '1'` also mirrors each line (`stroke.begin/end`, `cache.build/fold/drop`, render path, `db.persist` duration). Used for input bugs that only happen occasionally (e.g. "the second stroke disappears"). |
 | Restore all (import backup) | `src/store.ts` (`replaceAllData`). Entry point in Settings (`Modals.tsx`): **Import backup** (single full JSON via `importBackup` — desktop open dialog, mobile system document picker `pickBackupFile`, web file input) |
 | Store contracts (state + actions, see §5.5) | `src/store.ts` (`AppState`), `src/uiStore.ts` (`UiState`), `src/textStore.ts` (`TextUiState`) |
 | Local trash (delete → trash, restore, "restore from cloud", permanent delete, 30-day purge) | `src/store.ts` (`deleteNotebook`/`deleteFolder`/`deleteSelected` create `TrashItem` entries; `restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), `src/db.ts` (`getTrash`/`putTrashItem`/`deleteTrashItem`), `src/types.ts` (`TrashItem`), `src/components/Modals.tsx` (`TrashModal`), `src/components/Sidebar.tsx` (trash button), `src/uiStore.ts` (`'trash'` modal) |

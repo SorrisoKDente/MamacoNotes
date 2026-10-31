@@ -578,16 +578,39 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
   `stroke()` em vez de uma por amostra. Miniaturas e exportações PDF/PNG continuam
   correspondendo à aparência das anotações reais.
 - **Performance de Renderização**: O `Editor.tsx` utiliza um **loop de requestAnimationFrame (RAF)** otimizado com uma flag `isDirtyRef` para evitar desenhos desnecessários quando o canvas está ocioso, garantindo alta performance em dispositivos móveis. Atualizações de alta frequência (como a posição do cursor da ferramenta) são feitas via **manipulação direta do DOM** usando refs, **limitadas a uma escrita por frame** e só escrevendo propriedades que mudaram (sem layout thrash); existe um único handler `onPointerMove` (sem `onMouseMove` duplicado). Dispositivos de entrada de alta precisão (como mesas digitalizadoras) são suportados via **eventos coalescidos** (`getCoalescedEvents`) para traços o mais fluidos possível.
-  - **Cache de tinta durante o desenho** (`contentCache`/`getContentCache` em `canvas.ts`):
-    as camadas da página sem o traço em andamento são renderizadas uma vez em um bitmap
-    offscreen e blitadas a cada frame do traço, então cada frame desenha só o traço vivo.
-    O cache é invalidado por qualquer render completo fora de um traço (commit, desfazer,
-    troca de página, sync) e é reconstruído no primeiro frame do próximo traço. A resolução
-    segue `zoom × DPR` (limitada à escala 2 e a um orçamento de 4 megapixels) — uma leve
-    suavidade durante o desenho é trocada por um re-render nítido no commit. Gestos de
-    borracha não usam o cache (as máscaras mudam a página a cada frame).
+  - **Cache da página** (`pageCache`/`getPageCache` em `canvas.ts`): a página inteira —
+    template de fundo, PDF e camadas, tudo exceto o traço em andamento — é renderizada uma
+    vez em um bitmap offscreen. Durante o traço, cada frame é um único blit mais o traço
+    vivo, então a caneta acompanha o cursor mesmo em páginas densas com PDF no fundo. O
+    bitmap pode ser reutilizado no próximo traço quando possível. **A resolução é exatamente a escala da tela**
+    (`renderScale` = `zoom × DPR`, compartilhada com os bitmaps de PDF e de fundo), então o
+    blit é 1:1 e nada é ampliado. O cache é usado apenas durante a prévia de um traço;
+    renderizações ociosas usam o modelo da página diretamente para não exibir um bitmap
+    intermediário após soltar a caneta. Um orçamento de 20 megapixels limita a memória;
+    quando a página o excede, `cacheSharpEnough` recusa o cache e a página é desenhada ao
+    vivo (nítida) em vez de borrada. O engine **não** é recriado quando o caderno é
+    persistido, então os caches sobrevivem de um traço para o outro.
+  - **Validade do cache** (`pageSignature`): uma impressão digital barata (`page.updatedAt`,
+    template, rotação, tamanho do PDF e, por camada, id/visibilidade/opacidade/contagem de
+    elementos) decide se o bitmap ainda pode ser usado. Desfazer, mudanças de camada, edições
+    ou troca de página o descartam; `eraserActive` e `invalidatePageCache()` cobrem o gesto
+    de borracha, que muta máscaras a cada frame. Renders ociosos (repaint disparado pelo
+    persist, seleção) usam diretamente o modelo da página e nunca reconstroem nem exibem o
+    cache de prévia.
+  - **Cache de rasterização do PDF** (`pdfCache`/`getPdfCanvas`): páginas de PDF são imagens
+    grandes que antes eram reamostradas a cada frame com `imageSmoothingQuality` rebaixada
+    durante o desenho — essa reamostragem era cara e causava as "letras borradas" ao
+    escrever. Agora são rasterizadas uma vez na escala da página (`renderScale`, LRU de 3) e
+    blitadas 1:1, sempre em alta qualidade; um raster maior é reaproveitado (reduzir é sem
+    perda), um menor é reconstruído.
   - **Cache de fundo/template** (`bgCache`): o template também é mantido como bitmap
-    offscreen (LRU pequena, no máximo 4 entradas).
+    offscreen em `renderScale` (LRU pequena, no máximo 4 entradas).
+  - **Trace de desenho** (`utils/debug.ts`): um ring buffer de 400 entradas registra
+    início/fim de traço, commit, build/drop/fold do cache, transições de caminho de render e
+    a duração do persist. Fica sempre gravando, mas silencioso; `__mamacoLog()` no DevTools
+    despeja o buffer e `localStorage.mamaco.debug = '1'` espelha cada linha no console — usado
+    para pegar bugs de input que não se reproduzem sob demanda (ex.: "o segundo traço
+    desaparece").
 
 ---
 
@@ -722,7 +745,7 @@ Fluxo e arquivos envolvidos:
 | Modos de seleção (clique/laço/círculo/quadrado) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicar em qualquer lugar dentro da caixa de seleção permite o arraste. |
 | Barras de Rolagem (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). Design de alto contraste, interativo e com auto-hide de 1.5s. |
 | Mover a tela | `src/components/Editor.tsx` (ferramenta `pan`). Suporta arrastar com mouse/touch ou **manter o atalho configurado pressionado** (padrão: `Alt`) para mover temporariamente. Restrito por `getPanLimits` e `clampPan`. |
-| Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getContentCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, compartilhada com miniaturas/export) |
+| Traços: desenho e pressão | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getPageCache`, `commitStrokeToPageCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, compartilhada com miniaturas/export) |
 | Borracha de traços | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`); as máscaras de apagamento parcial acompanham traços transformados via `src/types.ts` (`transformStrokeErasures`) |
 | Borracha de imagens | `src/utils/imageErase.ts` + `Editor.tsx` |
 | Modos de seleção (clique/laço/círculo/retângulo) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx` |
@@ -747,6 +770,7 @@ Fluxo e arquivos envolvidos:
 | IndexedDB (leitura/escrita) | `src/db.ts` |
 | Backup manual (exportar/importar JSON, inclui configurações) | `src/utils/backup.ts` + `src/utils/chunkedIo.ts` + `Modals.tsx` (Settings). No celular, a exportação abre o **seletor "Salvar como" do sistema** (`saveBackupFile`) para que o usuário escolha o destino, sempre com **nome com carimbo de data** para nunca sobrescrever um backup existente; a importação usa o seletor de documentos do sistema (`pickBackupFile`, leitura em chunks). No desktop usa os diálogos salvar/abrir do Electron e na web dispara download/input de arquivo. |
 | Sistema de Logs | `src/utils/logger.ts`. Armazena eventos e erros do sistema (como falhas de WebDAV) em memória. Os logs são acessíveis via **aba Logs** nas Configurações, permitindo visualizar, copiar e limpar os registros. |
+| Trace de desenho (debug profundo, só DevTools) | `src/utils/debug.ts` — ring buffer sempre ativo (400 entradas), silencioso por padrão. `__mamacoLog()` despeja o buffer; `localStorage.mamaco.debug = '1'` também espelha cada linha (`stroke.begin/end`, `cache.build/fold/drop`, caminho de render, duração do `db.persist`). Usado para bugs de input que só acontecem de vez em quando (ex.: "o segundo traço desaparece"). |
 | Clipboard e Seleção | `src/store.ts` (`copySelected`, `pasteClipboard`). Implementa clipboard customizado para seleção com **fallback para sistemas sem suporte à API nativa de Clipboard**. |
 | Restaurar tudo (importar backup) | `src/store.ts` (`replaceAllData`) |
 | Lixeira local (excluir → lixeira, restaurar, "restaurar da nuvem", excluir definitivamente, purga de 30 dias) | `src/store.ts` (`deleteNotebook`/`deleteFolder`/`deleteSelected` criam entradas `TrashItem`; `restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), `src/db.ts` (`getTrash`/`putTrashItem`/`deleteTrashItem`), `src/types.ts` (`TrashItem`), `src/components/Modals.tsx` (`TrashModal`), `src/components/Sidebar.tsx` (botão da lixeira), `src/uiStore.ts` (modal `'trash'`) |

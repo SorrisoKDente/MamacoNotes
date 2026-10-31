@@ -12,6 +12,7 @@ import { normalizeKey } from '../utils/shortcuts'
 import { useI18n } from '../i18n'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { clamp } from '../utils/math'
+import { trace } from '../utils/debug'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -461,7 +462,9 @@ export function Editor() {
       requestRenderIdRef.current = requestAnimationFrame(loop)
     }
     requestRenderIdRef.current = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(requestRenderIdRef.current)
+    return () => {
+      cancelAnimationFrame(requestRenderIdRef.current)
+    }
   }, [performRender])
 
   // Cached canvas rect must be dropped whenever the element moves/resizes
@@ -499,7 +502,6 @@ export function Editor() {
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
-  const notebookObjectRef = useRef<Notebook | undefined>(undefined)
 
   useEffect(() => {
     if (tool !== 'select') {
@@ -589,16 +591,8 @@ export function Editor() {
       engineRef.current = null
       return
     }
-    if (notebookObjectRef.current !== undefined && notebookObjectRef.current !== notebook) {
-      // ponytail: only reset engine if NOT currently drawing or dirty (unsaved changes).
-      // resetting during an active gesture or while we have local changes causes
-      // the current stroke to be lost (disappear).
-      if (!dragRef.current && !dirtyRef.current) {
-        engineRef.current = null
-      }
-    }
-    notebookObjectRef.current = notebook
     if (!engineRef.current || engineRef.current.canvas !== canvas) {
+      trace('editor.engine-new')
       engineRef.current = new PageCanvas({
         canvas,
         page: pageRef.current || page, // Use ref if available to keep local changes
@@ -1652,6 +1646,8 @@ export function Editor() {
         pg.updatedAt = Date.now()
         notebookRef.current!.updatedAt = Date.now()
         dirtyRef.current = true
+        trace('editor.abort-commit', `pts=${committed.points.length}`)
+        engine?.commitStrokeToPageCache(pg, committed)
       }
     } else if (drag.kind === 'erase') {
       const session = eraseSessionRef.current
@@ -2274,6 +2270,10 @@ export function Editor() {
       dirtyRef.current = false
       eraseUndoPushedRef.current = false
       eraseMaskRef.current = null
+      // Erasing mutates the page every frame without touching `updatedAt`:
+      // keep the cached page bitmap invalid for the whole gesture.
+      engine.eraserActive = true
+      engine.invalidatePageCache()
       const eraseSettings = useAppStore.getState().settings
       if (
         (eraseSettings.eraserMode === 'strokes' || eraseSettings.eraserMode === 'both') &&
@@ -2325,6 +2325,7 @@ export function Editor() {
       startPan: { ...panRef.current },
     }
     engine.beginStroke(tool, color, size, pos.x, pos.y, pointerPressureRef.current)
+    trace('editor.down', tool, e.pointerType, `id=${e.pointerId}`, `page=${pageRef.current?.id.slice(0, 6)}`)
     requestRender()
   }
 
@@ -2860,6 +2861,7 @@ export function Editor() {
         // ponytail: only discard if it's literally empty (0 points).
         // intentional dots (1 point) or interrupted strokes must be kept.
         const shouldDiscard = multiTouchTap && (!stroke || stroke.points.length === 0)
+        trace('editor.up', `pts=${stroke?.points.length ?? 0}`, `discard=${shouldDiscard}`)
 
         if (!shouldDiscard && stroke && stroke.points.length >= 1 && drawPage) {
           pushUndo()
@@ -2870,7 +2872,13 @@ export function Editor() {
           drawPage.updatedAt = Date.now()
           notebookRef.current!.updatedAt = Date.now()
           dirtyRef.current = true
+          // Fold the finished stroke into the cached page bitmap: the render
+          // after releasing the pen is a blit instead of a full page repaint.
+          engine.commitStrokeToPageCache(drawPage, committed)
         }
+      } else {
+        // Another pointer moved the owner: the stroke is dropped on purpose.
+        trace('editor.up(not-owner)', `id=${e.pointerId}`, `owner=${dragOwnerIdRef.current}`)
       }
     }
     if (drag?.kind === 'region-draw') {
@@ -2922,6 +2930,7 @@ export function Editor() {
         eraseMaskRef.current = null
         erasePendingRef.current.to = null
         erasePendingRef.current.scheduled = false
+        engine.eraserActive = false
       }
     }
     if (drag?.kind === 'pan' || drag?.kind === 'scroll-v' || drag?.kind === 'scroll-h') {
