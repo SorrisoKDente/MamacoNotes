@@ -15,6 +15,8 @@ import type {
   PageTemplate,
   Stroke,
   SyncManifest,
+  SyncConflictItem,
+  SyncProgress,
   SyncResult,
   TemplateId,
   TextElement,
@@ -267,6 +269,7 @@ interface PendingResume {
   cloud: CloudSettings
   state: CloudSyncState
   manifest: SyncManifest
+  conflicts: SyncConflictItem[]
 }
 
 const LAST_SESSION_KEY = 'mamaco-notes.last-session'
@@ -358,6 +361,8 @@ interface AppState {
   layersOpen: boolean
   searchOpen: boolean
   rotationOpen: boolean
+  syncRevision: number
+  syncProgress: SyncProgress | null
 
   init: () => Promise<void>
   selectFolder: (id: string | null) => void
@@ -603,6 +608,7 @@ export const useAppStore = create<AppState>((set, get) => {
         currentPageIndex: 0,
         lastClicked: null,
         dataVersion: get().dataVersion + 1,
+        syncRevision: prev.syncRevision + 1,
       })
     } else {
       set({
@@ -611,6 +617,7 @@ export const useAppStore = create<AppState>((set, get) => {
         activeNotebook,
         currentPageIndex,
         dataVersion: get().dataVersion + 1,
+        syncRevision: prev.syncRevision + 1,
       })
     }
   }
@@ -679,6 +686,8 @@ export const useAppStore = create<AppState>((set, get) => {
     searchOpen: false,
     rotationOpen: false,
     layersOpen: false,
+    syncRevision: 0,
+    syncProgress: null,
     canUndo: false,
     canRedo: false,
     lastUndoRedo: 0,
@@ -1943,6 +1952,15 @@ export const useAppStore = create<AppState>((set, get) => {
         return null
       }
       syncRunning = true
+      set({
+        syncProgress: {
+          phase: 'preparing',
+          currentFile: null,
+          completed: 0,
+          total: 1,
+          percent: 0,
+        },
+      })
       try {
         let out
         try {
@@ -1955,6 +1973,7 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
             getNotebook: (id) => db.getNotebook(id),
+            onProgress: (progress) => set({ syncProgress: progress }),
           })
           // Apply the pulled/new content BEFORE committing the advanced baseline
           // (`db.putCloudSyncState`). If the content application fails (e.g. an
@@ -1973,6 +1992,7 @@ export const useAppStore = create<AppState>((set, get) => {
               cloud,
               state: out.nextState,
               manifest: out.manifest,
+              conflicts: out.pendingConflicts,
             }
             useUiStore.getState().open('syncConflict', {
               conflicts: out.pendingConflicts,
@@ -2010,7 +2030,6 @@ export const useAppStore = create<AppState>((set, get) => {
     async resolveConflicts(choices) {
       const resume = pendingResume
       if (!resume) return
-      pendingResume = null
       try {
         const transport = makeTransport(resume.cloud)
         const out = await applyConflictChoices({
@@ -2022,17 +2041,37 @@ export const useAppStore = create<AppState>((set, get) => {
           state: resume.state,
           manifest: resume.manifest,
           getNotebook: (id) => db.getNotebook(id),
+          onProgress: (progress) => set({ syncProgress: progress }),
         })
-        await db.putCloudSyncState(out.nextState)
         await applySyncChanges({
           pulledNotebooks: out.pulledNotebooks,
           newNotebooks: out.newNotebooks,
           removedLocalNotebookIds: out.removedLocalNotebookIds,
           pulledFolders: out.pulledFolders,
         })
+        // Commit the baseline only after the selected remote/local content has
+        // been applied successfully. Otherwise a failed cloud choice can make
+        // the next run treat the stale local copy as a safe upload.
+        await db.putCloudSyncState(out.nextState)
         await get().setCloud({ enabled: true, lastSyncAt: Date.now() })
-      } finally {
-        useUiStore.getState().close()
+        pendingResume = null
+        set((state) => ({
+          syncProgress: state.syncProgress
+            ? { ...state.syncProgress, phase: 'complete', percent: 100, currentFile: null }
+            : null,
+        }))
+        useUiStore.getState().open('cloudSync')
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        set((state) => ({
+          syncProgress: state.syncProgress
+            ? { ...state.syncProgress, phase: 'error', percent: null, currentFile: null }
+            : null,
+        }))
+        useUiStore.getState().open('syncConflict', {
+          conflicts: resume.conflicts,
+          error: message,
+        })
       }
     },
 

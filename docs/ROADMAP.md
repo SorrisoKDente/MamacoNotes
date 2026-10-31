@@ -33,7 +33,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Auto-follow Page Preview**: The page list now automatically scrolls to keep the current page in view and opens at the correct position when expanded.
 - [x] **Toolbar Submenu Toggle Logic**: Switching tools in the sidebar toolbar should only select the tool without opening its configuration submenu. Clicking an already active tool icon toggles its submenu open/closed.
 - [x] **Solid Pen Cursor**: Change the pen tool cursor from semi-opaque to a solid color for better visibility.
-- [ ] **Granular Tool Cursor Hiding**: Split the "Hide tool cursor" setting into independent options to hide pen cursor, hide eraser cursor, or hide all cursors.
+- [ ] **Granular Tool Cursor Hiding**: Add independent options to hide the pen, highlighter, and eraser cursors, plus a master control to hide/show all three.
 - [ ] **Sync Progress Details**: Show synchronization progress in the cloud tab, including percentage or estimated remaining time when available, and identify the file currently being synchronized.
 - [ ] **Dashboard Sync Button**: Add a cloud synchronization button to the Dashboard, not only to the editor/top bar.
 - [x] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.

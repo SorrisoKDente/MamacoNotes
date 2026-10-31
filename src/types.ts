@@ -240,6 +240,14 @@ export interface CloudSyncState {
   localOnlyDeleted: Record<string, number>
 }
 
+export interface SyncProgress {
+  phase: 'preparing' | 'upload' | 'download' | 'delete' | 'manifest' | 'conflict' | 'complete' | 'error'
+  currentFile: string | null
+  completed: number
+  total: number
+  percent: number | null
+}
+
 export type DeleteScope = 'local' | 'remote'
 
 /**

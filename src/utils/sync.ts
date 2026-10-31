@@ -7,6 +7,7 @@ import type {
   SyncConflictItem,
   SyncManifest,
   SyncManifestNotebook,
+  SyncProgress,
   SyncResult,
 } from '../types'
 import { normalizePage, uid, NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
@@ -22,6 +23,29 @@ export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 function notebookPath(basePath: string, id: string): string {
   return `${basePath}/${NOTEBOOKS_DIR}/${id}.json`
+}
+
+function notebookDisplayPath(
+  remotePath: string,
+  id: string,
+  folders: Folder[],
+  notebooks: NotebookSummary[],
+  fallbackName?: string,
+): string {
+  const summary = notebooks.find((notebook) => notebook.id === id)
+  const name = summary?.name ?? fallbackName ?? id
+  const folderById = new Map(folders.map((folder) => [folder.id, folder]))
+  const folderNames: string[] = []
+  let folderId = summary?.folderId ?? null
+  const visited = new Set<string>()
+  while (folderId && !visited.has(folderId)) {
+    visited.add(folderId)
+    const folder = folderById.get(folderId)
+    if (!folder) break
+    folderNames.unshift(folder.name)
+    folderId = folder.parentId
+  }
+  return `${remotePath} · ${[...folderNames, name].join('/')}`
 }
 
 export function hashFolders(folders: Folder[]): string {
@@ -114,6 +138,7 @@ export interface SyncInput {
   state: CloudSyncState
   transport: Transport
   getNotebook: (id: string) => Promise<Notebook | undefined>
+  onProgress?: (progress: SyncProgress) => void
 }
 
 export interface SyncOutput {
@@ -415,6 +440,24 @@ async function migrateLegacy(
 
 export async function runSync(input: SyncInput): Promise<SyncOutput> {
   const { basePath, folders, notebooks, transport } = input
+  const displayFile = (id: string, name?: string) =>
+    notebookDisplayPath(notebookPath(basePath, id), id, folders, notebooks, name)
+  let total = 1
+  let completed = 0
+  const report = (
+    phase: SyncProgress['phase'],
+    currentFile: string | null,
+  ) => {
+    const percent = Math.min(100, Math.round((completed / total) * 100))
+    input.onProgress?.({
+      phase,
+      currentFile,
+      completed,
+      total,
+      percent,
+    })
+  }
+  report('preparing', null)
   const result: SyncResult = { pushed: [], pulled: [], deleted: [], conflicts: [], errors: [] }
   let state = input.state
 
@@ -439,6 +482,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
 
   let manifest: SyncManifest
   let migrated = false
+  let manifestChanged = false
   try {
     const text = await transport.downloadFile(`${basePath}/${MANIFEST_PATH}`)
     manifest = parseManifest(text)
@@ -479,6 +523,38 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     migrated = true
   }
 
+  // Recover valid notebook files that are present remotely but missing from the
+  // manifest. An interrupted upload can leave the body behind after the
+  // manifest write fails; without this repair such a notebook is invisible to
+  // buildPlan and is never shown in sync progress.
+  try {
+    const remoteFiles = await transport.listDirectory(`${basePath}/${NOTEBOOKS_DIR}`)
+    const knownIds = new Set(manifest.notebooks.map((n) => n.id))
+    for (const fileName of remoteFiles) {
+      if (!fileName.endsWith('.json')) continue
+      const id = fileName.slice(0, -'.json'.length)
+      if (!id || knownIds.has(id)) continue
+      try {
+        const text = await transport.downloadFile(`${basePath}/${NOTEBOOKS_DIR}/${fileName}`)
+        const data = JSON.parse(text)
+        const nb = data?.notebook as Notebook | undefined
+        if (!nb?.id || nb.id !== id || typeof nb.updatedAt !== 'number') continue
+        manifest = upsertManifestNotebook(manifest, {
+          id,
+          name: nb.name,
+          updatedAt: nb.updatedAt,
+          deleted: false,
+        })
+        knownIds.add(id)
+        manifestChanged = true
+      } catch {
+        // Invalid or partially uploaded files are left untouched.
+      }
+    }
+  } catch (e) {
+    logger.warn(`Remote notebook listing failed (${basePath}/${NOTEBOOKS_DIR})`, e)
+  }
+
   // Baseline snapshot BEFORE this run's mutations: the local sync state must only
   // advance once the manifest is actually committed on the server. If the manifest
   // write fails, we restore this snapshot so the next sync re-runs the same plan
@@ -497,7 +573,16 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   }
 
   const plan = buildPlan(notebooks, folders, state, manifest)
-  let manifestChanged = migrated
+  total = Math.max(
+    1,
+    plan.pushIds.length +
+      plan.pullIds.length +
+      plan.deleteRemoteIds.length +
+      plan.deleteLocalIds.length +
+      plan.conflicts.length,
+  )
+  report('preparing', null)
+  manifestChanged = manifestChanged || migrated
 
   if (migrated && folders.length > 0) {
     try {
@@ -524,6 +609,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     const summary = localById.get(id)
     if (!summary) continue
     try {
+      report('upload', displayFile(id, summary.name))
       const nb = await input.getNotebook(id)
       if (!nb) throw new Error(t('error.invalidNotebook'))
       const path = notebookPath(basePath, nb.id)
@@ -544,10 +630,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     } catch (e) {
       result.errors.push(t('error.syncUploadNotebookFailed', { name: summary.name, message: e instanceof Error ? e.message : String(e) }))
     }
+    completed++
+    report('upload', null)
   }
 
   for (const id of plan.pullIds) {
     try {
+      report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       const text = await transport.downloadFile(notebookPath(basePath, id))
       const data = JSON.parse(text)
       const nb = data?.notebook as Notebook | undefined
@@ -601,6 +690,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       logger.error(`Sync notebook download failed: ${id}`, e)
       result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: msg }))
     }
+    completed++
+    report('download', null)
   }
 
   const initiallyDeleted = new Set(
@@ -615,6 +706,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
 
   for (const id of plan.deleteRemoteIds) {
     try {
+      report('delete', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       const entry = manifest.notebooks.find((n) => n.id === id)
       await transport.deleteRemoteFile(notebookPath(basePath, id))
       manifest = upsertManifestNotebook(manifest, {
@@ -630,6 +722,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     } catch (e) {
       result.errors.push(t('error.syncDeleteFailed', { name: id, message: e instanceof Error ? e.message : String(e) }))
     }
+    completed++
+    report('delete', null)
   }
 
   for (const id of plan.deleteLocalIds) {
@@ -717,6 +811,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
 
   let manifestWriteFailed = false
   if (manifestChanged) {
+    report('manifest', MANIFEST_PATH)
     manifest.updatedAt = Date.now()
     try {
       await transport.uploadFile(
@@ -742,6 +837,18 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     manifest = manifestSnapshot
   } else {
     state.lastSyncAt = Date.now()
+  }
+  if (plan.conflicts.length > 0) {
+    report(
+      'conflict',
+      displayFile(
+        plan.conflicts[0].id,
+        manifest.notebooks.find((entry) => entry.id === plan.conflicts[0].id)?.name,
+      ),
+    )
+  } else {
+    completed = total
+    report(result.errors.length > 0 ? 'error' : 'complete', null)
   }
 
   return {
@@ -770,6 +877,7 @@ export interface ConflictResolutionInput {
   state: CloudSyncState
   manifest: SyncManifest
   getNotebook: (id: string) => Promise<Notebook | undefined>
+  onProgress?: (progress: SyncProgress) => void
 }
 
 export interface ConflictResolutionOutput {
@@ -793,6 +901,19 @@ export async function applyConflictChoices(
   const removedLocalNotebookIds: string[] = []
   const localById = new Map(localNotebooks.map((n) => [n.id, n]))
   let pulledFolders: Folder[] | null = null
+  const choiceEntries = Object.entries(choices)
+  const displayFile = (id: string, name?: string) =>
+    notebookDisplayPath(notebookPath(basePath, id), id, folders ?? [], localNotebooks, name)
+  const report = (completed: number, currentFile: string | null) => {
+    const total = Math.max(1, choiceEntries.length)
+    input.onProgress?.({
+      phase: 'download',
+      currentFile,
+      completed,
+      total,
+      percent: Math.round((completed / total) * 100),
+    })
+  }
 
   const loadRemote = async (id: string): Promise<Notebook> => {
     const text = await transport.downloadFile(notebookPath(basePath, id))
@@ -802,7 +923,13 @@ export async function applyConflictChoices(
     return nb
   }
 
-  for (const [id, choice] of Object.entries(choices)) {
+  for (const [index, [id, choice]] of choiceEntries.entries()) {
+    report(
+      index,
+      id === 'folders'
+        ? `${basePath}/${FOLDERS_PATH}`
+        : displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name),
+    )
     if (id === 'folders') {
       if (choice === 'useServer') {
         try {
@@ -814,8 +941,9 @@ export async function applyConflictChoices(
             state.foldersUpdatedAt = manifest.folders.updatedAt
           }
         } catch (e) {
-          // ignore — pastas permanecem locais
-          state.foldersHash = folders ? hashFolders(folders) : state.foldersHash
+          throw new Error(t('error.syncDownloadFoldersFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }))
         }
       } else if (folders) {
         try {
@@ -831,7 +959,9 @@ export async function applyConflictChoices(
           manifest.folders.updatedAt = Date.now()
           manifestChanged = true
         } catch (e) {
-          // ignore
+          throw new Error(t('error.syncUploadFoldersFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }))
         }
       }
       continue
@@ -853,8 +983,11 @@ export async function applyConflictChoices(
           delete state.tombstones[id]
           delete state.notebooks[id]
           manifestChanged = true
-        } catch {
-          // ignore
+        } catch (e) {
+          throw new Error(t('error.syncDeleteFailed', {
+            name: id,
+            message: e instanceof Error ? e.message : String(e),
+          }))
         }
       } else {
         removedLocalNotebookIds.push(id)
@@ -888,8 +1021,11 @@ export async function applyConflictChoices(
           state.notebooks[id] = nb.updatedAt
           delete state.tombstones[id]
           manifestChanged = true
-        } catch {
-          // ignore
+        } catch (e) {
+          throw new Error(t('error.syncDeleteFailed', {
+            name: id,
+            message: e instanceof Error ? e.message : String(e),
+          }))
         }
       }
       continue
@@ -908,8 +1044,11 @@ export async function applyConflictChoices(
           deleted: false,
         })
         manifestChanged = true
-      } catch {
-        // ignore
+      } catch (e) {
+        throw new Error(t('error.syncDownloadNotebookFailed', {
+          id,
+          message: e instanceof Error ? e.message : String(e),
+        }))
       }
       continue
     }
@@ -945,14 +1084,18 @@ export async function applyConflictChoices(
           state.notebooks[id] = nb.updatedAt
           state.notebooks[copy.id] = copy.updatedAt
           manifestChanged = true
-        } catch {
-          // ignore
+        } catch (e) {
+          throw new Error(t('error.syncUploadNotebookFailed', {
+            name: summary.name,
+            message: e instanceof Error ? e.message : String(e),
+          }))
         }
       }
       continue
     }
   }
 
+  report(choiceEntries.length, null)
   if (manifestChanged) {
     manifest.updatedAt = Date.now()
     try {
@@ -961,8 +1104,10 @@ export async function applyConflictChoices(
         new TextEncoder().encode(serializeManifest(manifest)),
         'application/json',
       )
-    } catch {
-      // ignore
+    } catch (e) {
+      throw new Error(t('error.syncSaveManifestFailed', {
+        message: e instanceof Error ? e.message : String(e),
+      }))
     }
   }
 

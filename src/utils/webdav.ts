@@ -137,13 +137,27 @@ async function koofrListDirectory(
   dirPath: string,
 ): Promise<string[]> {
   const { apiBase, mountId } = await koofrInfo(settings)
-  const { status, data } = await koofrFetch<any[]>(
+  const { status, data } = await koofrFetch<unknown>(
     apiBase,
     `/api/v2/mounts/${encodeURIComponent(mountId)}/files/list?path=${encodeURIComponent(dirPath)}`,
     settings,
   )
   if (status !== 200) return []
-  return (data || []).map((item) => item.name).filter(Boolean)
+  const entries = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object'
+      ? (() => {
+          const value = data as { files?: unknown; items?: unknown }
+          return Array.isArray(value.files) ? value.files : value.items
+        })()
+      : undefined
+  if (!Array.isArray(entries)) {
+    throw new Error(t('error.koofrListFoldersFailed', { status }))
+  }
+  return entries
+    .filter((item): item is { name?: unknown } => !!item && typeof item === 'object')
+    .map((item) => item.name)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0)
 }
 
 async function koofrInfo(settings: CloudSettings): Promise<KoofrInfo> {
@@ -204,6 +218,59 @@ async function effectiveBaseUrl(settings: CloudSettings): Promise<string> {
   if (!apiBase) return settings.webdavUrl
   const info = await koofrInfo(settings)
   return `${info.apiBase}/dav/${encodeURIComponent(info.mountName)}`
+}
+
+async function koofrDownloadFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<string> {
+  const { apiBase, mountId } = await koofrInfo(settings)
+  const url =
+    `${apiBase}/content/api/v2/mounts/${encodeURIComponent(mountId)}/files/get` +
+    `?path=${encodeURIComponent(filePath)}`
+  const res = await customFetch(url, {
+    headers: {
+      Authorization: authHeader(settings),
+      Accept: 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    },
+  })
+  if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
+  if (!res.ok) {
+    if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
+    throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+  }
+  markWebdavSuccess()
+  return await res.text()
+}
+
+async function verifyUploadedJson(
+  settings: CloudSettings,
+  filePath: string,
+  url: string,
+  authorization: string,
+): Promise<void> {
+  const verificationText = koofrApiBase(settings)
+    ? await koofrDownloadFile(settings, filePath)
+    : (() => downloadText(url, { Authorization: authorization }))()
+  const verification = typeof verificationText === 'string'
+    ? { ok: true, status: 200, text: verificationText }
+    : await verificationText
+  if (!verification.ok) {
+    throw new Error(
+      t('error.uploadVerificationFailed', { filePath, status: verification.status }),
+    )
+  }
+  try {
+    JSON.parse(verification.text)
+  } catch (error) {
+    throw new Error(
+      t('error.uploadVerificationInvalidJson', {
+        filePath,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    )
+  }
 }
 
 async function directoryExists(settings: CloudSettings, dirPath: string): Promise<boolean> {
@@ -360,6 +427,9 @@ async function uploadFile(
             )
           }
         }
+        if (filePath.endsWith('.json')) {
+          await verifyUploadedJson(settings, filePath, url, headers.Authorization)
+        }
         markWebdavSuccess()
         return
       }
@@ -386,6 +456,9 @@ async function uploadFile(
       }
       throw new Error(t('error.uploadFailed', { filePath, status: res.status }))
     }
+    if (filePath.endsWith('.json')) {
+      await verifyUploadedJson(settings, filePath, url, headers.Authorization)
+    }
     markWebdavSuccess()
   } catch (err) {
     logger.error(`Upload failed: ${filePath}`, err)
@@ -401,6 +474,9 @@ async function downloadFile(
   const url = joinUrl(base, filePath)
   try {
     const headers = { Authorization: authHeader(settings) }
+    if (koofrApiBase(settings)) {
+      return await koofrDownloadFile(settings, filePath)
+    }
     if (Capacitor.isNativePlatform()) {
       // Chunked Range download: the remote content is fetched in pieces
       // (arraybuffer/base64) and reassembled in JS, avoiding the bridge OOM.

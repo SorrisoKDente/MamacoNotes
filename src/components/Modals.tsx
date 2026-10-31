@@ -1614,6 +1614,7 @@ function CloudSyncModal() {
   const close = useUiStore((s) => s.close)
   const settings = useAppStore((s) => s.settings)
   const syncNow = useAppStore((s) => s.syncNow)
+  const syncProgress = useAppStore((s) => s.syncProgress)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1688,6 +1689,32 @@ function CloudSyncModal() {
         </div>
       ) : null}
       {status && <div className="modal-result">{status}</div>}
+      {syncProgress && (
+        <div className="cloud-status" aria-live="polite">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span>{t(`modal.syncPhase.${syncProgress.phase}`)}</span>
+            <span>
+              {syncProgress.percent === null
+                ? '—'
+                : `${syncProgress.percent}%`}
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={syncProgress.percent ?? 0}
+            style={{ height: 6, marginTop: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}
+          >
+            <div style={{ width: `${syncProgress.percent ?? 0}%`, height: '100%', background: 'var(--accent)', transition: 'width 160ms ease' }} />
+          </div>
+          {syncProgress.currentFile && (
+            <div className="modal-hint" style={{ marginTop: 6 }}>
+              {t('modal.syncCurrentFile', { file: syncProgress.currentFile })}
+            </div>
+          )}
+        </div>
+      )}
       {error && <div className="modal-result error">{error}</div>}
       <div className="modal-actions">
         <button className="btn" onClick={test} disabled={busy}>{t('modal.testConnection')}</button>
@@ -1724,8 +1751,10 @@ function SyncConflictModal() {
   const close = useUiStore((s) => s.close)
   const resolveConflicts = useAppStore((s) => s.resolveConflicts)
   const conflictsData = useUiStore((s) => s.modalData.conflicts)
+  const conflictError = useUiStore((s) => s.modalData.error)
 
   const [choices, setChoices] = useState<Record<string, ConflictChoice>>({})
+  const [busy, setBusy] = useState(false)
 
   // Initialize choices when conflictsData changes
   useEffect(() => {
@@ -1756,8 +1785,13 @@ function SyncConflictModal() {
   }
 
   async function confirm() {
-    await resolveConflicts(choices)
-    close()
+    if (busy) return
+    setBusy(true)
+    try {
+      await resolveConflicts(choices)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -1766,6 +1800,9 @@ function SyncConflictModal() {
       <p className="modal-hint">
         {t('modal.syncConflictsHint')}
       </p>
+      {typeof conflictError === 'string' && (
+        <div className="modal-error" role="alert">{conflictError}</div>
+      )}
       {conflicts.map((c) => {
         const opts = getConflictOptions(t)[c.conflictType] ?? []
         return (
@@ -1781,6 +1818,7 @@ function SyncConflictModal() {
             {opts.map((opt) => (
               <label key={opt.value} className="conflict-option">
                 <input
+                  disabled={busy}
                   type="radio"
                   name={`conflict-${c.id}`}
                   value={opt.value}
@@ -1794,8 +1832,10 @@ function SyncConflictModal() {
         )
       })}
       <div className="modal-actions">
-        <button className="btn" onClick={applyToAll}>{t('modal.applyToAll')}</button>
-        <button className="btn primary" onClick={confirm}>{t('modal.confirm')}</button>
+        <button className="btn" onClick={applyToAll} disabled={busy}>{t('modal.applyToAll')}</button>
+        <button className="btn primary" onClick={confirm} disabled={busy} aria-busy={busy}>
+          {busy ? t('modal.syncing') : t('modal.confirm')}
+        </button>
         <button className="btn" onClick={close}>{t('modal.close')}</button>
       </div>
     </>

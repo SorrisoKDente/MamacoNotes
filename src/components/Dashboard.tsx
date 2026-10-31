@@ -646,6 +646,10 @@ export function Dashboard() {
           <IconSettings />
           <span>{t('topbar.settings')}</span>
         </button>
+        <button className="sidebar-btn" onClick={() => open('cloudSync')}>
+          <span className="icon icon-cloud" />
+          <span>{t('topbar.sync')}</span>
+        </button>
       </nav>
 
       <div className="dashboard-main">

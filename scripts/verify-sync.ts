@@ -14,6 +14,7 @@
  */
 import {
   buildPlan,
+  applyConflictChoices,
   hashFolders,
   runSync,
   serializeManifest,
@@ -23,9 +24,24 @@ import {
 import type { CloudSyncState, Folder, Notebook, NotebookSummary, SyncManifest } from '../src/types'
 import type { Transport } from '../src/utils/webdav'
 import { RemoteFileNotFoundError } from '../src/utils/webdav'
+import { validateContentRange } from '../src/utils/http'
 
 let passed = 0
 let failed = 0
+
+{
+  assert(
+    (() => {
+      try {
+        validateContentRange('bytes 0-524287/600000', 0, 59)
+        return false
+      } catch (error) {
+        return error instanceof Error && error.message.includes('expected 524288 bytes, received 59')
+      }
+    })(),
+    'ranged download: truncated 206 response is rejected',
+  )
+}
 
 function assert(cond: boolean, label: string): void {
   if (cond) {
@@ -691,6 +707,31 @@ console.log('== runSync ==')
 }
 
 {
+  // Regression: a notebook body left behind by an interrupted upload must be
+  // recovered even when the manifest write never happened.
+  const remote = makeNotebook('nb-orphan', 'Orphan cloud note', 3000)
+  const t = new FakeTransport()
+  seedManifest(t, 'base', emptyManifest())
+  t.files.set(
+    'base/notebooks/nb-orphan.json',
+    JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: remote }),
+  )
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+  })
+  assert(out.result.errors.length === 0, 'orphan remote notebook: no errors')
+  assert(out.result.pulled.includes(remote.name), 'orphan remote notebook: pulled')
+  assert(out.pulledNotebooks.some((n) => n.id === remote.id), 'orphan remote notebook: returned for local application')
+  const repaired = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  assert(repaired.notebooks.some((n) => n.id === remote.id), 'orphan remote notebook: manifest repaired')
+}
+
+{
   const transport = new FakeTransport()
   transport.failManifestDownloadWithConnectionError = true
   const state = makeState()
@@ -710,6 +751,111 @@ console.log('== runSync ==')
     transport.files.has(`MamacoNotes/${MANIFEST_PATH}`),
     'recovered runSync saved a new manifest',
   )
+}
+
+{
+  // Regression: accepting the server version must return the downloaded
+  // notebook so the store can replace the currently open note immediately.
+  const local = makeNotebook('nb-open', 'Local copy', 2000)
+  const remote = makeNotebook('nb-open', 'Cloud copy', 3000)
+  const transport = new FakeTransport()
+  seedManifest(transport, 'base', {
+    version: 2,
+    updatedAt: 3000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: remote.id, name: remote.name, updatedAt: remote.updatedAt, deleted: false }],
+  })
+  transport.files.set(
+    'base/notebooks/nb-open.json',
+    JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: remote }),
+  )
+  const out = await applyConflictChoices({
+    basePath: 'base',
+    transport,
+    choices: { [remote.id]: 'useServer' },
+    localNotebooks: [makeSummary(local)],
+    folders: [],
+    state: makeState({ notebooks: { [local.id]: 1000 } }),
+    manifest: {
+      version: 2,
+      updatedAt: 3000,
+      folders: { updatedAt: 0 },
+      notebooks: [{ id: remote.id, name: remote.name, updatedAt: remote.updatedAt, deleted: false }],
+    },
+    getNotebook: async () => local,
+  })
+  assert(
+    out.pulledNotebooks.length === 1 &&
+      out.pulledNotebooks[0].name === remote.name &&
+      out.pulledNotebooks[0].updatedAt === remote.updatedAt,
+    'accepted cloud conflict returns the remote notebook for immediate application',
+  )
+}
+
+{
+  // Regression: after choosing the server copy, the synchronized baseline must
+  // match that copy; the next run must not push the stale local summary back.
+  const local = makeNotebook('nb-protected', 'Local stale', 2000)
+  const remote = makeNotebook('nb-protected', 'Cloud correct', 3000)
+  const t = new FakeTransport()
+  seedManifest(t, 'base', {
+    version: 2,
+    updatedAt: 3000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: remote.id, name: remote.name, updatedAt: remote.updatedAt, deleted: false }],
+  })
+  t.files.set(
+    'base/notebooks/nb-protected.json',
+    JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: remote }),
+  )
+  const resolved = await applyConflictChoices({
+    basePath: 'base',
+    transport: t,
+    choices: { [remote.id]: 'useServer' },
+    localNotebooks: [makeSummary(local)],
+    folders: [],
+    state: makeState({ notebooks: { [local.id]: 1000 } }),
+    manifest: {
+      version: 2,
+      updatedAt: 3000,
+      folders: { updatedAt: 0 },
+      notebooks: [{ id: remote.id, name: remote.name, updatedAt: remote.updatedAt, deleted: false }],
+    },
+    getNotebook: async () => local,
+  })
+  const nextPlan = buildPlan(
+    [makeSummary(remote)],
+    [],
+    resolved.nextState,
+    resolved.manifest,
+  )
+  assert(nextPlan.pushIds.length === 0, 'accepted cloud conflict: stale local copy is not pushed back')
+  assert(nextPlan.conflicts.length === 0, 'accepted cloud conflict: next run has no repeated conflict')
+}
+
+{
+  // Regression: malformed remote JSON must never be replaced by the local copy
+  // automatically; the error must remain visible for explicit recovery.
+  const local = makeNotebook('nb-corrupt', 'Local copy', 1000)
+  const t = new FakeTransport()
+  seedManifest(t, 'base', {
+    version: 2,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: local.id, name: 'Cloud copy', updatedAt: 2000, deleted: false }],
+  })
+  const corrupt = '{"version":2,"notebook":{"id":"nb-corrupt","pages":['
+  t.files.set('base/notebooks/nb-corrupt.json', corrupt)
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(local)],
+    state: makeState({ notebooks: { [local.id]: 1000 } }),
+    transport: t,
+    getNotebook: async () => local,
+  })
+  assert(out.result.errors.length === 1, 'malformed remote JSON: error reported')
+  assert(t.files.get('base/notebooks/nb-corrupt.json') === corrupt, 'malformed remote JSON: cloud file not overwritten')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -133,7 +133,8 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
   return withRetry(() => fetch(url, init))
 }
 
-const DOWNLOAD_CHUNK = 512 * 1024
+const DOWNLOAD_CHUNK = 128 * 1024
+const MIN_DOWNLOAD_CHUNK = 16 * 1024
 
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64)
@@ -201,6 +202,35 @@ function decodeCapacitorData(data: unknown, isJson = false): Uint8Array | null {
 
 export { decodeCapacitorData }
 
+export function validateContentRange(
+  contentRange: string | null | undefined,
+  offset: number,
+  byteLength: number,
+): number {
+  const match = typeof contentRange === 'string'
+    ? /bytes (\d+)-(\d+)\/(\d+)/.exec(contentRange)
+    : null
+  if (!match) {
+    throw new Error('Invalid ranged download: missing Content-Range header')
+  }
+  const start = Number(match[1])
+  const end = Number(match[2])
+  const total = Number(match[3])
+  if (start !== offset) {
+    throw new Error(`Invalid ranged download: expected byte ${offset}, received byte ${start}`)
+  }
+  const expectedLength = end - start + 1
+  if (expectedLength !== byteLength) {
+    throw new Error(
+      `Invalid ranged download length: expected ${expectedLength} bytes, received ${byteLength}`,
+    )
+  }
+  if (end >= total || total <= 0) {
+    throw new Error(`Invalid ranged download total: ${contentRange}`)
+  }
+  return total
+}
+
 /**
  * Downloads a text resource on native platforms using HTTP Range requests
  * (responseType 'arraybuffer' returns base64, so the server-side content never
@@ -216,42 +246,64 @@ export async function downloadText(
     let offset = 0
     let total: number | null = null
     let chunks: Uint8Array[] = []
+    let chunkSize = DOWNLOAD_CHUNK
 
     for (;;) {
-      const end = offset + DOWNLOAD_CHUNK - 1
-      const res = await withRetry(() =>
-        CapacitorHttp.request({
-          url,
-          method: 'GET',
-          headers: { ...allHeaders, Range: `bytes=${offset}-${end}` },
-          responseType: 'arraybuffer',
-        }),
-      )
+      let res: Awaited<ReturnType<typeof CapacitorHttp.request>>
+      let bytes: Uint8Array | null = null
+      let rangeError: Error | null = null
+      for (;;) {
+        const end = offset + chunkSize - 1
+        res = await withRetry(() =>
+          CapacitorHttp.request({
+            url,
+            method: 'GET',
+            headers: {
+              ...allHeaders,
+              Accept: 'application/octet-stream',
+              'Cache-Control': 'no-cache',
+              Range: `bytes=${offset}-${end}`,
+            },
+            responseType: 'arraybuffer',
+          }),
+        )
 
-      const isJson = isJsonContentType(res.headers as Record<string, unknown>)
+        const isJson = isJsonContentType(res.headers as Record<string, unknown>)
 
-      // Server ignored Range and returned the whole body in one shot.
-      if (res.status === 200) {
-        const bytes = decodeCapacitorData(res.data, isJson)
-        const text = bytes ? new TextDecoder('utf-8').decode(bytes) : ''
-        return { ok: true, status: 200, text }
+        // Server ignored Range and returned the whole body in one shot.
+        if (res.status === 200) {
+          bytes = decodeCapacitorData(res.data, isJson)
+          const text = bytes ? new TextDecoder('utf-8').decode(bytes) : ''
+          return { ok: true, status: 200, text }
+        }
+
+        if (res.status !== 206) {
+          return { ok: res.status >= 200 && res.status < 300, status: res.status, text: '' }
+        }
+
+        bytes = decodeCapacitorData(res.data, isJson)
+        const contentRange = res.headers?.['Content-Range'] ?? res.headers?.['content-range']
+        try {
+          total = validateContentRange(contentRange, offset, bytes?.length ?? 0)
+          rangeError = null
+        } catch (error) {
+          rangeError = error instanceof Error ? error : new Error(String(error))
+        }
+        if (!rangeError) break
+        if (chunkSize <= MIN_DOWNLOAD_CHUNK) throw rangeError
+        chunkSize = Math.max(MIN_DOWNLOAD_CHUNK, Math.floor(chunkSize / 2))
       }
 
-      if (res.status !== 206) {
-        return { ok: res.status >= 200 && res.status < 300, status: res.status, text: '' }
-      }
-
-      const bytes = decodeCapacitorData(res.data, isJson)
       if (!bytes || bytes.length === 0) break
       chunks.push(bytes)
 
-      const contentRange = res.headers?.['Content-Range'] ?? res.headers?.['content-range']
-      const m = typeof contentRange === 'string' ? /bytes \d+-\d+\/(\d+)/.exec(contentRange) : null
-      if (m) total = parseInt(m[1], 10)
-
       offset += bytes.length
       if (total !== null && offset >= total) break
-      if (bytes.length < DOWNLOAD_CHUNK) break
+      if (bytes.length < chunkSize) {
+        throw new Error(
+          `Invalid ranged download: response ended at byte ${offset}, expected ${total ?? 'more data'}`,
+        )
+      }
     }
 
     const decoder = new TextDecoder('utf-8')
