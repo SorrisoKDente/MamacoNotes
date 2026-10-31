@@ -45,5 +45,13 @@ Identified by `dragRef.kind`:
 
 ## 6. Optimization
 - **RAF Loop**: Drawing is decoupled from events using `requestAnimationFrame`.
+- **Eraser mask scale**: The intermediate bitmap used to clip strokes uses the
+  page's visible scale (`zoom × DPR`), preventing all strokes from becoming soft
+  after the first erase at a non-100% zoom.
+- **PDF stroke preview**: Pages with PDF backgrounds bypass the composite
+  `pageCache` while a stroke is active. The rasterized PDF is drawn once directly
+  alongside the live strokes, avoiding two successive smoothing passes at fractional zoom.
+- **Layout during writing**: The canvas rect is reused between frames and refreshed
+  only after resize or scroll invalidates it, avoiding forced layout in the hot path.
 - **Direct DOM**: High-frequency UI updates (like the tool cursor) bypass React using refs and direct style manipulation.
 - **Coalesced Events**: Uses `getCoalescedEvents` for high-precision stylus input smoothing.

@@ -601,6 +601,15 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     `translate3d`/`will-change` para evitar repaints desnecessários do editor. Os commits
     de traço também emitem uma checagem opt-in no frame seguinte para diagnosticar corridas
     de página obsoleta ou de ownership.
+  - **Nitidez da máscara de borracha**: o bitmap intermediário usado pelas máscaras dos
+    traços usa a mesma escala `zoom × DPR` da página visível, evitando uma reconstrução em
+    baixa resolução que deixa todos os traços borrados depois de apagar.
+  - **Prévia de traço sobre PDF**: páginas com fundo PDF ignoram o `pageCache` composto
+    enquanto um traço está ativo. O PDF rasterizado é desenhado uma única vez diretamente
+    com os traços vivos, evitando duas passadas de suavização em zoom fracionário.
+  - **Estabilidade de layout**: o retângulo do canvas em cache é reutilizado durante a
+    renderização e atualizado apenas após invalidação por resize ou scroll, evitando
+    leituras forçadas a cada frame.
   - **Cache de rasterização do PDF** (`pdfCache`/`getPdfCanvas`): páginas de PDF são imagens
     grandes que antes eram reamostradas a cada frame com `imageSmoothingQuality` rebaixada
     durante o desenho — essa reamostragem era cara e causava as "letras borradas" ao

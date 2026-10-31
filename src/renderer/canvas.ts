@@ -44,8 +44,16 @@ export function pageRenderScale(width: number, height: number, zoom: number, dpr
   return scale
 }
 
-export function shouldUsePageCache(drawing: boolean, hasCurrentStroke: boolean): boolean {
-  return drawing && hasCurrentStroke
+export function maskRenderScale(width: number, height: number, zoom: number, dpr: number): number {
+  return pageRenderScale(width, height, zoom, dpr)
+}
+
+export function shouldUsePageCache(
+  drawing: boolean,
+  hasCurrentStroke: boolean,
+  hasPdfBackground = false,
+): boolean {
+  return drawing && hasCurrentStroke && !hasPdfBackground
 }
 
 export class PageCanvas {
@@ -272,8 +280,9 @@ export class PageCanvas {
   }
 
   render() {
-    // One layout read per frame (never per pointer event).
-    this.updateRect(true)
+    // Resize/scroll observers invalidate the cached rect. Forcing a layout read
+    // on every animation frame makes writing stutter.
+    this.updateRect()
     // While idle, drop the cached page bitmap as soon as the page content no
     // longer matches what was cached (undo, eraser, layer/edit operations): the
     // next render then draws live data instead of serving stale pixels.
@@ -441,8 +450,8 @@ export class PageCanvas {
     drawCurrentStroke: boolean,
   ): boolean {
     const drawingNow = drawCurrentStroke && !!this.currentStroke
-    if (!shouldUsePageCache(this.drawing, drawingNow)) {
-      this.notePath('full(idle)')
+    if (!shouldUsePageCache(this.drawing, drawingNow, !!page.pdf)) {
+      this.notePath(page.pdf && drawingNow ? 'full(pdf-stroke)' : 'full(idle)')
       return false
     }
     if (!this.cacheSharpEnough(page)) {
@@ -647,9 +656,9 @@ export class PageCanvas {
       this.scratchCanvas = document.createElement('canvas')
       this.scratchCtx = this.scratchCanvas.getContext('2d')
     }
-    const dpr = this.devicePixelRatio
-    const tw = Math.max(1, Math.ceil(w * dpr))
-    const th = Math.max(1, Math.ceil(h * dpr))
+    const scale = maskRenderScale(w, h, this.zoom, this.devicePixelRatio)
+    const tw = Math.max(1, Math.ceil(w * scale))
+    const th = Math.max(1, Math.ceil(h * scale))
     if (this.scratchCanvas.width !== tw || this.scratchCanvas.height !== th) {
       this.scratchCanvas.width = tw
       this.scratchCanvas.height = th
@@ -658,7 +667,7 @@ export class PageCanvas {
     if (!sctx) return null
     sctx.setTransform(1, 0, 0, 1, 0, 0)
     sctx.clearRect(0, 0, tw, th)
-    sctx.scale(dpr, dpr)
+    sctx.scale(scale, scale)
     return sctx
   }
 

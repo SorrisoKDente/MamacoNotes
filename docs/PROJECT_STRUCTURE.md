@@ -590,6 +590,14 @@ Key points:
     The tool cursor is updated once per animation frame and promoted with
     `translate3d`/`will-change` to avoid unnecessary editor repaints. Stroke commits also
     emit an opt-in next-frame trace check to diagnose stale-page or ownership races.
+  - **Eraser mask sharpness**: the intermediate bitmap used for stroke masks uses the
+    same `zoom × DPR` scale as the visible page, avoiding a low-resolution redraw that
+    makes every stroke look blurred after erasing.
+  - **PDF stroke preview**: pages with PDF backgrounds bypass the composite `pageCache`
+    while a stroke is active. The rasterized PDF is drawn once directly with the live
+    strokes, avoiding two smoothing passes at fractional zoom.
+  - **Layout stability**: the cached canvas rect is reused during rendering and refreshed
+    only after resize or scroll invalidation, avoiding forced layout reads on every frame.
   - **PDF raster cache** (`pdfCache`/`getPdfCanvas`): PDF pages are big images that used to
     be resampled every frame with `imageSmoothingQuality` lowered while drawing — that
     resampling was both expensive and the cause of the "blurry letters" while writing.

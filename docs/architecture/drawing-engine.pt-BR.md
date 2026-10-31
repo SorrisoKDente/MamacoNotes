@@ -45,5 +45,14 @@ Identificados por `dragRef.kind`:
 
 ## 6. Otimização
 - **Loop RAF**: O desenho é desacoplado dos eventos usando `requestAnimationFrame`.
+- **Escala da máscara de borracha**: O bitmap intermediário usado para recortar traços
+  usa a mesma escala visível da página (`zoom × DPR`), evitando que todos os traços
+  fiquem borrados depois da primeira borracha em zoom diferente de 100%.
+- **Prévia de traço sobre PDF**: Páginas com fundo PDF ignoram o `pageCache` composto
+  enquanto um traço está ativo. O PDF rasterizado é desenhado uma única vez diretamente
+  junto aos traços, evitando duas passadas de suavização em zoom fracionário.
+- **Layout durante a escrita**: O retângulo do canvas é reutilizado entre frames e só
+  é atualizado quando resize ou scroll invalida o cache, evitando leituras forçadas de
+  layout no caminho crítico.
 - **Dom Direto**: Atualizações de UI de alta frequência (como o cursor da ferramenta) ignoram o React usando refs e manipulação direta de estilos.
 - **Eventos Coalescidos**: Usa `getCoalescedEvents` para suavização de entrada de caneta de alta precisão.

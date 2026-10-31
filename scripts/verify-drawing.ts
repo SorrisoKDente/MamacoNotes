@@ -19,7 +19,12 @@
 import type { Layer, Page, Stroke, StrokeErasure } from '../src/types'
 import { arrangeLayer, layerItems, makePage, makeLayer, nextLayerOrder, transformStrokeErasures } from '../src/types'
 import { drawStroke } from '../src/renderer/drawUtils'
-import { pageRenderScale, PAGE_BITMAP_MAX_PIXELS, shouldUsePageCache } from '../src/renderer/canvas'
+import {
+  maskRenderScale,
+  pageRenderScale,
+  PAGE_BITMAP_MAX_PIXELS,
+  shouldUsePageCache,
+} from '../src/renderer/canvas'
 
 let passed = 0
 let failed = 0
@@ -483,7 +488,19 @@ console.log('== Drawing & Stroke Regression Verification ==')
   assert(smallPage >= 1 * 1.25 * 0.95, 'a normal-sized page stays sharp enough to cache')
   assert(!shouldUsePageCache(false, false), 'idle renders never serve the page bitmap cache')
   assert(shouldUsePageCache(true, true), 'active stroke previews may serve the page bitmap cache')
-
+  assert(
+    !shouldUsePageCache(true, true, true),
+    'PDF pages render directly during a stroke to avoid double rasterization blur',
+  )
+  const maskScale = maskRenderScale(1600, 2200, 0.75, 2)
+  assert(
+    maskScale === 1.5,
+    'eraser mask uses the same zoom x DPR scale as the visible page',
+  )
+  assert(
+    maskRenderScale(1600, 2200, 1, 2) >= 1.9,
+    'eraser mask does not fall back to DPR-only resolution at 100% zoom',
+  )
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
