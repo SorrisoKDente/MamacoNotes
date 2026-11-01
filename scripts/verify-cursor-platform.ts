@@ -1,4 +1,11 @@
-import { isMousePointer, isPenPointer, isToolCursorHidden, isTouchPointer, shouldUseCursorOnlyPointerPath } from '../src/utils/cursor'
+import {
+  isMousePointer,
+  isPenPointer,
+  isToolCursorHidden,
+  isTouchPointer,
+  shouldShowToolCursor,
+  shouldUseCursorOnlyPointerPath,
+} from '../src/utils/cursor'
 import { shouldShowFullscreen } from '../src/utils/platform'
 import type { ToolKind } from '../src/types'
 
@@ -43,6 +50,9 @@ assert(!isToolCursorHidden('pen', cursorSettings), 'pen cursor remains visible w
 assert(isToolCursorHidden('highlighter', cursorSettings), 'highlighter cursor follows its individual setting')
 assert(!isToolCursorHidden('eraser', cursorSettings), 'eraser cursor remains visible when enabled')
 assert(isToolCursorHidden('pen', { ...cursorSettings, hideToolCursor: true }), 'master cursor setting hides every tool')
+assert(shouldShowToolCursor('pen', true, false), 'tool cursor is shown outside pan mode')
+assert(!shouldShowToolCursor('pen', true, true), 'tool cursor is hidden while pan shortcut is active')
+assert(!shouldShowToolCursor('text', true, false), 'non-drawing tools do not show tool cursor')
 
 const originalWindow = globalThis.window
 Object.defineProperty(globalThis, 'window', {

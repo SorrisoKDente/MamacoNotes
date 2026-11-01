@@ -13,7 +13,13 @@ import { useI18n } from '../i18n'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { clamp } from '../utils/math'
 import { trace } from '../utils/debug'
-import { isPenPointer, isToolCursorHidden, isTouchPointer, shouldUseCursorOnlyPointerPath } from '../utils/cursor'
+import {
+  isPenPointer,
+  isToolCursorHidden,
+  isTouchPointer,
+  shouldShowToolCursor,
+  shouldUseCursorOnlyPointerPath,
+} from '../utils/cursor'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -508,8 +514,7 @@ export function Editor() {
       if (event.pointerType !== 'mouse' || dragRef.current || !shouldUseCursorOnlyPointerPath(toolRef.current, event.pointerType, false)) {
         return
       }
-      const rect = engineRef.current?.getRect()
-      if (!rect) return
+      const rect = canvas.getBoundingClientRect()
       const mx = event.clientX - rect.left
       const my = event.clientY - rect.top
       mousePosRef.current = { x: mx, y: my }
@@ -880,7 +885,8 @@ export function Editor() {
     const isMouse = (e.nativeEvent as any).pointerType === 'mouse' || !('pointerType' in e.nativeEvent)
     if (!isMouse) return
 
-    const rect = canvas.getBoundingClientRect()
+    const rect = engineRef.current?.getRect()
+    if (!rect) return
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
 
@@ -888,12 +894,18 @@ export function Editor() {
     mousePosRef.current = { x: mx, y: my }
     const cursor = toolCursorRef.current
     const activeTool = toolRef.current
+    const panActive = isPanShortcutActive(e.nativeEvent)
+    if (panActive) {
+      updateCursorRef.current(-1, -1, 1, false)
+      return
+    }
     if (
       cursor &&
       (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser') &&
-      !isToolCursorHidden(activeTool, useAppStore.getState().settings)
+      !isToolCursorHidden(activeTool, useAppStore.getState().settings) &&
+      !panActive
     ) {
-      positionToolCursor(mx, my, 1)
+      if (cursor.style.opacity !== '1') positionToolCursor(mx, my, 1)
     }
     updateCursorRef.current(mx, my, 1)
   }
@@ -901,7 +913,14 @@ export function Editor() {
   function positionToolCursor(mx: number, my: number, pressure: number) {
     const activeTool = toolRef.current
     const cursor = toolCursorRef.current
-    if (!cursor || isToolCursorHidden(activeTool, useAppStore.getState().settings)) return
+    if (
+      !cursor ||
+      isToolCursorHidden(activeTool, useAppStore.getState().settings) ||
+      isPanShortcutActive()
+    ) {
+      if (cursor && isPanShortcutActive()) cursor.style.opacity = '0'
+      return
+    }
     const currentSettings = useAppStore.getState().settings
     const diameter = cursorDisplaySize(activeTool, currentSettings, zoomRef.current, pressure)
     if (cursor.style.opacity !== '1') cursor.style.opacity = '1'
@@ -2465,10 +2484,8 @@ export function Editor() {
           el.style.setProperty(prop, value)
         }
         if (
-          (t !== 'pen' && t !== 'highlighter' && t !== 'eraser') ||
-          !vis ||
-          x < 0 ||
-          isPanShortcutActive()
+          !shouldShowToolCursor(t, vis, isPanShortcutActive()) ||
+          x < 0
         ) {
           apply('opacity', '0')
           return
@@ -3392,11 +3409,12 @@ export function Editor() {
       // Update cursor when Pan shortcut key is pressed
       if (isPanShortcutActive(e) && !dragRef.current) {
         if (canvasRef.current) canvasRef.current.style.cursor = 'grab'
-        if (toolCursorRef.current) toolCursorRef.current.style.opacity = '0'
+        updateCursorRef.current(-1, -1, 1, false)
       }
 
       // If no page is selected, we don't handle shortcuts in the Editor.
-      if (!pageRef.current) return
+      if (!pageRef.current)       updateCursorRef.current(-1, -1, 1, false)
+      return
 
       const s = useAppStore.getState()
       if (e.key === 'Escape' && s.tool === 'select') {

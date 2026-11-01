@@ -167,7 +167,7 @@ Initialization flow:
 | `fonts.ts` | System fonts list (Local Font Access) with fallback |
 | `shortcuts.ts` | Key normalization, shortcut lookup by action, pt-BR labels |
 | `math.ts` | Centralized math utilities (`clamp`) |
-| `cursor.ts` | Drawing-tool classification and lightweight desktop hover-pointer path guard |
+| `cursor.ts` | Drawing-tool classification, lightweight desktop hover-pointer path guard, and tool-cursor visibility rules including PAN suppression |
 | `download.ts` | Centralized browser download helper (`triggerDownload`) |
 | `fullscreen.ts` | Fullscreen toggle |
 
@@ -206,7 +206,7 @@ Initialization flow:
 | `scripts/verify-drawing.ts` | Standalone drawing engine regression verification: exercises consecutive rapid strokes, dot strokes, **pressure batching** (200-sample pen stroke must stay bounded to ≤32 `stroke()` calls), and the **eraser mask overlap regression** (masks follow transformed strokes and split when shared with strokes that stayed in place). Run with `npm test` or `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-zorder.ts` | End-to-end regression for **Layer Element Z-Ordering**: legacy fallback (strokes→images→texts), explicit per-element `order`, `nextLayerOrder`, `arrangeLayer` (front/back/forward/backward/multi-select/no-op), z-aware render sequence, z-aware hit-testing, and `normalizePage` preserving `order`. Run with `npm test` or `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-eraser.ts` | Standalone eraser regression verification: single-click erasure size/radius, intersection mask math, and the end-to-end **eraser mask overlap** flow (erase → drag a scoped stroke over the erased region → the mask travels with the stroke, so nothing disappears). Run with `npm test` or `npx tsx scripts/verify-eraser.ts` |
-| `scripts/verify-cursor-platform.ts` | Regression verification for the lightweight desktop cursor path and browser/native fullscreen visibility. Run with `npm test` |
+| `scripts/verify-cursor-platform.ts` | Regression verification for the lightweight desktop cursor path, PAN cursor suppression, and browser/native fullscreen visibility. Run with `npm test` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
 
 ---

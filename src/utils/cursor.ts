@@ -34,3 +34,11 @@ export function shouldUseCursorOnlyPointerPath(
 ): boolean {
   return isMousePointer(pointerType) && isDrawingTool(tool) && !isDragging
 }
+
+export function shouldShowToolCursor(
+  tool: ToolKind,
+  visible: boolean,
+  panShortcutActive: boolean,
+): boolean {
+  return visible && !panShortcutActive && isDrawingTool(tool)
+}
