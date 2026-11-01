@@ -38,15 +38,15 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Sync Progress Details**: Show synchronization progress in the cloud tab, including percentage and the file currently being synchronized.
 - [x] **Dashboard Sync Button**: Add a cloud synchronization button to the Dashboard, not only to the editor/top bar.
 - [x] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
-- [ ] **F2 File Rename**: Rename the active notebook/file with the F2 shortcut from the Dashboard and Editor.
-- [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
+- [x] **F2 File Rename**: Rename the active notebook/file with the F2 shortcut from the Dashboard and Editor.
+- [x] **Context-Aware Shortcuts (Ctrl+A)**:
   - **Page Preview**: Select all pages.
   - **Canvas**: Select all strokes, images, and text.
   - **Layers Panel**: Select all layers and layer folders.
-- [ ] **Extended Clipboard**: Support for Copy (`Ctrl+C`), Paste (`Ctrl+V`), and Delete (`Del`) for layers, notebooks, and folders.
-- [ ] **Safe Deletion**: 
-  - Implement a confirmation popup for bulk deletion of layers or folders.
-  - **Layer Constraint**: Ensure at least one layer always exists; if the user attempts to delete all, prompt them to select one to remain.
+- [x] **Extended Clipboard**: Support for Copy (`Ctrl+C`), Paste (`Ctrl+V`), and Delete (`Del`) for layers, notebooks, and folders.
+- [x] **Safe Deletion**:
+  - [x] Implement a confirmation popup for bulk deletion of layers or folders.
+  - [x] **Layer Constraint**: Ensure at least one layer always exists; attempts to delete all layers are rejected with feedback.
 - [x] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download.
 
 ## 💡 Future Ideas (Backlog)
@@ -55,7 +55,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Hover Tooltips**: Display the full name of folders and notebooks when hovering over them for a short period (Sidebar and Grid view).
 - [ ] **Visual Sync Diff**: Show a side-by-side preview of differences between local and cloud versions when a sync conflict occurs.
 - [ ] **Minimalist Desktop UI**: Option to remove the standard native menu bar (File, Edit, View) in the Electron version for a more immersive experience.
-- [ ] **Cursor Layer Isolation**: Move the tool cursor to an independent fixed-position layer outside the canvas interaction tree to reduce hover coupling. **Risks:** coordinate drift when panels, zoom, scrolling, fullscreen, or device pixel ratio change; cursor/tool state desynchronization; extra platform-specific positioning work. Validate with mouse, pen, touch, Electron, browser, and Android.
+- [ ] **Cursor Layer Isolation**: Move the tool cursor to an independent fixed-position layer outside the canvas interaction tree to reduce hover coupling. **Risks:** coordinate drift when panels, zoom, scrolling, fullscreen, or device pixel ratio change; cursor/tool state desynchronization; extra platform-specific positioning work. Validate with mouse, pen, touch, Electron, browser, and Android. Previous prototype was reverted after increasing perceived latency.
 - [ ] **Offscreen PDF Rendering**: Render heavy PDF backgrounds through `OffscreenCanvas` or pre-rendered bitmap workers to keep the main thread responsive. **Risks:** browser/Android/WebView support differences, higher memory usage, worker lifecycle complexity, export/rendering discrepancies, and possible blur or stale-background regressions. Validate PDF zoom, erase, export, sync, and low-memory devices.
 - [ ] **High-Frequency Pointer Events**: Evaluate `pointerrawupdate` and coalesced pointer events for smoother drawing and cursor tracking. **Risks:** inconsistent event support and frequency across browsers, duplicate processing, higher CPU/battery usage, and interference with touch gestures or undo boundaries. Validate stroke ordering, pressure, palm rejection, multi-touch, and fallback behavior.
 - [ ] **Dedicated Cursor Compositor Path**: Use a compositor-friendly cursor element with transform-only updates and stricter style caching, independent from editor rendering. **Risks:** visual desynchronization during zoom/pan, stacking and clipping issues, accessibility/visibility inconsistencies, and platform-specific compositor behavior. Validate cursor size, pressure, tool switching, hidden-cursor settings, and heavy PDF pages.

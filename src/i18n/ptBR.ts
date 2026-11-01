@@ -151,6 +151,8 @@ export const ptBRMessages: Record<string, string> = {
   'layers.deleteFolder': 'Excluir pasta',
   'layers.deleteFolderConfirm':
     'Excluir a pasta "{{name}}"? As camadas dentro dela serão movidas para a raiz.',
+  'layers.deleteSelectedConfirm': 'Excluir {{count}} camadas selecionadas?',
+  'layers.lastLayerConfirm': 'A última camada não pode ser excluída.',
   'layers.newFolderPrompt': 'Nome da nova pasta de camadas:',
   'layers.renameFolderPrompt': 'Novo nome da pasta de camadas:',
   'layers.resizePanel': 'Arrastar para redimensionar',

@@ -44,6 +44,7 @@ export function Dashboard() {
   const selectedIds = useAppStore((s) => s.selectedIds)
   const toggleSelect = useAppStore((s) => s.toggleSelect)
   const setSelectedIds = useAppStore((s) => s.setSelectedIds)
+  const setLastClicked = useAppStore((s) => s.setLastClicked)
   const clearSelection = useAppStore((s) => s.clearSelection)
   const copySelected = useAppStore((s) => s.copySelected)
   const cutSelected = useAppStore((s) => s.cutSelected)
@@ -208,6 +209,24 @@ export function Dashboard() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [currentFolders, currentNotebooks, selectedIds, clipboard, copySelected, cutSelected, pasteClipboard, duplicateSelected, setSelectedIds, clearSelection])
 
+  useEffect(() => {
+    const onRename = () => {
+      if (useUiStore.getState().openModal || document.activeElement?.tagName === 'INPUT') return
+      const last = useAppStore.getState().lastClicked
+      if (last?.type === 'folder' || last?.type === 'notebook') {
+        void handleRename(last.type, last.id)
+        return
+      }
+      if (selectedIds.length === 1) {
+        const id = selectedIds[0]
+        if (folders.some((folder) => folder.id === id)) void handleRename('folder', id)
+        else if (notebooks.some((notebook) => notebook.id === id)) void handleRename('notebook', id)
+      }
+    }
+    window.addEventListener('ink:rename', onRename)
+    return () => window.removeEventListener('ink:rename', onRename)
+  }, [folders, notebooks, selectedIds])
+
   function handleContextMenu(e: React.MouseEvent, type: 'folder' | 'notebook', id: string) {
     e.preventDefault()
     if (!selectedIds.includes(id)) {
@@ -239,6 +258,7 @@ export function Dashboard() {
     if (e.ctrlKey || e.metaKey) {
       toggleSelect(id)
     } else {
+      setLastClicked({ type, id })
       if (type === 'folder') {
         setSearch('')
         setFilter('all')

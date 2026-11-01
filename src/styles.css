@@ -1058,12 +1058,12 @@ body {
 }
 
 .layer-item.active {
-  background: rgba(74, 144, 226, 0.18);
+  background: rgba(74, 144, 226, 0.06);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .layer-item.selected {
-  background: rgba(74, 144, 226, 0.1);
+  background: rgba(74, 144, 226, 0.18);
 }
 
 .layer-item.locked {

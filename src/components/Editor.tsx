@@ -3413,10 +3413,13 @@ export function Editor() {
       }
 
       // If no page is selected, we don't handle shortcuts in the Editor.
-      if (!pageRef.current)       updateCursorRef.current(-1, -1, 1, false)
-      return
+      if (!pageRef.current) {
+        updateCursorRef.current(-1, -1, 1, false)
+        return
+      }
 
       const s = useAppStore.getState()
+      if ((e.target as HTMLElement | null)?.closest('.page-list')) return
       if (e.key === 'Escape' && s.tool === 'select') {
         e.preventDefault()
         onInkEsc()
@@ -3430,9 +3433,24 @@ export function Editor() {
         }
         return
       }
-      if (s.tool !== 'select') return
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const key = e.key.toLowerCase()
+        if (key === 'a') {
+          e.preventDefault()
+          if (s.tool === 'select') {
+            const layer = getActiveLayer(pageRef.current)
+            selectionRef.current = {
+              strokes: new Set(layer.strokes.map((stroke) => stroke.id)),
+              images: new Set(layer.images.map((image) => image.id)),
+              texts: new Set(layer.texts.map((text) => text.id)),
+            }
+            setSelectedImageId(null)
+            selectionRegionRef.current = null
+            requestRenderRef.current()
+          }
+          return
+        }
+        if (s.tool !== 'select') return
         if (key === 'c') {
           e.preventDefault()
           copySelectionRef.current()

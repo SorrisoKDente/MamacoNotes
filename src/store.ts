@@ -60,6 +60,12 @@ interface UndoEntry {
   pageSnapshot: Page
 }
 
+interface DashboardUndoEntry {
+  folders: Folder[]
+  notebooks: Notebook[]
+  trash: TrashItem[]
+}
+
 export function clonePage(page: Page): Page {
   return {
     ...page,
@@ -354,6 +360,7 @@ interface AppState {
   selectedIds: string[]
   selectedPageIndices: number[]
   clipboard: { ids: string[]; cut: boolean } | null
+  layerClipboard: { layers: Layer[]; cut: boolean } | null
   lastClicked: LastClickedTarget
   currentPageIndex: number
   tool: ToolKind
@@ -433,6 +440,8 @@ interface AppState {
   renameLayer: (index: number, name: string) => Promise<void>
   duplicateLayer: (index: number) => Promise<void>
   deleteLayer: (index: number) => Promise<void>
+  copyLayers: (ids: string[], cut?: boolean) => void
+  pasteLayers: () => Promise<void>
   moveLayerToFolder: (
     from: number,
     folderId: string | null,
@@ -483,6 +492,67 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => {
   const undoStack: UndoEntry[] = []
   const redoStack: UndoEntry[] = []
+  const dashboardUndoStack: DashboardUndoEntry[] = []
+  const dashboardRedoStack: DashboardUndoEntry[] = []
+  let dashboardHistorySuspended = false
+
+  async function captureDashboardSnapshot(): Promise<DashboardUndoEntry> {
+    const notebooks: Notebook[] = []
+    for (const summary of get().notebooks) {
+      const notebook = get().activeNotebook?.id === summary.id
+        ? get().activeNotebook
+        : await db.getNotebook(summary.id)
+      if (notebook) notebooks.push({ ...notebook, pages: notebook.pages })
+    }
+    return {
+      folders: get().folders.map((folder) => ({ ...folder })),
+      notebooks,
+      trash: get().trash.map((item) => ({ ...item })),
+    }
+  }
+
+  async function pushDashboardUndo(): Promise<void> {
+    if (dashboardHistorySuspended) return
+    dashboardUndoStack.push(await captureDashboardSnapshot())
+    if (dashboardUndoStack.length > 60) dashboardUndoStack.shift()
+    dashboardRedoStack.length = 0
+    set({ canUndo: true, canRedo: false })
+  }
+
+  async function restoreDashboardSnapshot(snapshot: DashboardUndoEntry): Promise<void> {
+    const current = get()
+    const snapshotIds = new Set(snapshot.notebooks.map((notebook) => notebook.id))
+    for (const notebook of current.notebooks) {
+      if (!snapshotIds.has(notebook.id)) await db.deleteNotebook(notebook.id)
+    }
+    for (const folder of snapshot.folders) await db.putFolder(folder)
+    for (const folder of current.folders) {
+      if (!snapshot.folders.some((saved) => saved.id === folder.id)) await db.deleteFolder(folder.id)
+    }
+    for (const notebook of snapshot.notebooks) await db.putNotebook(notebook)
+    const summaries = snapshot.notebooks.map((notebook) => ({
+      id: notebook.id,
+      name: notebook.name,
+      folderId: notebook.folderId,
+      createdAt: notebook.createdAt,
+      updatedAt: notebook.updatedAt,
+      order: notebook.order,
+      pageCount: notebook.pages.length,
+      favorite: notebook.favorite,
+    }))
+    const active = current.activeNotebook
+      ? snapshot.notebooks.find((notebook) => notebook.id === current.activeNotebook?.id) ?? null
+      : null
+    set({
+      folders: snapshot.folders,
+      notebooks: sortNotebooksByOrder(summaries),
+      trash: snapshot.trash,
+      activeNotebook: active,
+      selectedNotebookId: active?.id ?? null,
+      dataVersion: current.dataVersion + 1,
+    })
+  }
+
 
   interface SyncChanges {
     pulledNotebooks: Notebook[]
@@ -679,6 +749,7 @@ export const useAppStore = create<AppState>((set, get) => {
     selectedIds: [],
     selectedPageIndices: [],
     clipboard: null,
+    layerClipboard: null,
     lastClicked: null,
     currentPageIndex: 0,
     tool: 'pen',
@@ -1068,13 +1139,19 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteSelected(scope) {
+      await pushDashboardUndo()
       const ids = [...get().selectedIds]
-      for (const id of ids) {
-        if (get().notebooks.some((n) => n.id === id)) {
-          await get().deleteNotebook(id, scope)
-        } else if (get().folders.some((f) => f.id === id)) {
-          await get().deleteFolder(id, scope)
+      dashboardHistorySuspended = true
+      try {
+        for (const id of ids) {
+          if (get().notebooks.some((n) => n.id === id)) {
+            await get().deleteNotebook(id, scope)
+          } else if (get().folders.some((f) => f.id === id)) {
+            await get().deleteFolder(id, scope)
+          }
         }
+      } finally {
+        dashboardHistorySuspended = false
       }
       set({ selectedIds: [] })
     },
@@ -1093,6 +1170,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteFolder(id, scope) {
+      await pushDashboardUndo()
       const allFolders = get().folders
       const allNotebooks = get().notebooks
       const toDelete = new Set<string>()
@@ -1180,6 +1258,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameFolder(id, name) {
+      await pushDashboardUndo()
       const folders = get().folders.map((f) => (f.id === id ? { ...f, name } : f))
       set({ folders })
       const folder = folders.find((f) => f.id === id)
@@ -1187,6 +1266,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async reorderFolder(id, parentId, beforeId) {
+      await pushDashboardUndo()
       const folder = get().folders.find((f) => f.id === id)
       if (!folder) return
       if (id === parentId) return
@@ -1407,6 +1487,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async deleteNotebook(id, scope) {
+      await pushDashboardUndo()
       const cloud = get().settings.cloud
       const configured = !!cloud.webdavUrl
       const scopeRemote = scope === 'remote' || (scope === undefined && cloud.enabled)
@@ -1453,6 +1534,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async reorderNotebook(id, folderId, beforeId) {
+      await pushDashboardUndo()
       const nb = get().notebooks.find((n) => n.id === id)
       if (!nb) return
       const now = Date.now()
@@ -1539,6 +1621,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async updateNotebook(notebook) {
+      await pushDashboardUndo()
       await updateNotebookStorage(notebook)
     },
 
@@ -1700,6 +1783,42 @@ export const useAppStore = create<AppState>((set, get) => {
       await updateNotebookStorage(notebook)
     },
 
+    copyLayers(ids, cut = false) {
+      const ctx = getActiveContext(get)
+      if (!ctx || ids.length === 0) return
+      const selected = ctx.page.layers
+        .filter((layer) => ids.includes(layer.id))
+        .map((layer) => cloneLayerWithNewIds(layer))
+      if (selected.length === 0) return
+      if (cut) {
+        const remaining = ctx.page.layers.filter((layer) => !ids.includes(layer.id))
+        if (remaining.length === 0) return
+        get().pushUndo()
+        ctx.page.layers = remaining
+        ctx.page.activeLayerId = remaining[remaining.length - 1].id
+        ctx.page.updatedAt = Date.now()
+        ctx.notebook.updatedAt = Date.now()
+        void updateNotebookStorage(ctx.notebook)
+      }
+      set({ layerClipboard: { layers: selected, cut } })
+    },
+
+    async pasteLayers() {
+      const ctx = getActiveContext(get)
+      const clip = get().layerClipboard
+      if (!ctx || !clip || clip.layers.length === 0) return
+      const { notebook, page } = ctx
+      get().pushUndo()
+      const clones = clip.layers.map((layer) => cloneLayerWithNewIds(layer))
+      const insertAt = page.layers.length
+      page.layers.splice(insertAt, 0, ...clones)
+      page.activeLayerId = clones[clones.length - 1].id
+      if (clip.cut) set({ layerClipboard: null })
+      page.updatedAt = Date.now()
+      notebook.updatedAt = Date.now()
+      await updateNotebookStorage(notebook)
+    },
+
     async deleteLayer(index) {
       const ctx = getActiveContext(get)
       if (!ctx || ctx.page.layers.length <= 1) return
@@ -1730,7 +1849,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const layer = page.layers[from]
       if (!layer) return
       const target = folderId ?? null
-      const rest = page.layers.filter((_: any, i: number) => i !== from)
+      const rest = page.layers.filter((_: Layer, i: number) => i !== from)
       let insertAt: number
       if (beforeId !== null) {
         const idx = rest.findIndex((l: Layer) => l.id === beforeId)
@@ -1740,9 +1859,9 @@ export const useAppStore = create<AppState>((set, get) => {
         for (let i = 0; i < rest.length; i++) {
           if ((rest[i].folderId ?? null) === target) hi = i
         }
-        insertAt = hi >= 0 ? hi + 1 : (layer.folderId ?? null) === target ? from : rest.length
+        insertAt = hi >= 0 ? hi + 1 : rest.length
       }
-      if ((layer.folderId ?? null) === target && insertAt === from) return
+      if ((layer.folderId ?? null) === target && rest[insertAt - 1]?.id === layer.id) return
       get().pushUndo()
       page.layers.splice(from, 1)
       layer.folderId = target
@@ -2090,6 +2209,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async undo() {
+      const dashboardEntry = dashboardUndoStack.pop()
+      if (dashboardEntry) {
+        dashboardRedoStack.push(await captureDashboardSnapshot())
+        await restoreDashboardSnapshot(dashboardEntry)
+        set({ canUndo: dashboardUndoStack.length > 0 || undoStack.length > 0, canRedo: true, lastUndoRedo: Date.now() })
+        return
+      }
       const entry = undoStack.pop()
       if (!entry) return
       const notebook = get().activeNotebook
@@ -2104,6 +2230,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async redo() {
+      const dashboardEntry = dashboardRedoStack.pop()
+      if (dashboardEntry) {
+        dashboardUndoStack.push(await captureDashboardSnapshot())
+        await restoreDashboardSnapshot(dashboardEntry)
+        set({ canUndo: true, canRedo: dashboardRedoStack.length > 0 || redoStack.length > 0, lastUndoRedo: Date.now() })
+        return
+      }
       const entry = redoStack.pop()
       if (!entry) return
       const notebook = get().activeNotebook

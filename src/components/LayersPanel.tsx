@@ -4,6 +4,7 @@ import { getActiveLayer } from '../types'
 import type { Layer, LayerFolder } from '../types'
 import { useI18n } from '../i18n'
 import { confirmAction, promptName } from '../utils/dialogs'
+import { useUiStore } from '../uiStore'
 
 const DEFAULT_NAME_RE = /^Camada (\d+)$/
 
@@ -18,6 +19,8 @@ export function LayersPanel() {
   const renameLayer = useAppStore((s) => s.renameLayer)
   const duplicateLayer = useAppStore((s) => s.duplicateLayer)
   const deleteLayer = useAppStore((s) => s.deleteLayer)
+  const copyLayers = useAppStore((s) => s.copyLayers)
+  const pasteLayers = useAppStore((s) => s.pasteLayers)
   const setLayerVisible = useAppStore((s) => s.setLayerVisible)
   const setLayerOpacity = useAppStore((s) => s.setLayerOpacity)
   const setLayerLocked = useAppStore((s) => s.setLayerLocked)
@@ -140,6 +143,39 @@ export function LayersPanel() {
     window.addEventListener('ink:esc', onEsc)
     return () => window.removeEventListener('ink:esc', onEsc)
   }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!useAppStore.getState().layersOpen || useUiStore.getState().openModal) return
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) return
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase()
+        if (key === 'a') {
+          e.preventDefault()
+          setSelectedIds(layers.map((layer) => layer.id))
+        } else if (key === 'c' && selectedIds.length > 0) {
+          e.preventDefault()
+          copyLayers(selectedIds)
+        } else if (key === 'x' && selectedIds.length > 0) {
+          e.preventDefault()
+          copyLayers(selectedIds, true)
+          setSelectedIds([])
+        } else if (key === 'v') {
+          e.preventDefault()
+          void pasteLayers()
+        }
+      } else if (e.key === 'Delete' && selectedIds.length > 0) {
+        e.preventDefault()
+        void handleDeleteSelected()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [layers, selectedIds, copyLayers, pasteLayers])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -570,6 +606,27 @@ export function LayersPanel() {
     if (selectedFolderId === folder.id) setSelectedFolderId(null)
   }
 
+  async function handleDeleteSelected() {
+    const ids = selectedIds.length > 0
+      ? selectedIds
+      : activeLayer
+        ? [activeLayer.id]
+        : []
+    if (ids.length === 0) return
+    if (layers.length - ids.length < 1) {
+      await confirmAction(t('layers.lastLayerConfirm'))
+      return
+    }
+    const ok = await confirmAction(t('layers.deleteSelectedConfirm', { count: ids.length }))
+    if (!ok) return
+    const indices = ids
+      .map((id) => layers.findIndex((layer) => layer.id === id))
+      .filter((index) => index >= 0)
+      .sort((a, b) => b - a)
+    for (const index of indices) await deleteLayer(index)
+    setSelectedIds([])
+  }
+
   function openFolderMenu(folderId: string, e: React.MouseEvent) {
     e.stopPropagation()
     if (menuOpen === folderId) {
@@ -848,7 +905,7 @@ export function LayersPanel() {
           className="icon-btn"
           title={t('layers.delete')}
           disabled={layers.length <= 1}
-          onClick={() => activeIndex >= 0 && void deleteLayer(activeIndex)}
+          onClick={() => activeIndex >= 0 && void handleDeleteSelected()}
         >
           <TrashIcon />
         </button>

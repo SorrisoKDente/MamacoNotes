@@ -151,6 +151,8 @@ export const enMessages: Record<string, string> = {
   'layers.deleteFolder': 'Delete folder',
   'layers.deleteFolderConfirm':
     'Delete the folder "{{name}}"? Its layers will be moved to the root.',
+  'layers.deleteSelectedConfirm': 'Delete {{count}} selected layers?',
+  'layers.lastLayerConfirm': 'The last layer cannot be deleted.',
   'layers.newFolderPrompt': 'New layer folder name:',
   'layers.renameFolderPrompt': 'New layer folder name:',
   'layers.resizePanel': 'Drag to resize',

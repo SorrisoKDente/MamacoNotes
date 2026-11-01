@@ -143,6 +143,14 @@ Initialization flow:
 
 #### `src/renderer/` — drawing engine (Canvas)
 
+Contextual editing behavior is implemented across `Dashboard.tsx`, `Editor.tsx`,
+`PageList.tsx`, and `LayersPanel.tsx`: F2 rename dispatches to the active surface,
+Ctrl+A selects the visible objects for that surface, and layer clipboard snapshots
+are kept separate from Dashboard notebook/folder clipboard IDs. Bulk layer deletion
+is confirmed and cannot remove the final remaining layer. Dashboard metadata actions
+also use the global undo/redo history, while `scripts/verify-contextual-editing.ts`
+covers selection and two-layer ordering invariants.
+
 | File | Responsibility |
 |---|---|
 | `canvas.ts` | `PageCanvas` class: renders pages (continuous/separate), layers (visibility/opacity), strokes, images, texts, PDF, templates, selection; coordinate conversion; hit tests |

@@ -43,6 +43,20 @@ export function PageList() {
   const menuRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<number | null>(null)
   const thumbsContainerRef = useRef<HTMLDivElement>(null)
+  const pageListRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'a') return
+      const target = e.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      if (!notebook || !useAppStore.getState().pageListOpen || !target?.closest('.page-list')) return
+      e.preventDefault()
+      setPageSelection(notebook?.pages.map((_, index) => index) ?? [])
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [notebook, setPageSelection])
 
   // ponytail: auto-follow current page in preview
   useEffect(() => {
@@ -220,7 +234,12 @@ export function PageList() {
   const menuPageData = menuPage !== null ? pages[menuPage] : null
 
   return (
-    <div className="page-list">
+    <div
+      className="page-list"
+      ref={pageListRef}
+      tabIndex={-1}
+      onPointerDown={() => pageListRef.current?.focus({ preventScroll: true })}
+    >
       <div className="page-list-header">
         <span>{t('pageList.title')}</span>
         <button className="icon-btn" onClick={() => open('addPagePicker')} title={t('pageList.addPage')}>
