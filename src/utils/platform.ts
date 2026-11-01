@@ -2,11 +2,11 @@ export function isNativePlatform(): boolean {
   const capacitorGlobal = window as unknown as {
     Capacitor?: { isNativePlatform?: () => boolean }
   }
-  // Check both the function call and the presence of the Capacitor object
-  return !!(
-    (capacitorGlobal.Capacitor && capacitorGlobal.Capacitor.isNativePlatform && capacitorGlobal.Capacitor.isNativePlatform()) ||
-    capacitorGlobal.Capacitor
-  )
+  if (!capacitorGlobal.Capacitor) return false
+  if (typeof capacitorGlobal.Capacitor.isNativePlatform === 'function') {
+    return capacitorGlobal.Capacitor.isNativePlatform()
+  }
+  return true
 }
 
 export function isDesktop(): boolean {
@@ -15,13 +15,12 @@ export function isDesktop(): boolean {
 
 /**
  * Returns true if the fullscreen button should be shown.
- * It should show on Web (PWA) and Desktop (Electron), but NOT on native mobile apps (APK).
+ * It should show only in the browser/PWA, not in Electron or native mobile apps.
  */
 export function shouldShowFullscreen(): boolean {
-  // If it's native (Android APK via Capacitor), hide it because native handling is better or F11 doesn't make sense.
+  // Capacitor is present in the browser build too, but reports false there.
   if (isNativePlatform()) {
     return false
   }
-  // Show on Web or Electron
   return true
 }

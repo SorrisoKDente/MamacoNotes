@@ -561,7 +561,7 @@ export function Dashboard() {
                 <div className="tree-icon">
                   <IconFolder />
                 </div>
-                <span className="tree-name">{f.name}</span>
+                <span className="tree-name" title={f.name} aria-label={f.name}>{f.name}</span>
                 {noteCount > 0 && <span className="tree-count">{noteCount}</span>}
                 {dropTarget?.id === f.id && dropTarget.type === 'after' && <div className="dashboard-drop-indicator horizontal" style={{ bottom: -1 }} />}
               </div>
@@ -590,7 +590,7 @@ export function Dashboard() {
               <div className="tree-icon">
                 <IconBook />
               </div>
-              <span className="tree-name">{nb.name}</span>
+              <span className="tree-name" title={nb.name} aria-label={nb.name}>{nb.name}</span>
               {dropTarget?.id === nb.id && dropTarget.type === 'after' && <div className="dashboard-drop-indicator horizontal" style={{ bottom: -1 }} />}
             </div>
           )
@@ -793,7 +793,7 @@ export function Dashboard() {
                     <IconFolder />
                   </div>
                   <div className="item-info">
-                    <span className="name">{f.name}</span>
+                    <span className="name" title={f.name} aria-label={f.name}>{f.name}</span>
                     <span className="meta">{noteCount} {noteCount === 1 ? t('sidebar.itemSingular') || 'item' : t('sidebar.itemPlural') || 'itens'}</span>
                   </div>
                   {isTarget && dropTarget.type === 'after' && <div className="dashboard-drop-indicator vertical" style={{ right: -12 }} />}
@@ -837,7 +837,7 @@ export function Dashboard() {
                     )}
                   </div>
                   <div className="item-info">
-                    <span className="name">{nb.name}</span>
+                    <span className="name" title={nb.name} aria-label={nb.name}>{nb.name}</span>
                     <span className="meta">{nb.pageCount} {nb.pageCount === 1 ? t('sidebar.pageSingular') || 'página' : t('sidebar.pagePlural') || 'páginas'}</span>
                   </div>
                   {isTarget && dropTarget.type === 'after' && <div className="dashboard-drop-indicator vertical" style={{ right: -12 }} />}

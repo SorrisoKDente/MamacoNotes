@@ -60,6 +60,12 @@ export async function exportPageAsPng(page: Page, filename?: string): Promise<vo
   triggerDownload(dataUrl, filename ?? `pagina-${Date.now()}.png`)
 }
 
+export async function exportPageAsJpeg(page: Page, filename?: string): Promise<void> {
+  const canvas = await renderPageToCanvas(page)
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+  triggerDownload(dataUrl, filename ?? `pagina-${Date.now()}.jpg`)
+}
+
 export async function exportPagesAsPdf(pages: Page[], filename?: string): Promise<void> {
   const first = pages[0]
   const scale = Math.min(2400 / first.width, 3400 / first.height, 2.5)

@@ -13,6 +13,7 @@ import { useI18n } from '../i18n'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { clamp } from '../utils/math'
 import { trace } from '../utils/debug'
+import { shouldUseCursorOnlyPointerPath } from '../utils/cursor'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -2454,10 +2455,19 @@ export function Editor() {
     const canvas = canvasRef.current
     if (!engine || !canvas || !page) return
 
-    engine.updateRect()
     const isMouse = e.pointerType === 'mouse'
     pointerPressureRef.current = isMouse ? 1 : (e.pressure || 0.5)
 
+    if (shouldUseCursorOnlyPointerPath(tool, e.pointerType, !!dragRef.current)) {
+      const rect = engine.getRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      mousePosRef.current = { x: mx, y: my }
+      updateCursorRef.current(mx, my, 1)
+      return
+    }
+
+    engine.updateRect()
     if (isMouse) {
       const rect = engine.getRect()
       const mx = e.clientX - rect.left
@@ -3565,7 +3575,12 @@ export function Editor() {
     }
   }, [setTool, setSelectedImageId])
 
-  const showToolCursor = !settings.hideToolCursor
+  const hiddenToolCursors = {
+    pen: settings.hideToolCursor || settings.hidePenCursor,
+    highlighter: settings.hideToolCursor || settings.hideHighlighterCursor,
+    eraser: settings.hideToolCursor || settings.hideEraserCursor,
+  }
+  const showToolCursor = !hiddenToolCursors[tool as keyof typeof hiddenToolCursors]
   const cursorClass =
     !showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser')
       ? 'cursor-tool-hidden'

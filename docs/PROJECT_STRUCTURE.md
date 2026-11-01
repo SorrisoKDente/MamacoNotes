@@ -167,6 +167,7 @@ Initialization flow:
 | `fonts.ts` | System fonts list (Local Font Access) with fallback |
 | `shortcuts.ts` | Key normalization, shortcut lookup by action, pt-BR labels |
 | `math.ts` | Centralized math utilities (`clamp`) |
+| `cursor.ts` | Drawing-tool classification and lightweight desktop hover-pointer path guard |
 | `download.ts` | Centralized browser download helper (`triggerDownload`) |
 | `fullscreen.ts` | Fullscreen toggle |
 
@@ -205,6 +206,7 @@ Initialization flow:
 | `scripts/verify-drawing.ts` | Standalone drawing engine regression verification: exercises consecutive rapid strokes, dot strokes, **pressure batching** (200-sample pen stroke must stay bounded to ≤32 `stroke()` calls), and the **eraser mask overlap regression** (masks follow transformed strokes and split when shared with strokes that stayed in place). Run with `npm test` or `npx tsx scripts/verify-drawing.ts` |
 | `scripts/verify-zorder.ts` | End-to-end regression for **Layer Element Z-Ordering**: legacy fallback (strokes→images→texts), explicit per-element `order`, `nextLayerOrder`, `arrangeLayer` (front/back/forward/backward/multi-select/no-op), z-aware render sequence, z-aware hit-testing, and `normalizePage` preserving `order`. Run with `npm test` or `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-eraser.ts` | Standalone eraser regression verification: single-click erasure size/radius, intersection mask math, and the end-to-end **eraser mask overlap** flow (erase → drag a scoped stroke over the erased region → the mask travels with the stroke, so nothing disappears). Run with `npm test` or `npx tsx scripts/verify-eraser.ts` |
+| `scripts/verify-cursor-platform.ts` | Regression verification for the lightweight desktop cursor path and browser/native fullscreen visibility. Run with `npm test` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
 
 ---
@@ -225,7 +227,7 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 - `TextElement { id, text, x, y, width, rotation, fontSize, fontFamily, bold, italic, underline, strikethrough, color, backgroundColor, align, marker, direction, createdAt, order? }`.
   In all three, `order` is the optional within-layer z-order (bottom = lower); see `Layer` above.
 - `PdfBackground { dataUrl, name, pageNumber }` — PDF used as page background (resides **at page level**, below all layers; not a `Layer`).
-- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide the tool cursor over the page via `hideToolCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`, **layers panel width via `layersWidth`**).
+- `AppSettings` — all configurations (pen color/size, eraser, modes, shortcuts, `cloud`, hide top bar/tools via `hideTopBar`/`hideToolbar`, hide notebook/page list sidebar via `hideSidebar`/`hidePageList`, hide page count via `hidePageCount`, hide all or individual tool cursors via `hideToolCursor`/`hidePenCursor`/`hideHighlighterCursor`/`hideEraserCursor`, ignore a specific update version via `ignoreVersion`, select delimited only via `selectDelimitedOnly`, sidebar width via `sidebarWidth`, **layers panel width via `layersWidth`**).
 - `CloudSettings { enabled, webdavUrl, webdavUsername, webdavPassword, rememberPassword, webdavPath, autoSync, lastSyncAt }` — sync data. `rememberPassword` (boolean) controls if the password is wiped on disconnect.
 - `TrashItem { id, kind: 'notebook'|'folder', name, parentId, data: Notebook|Folder|null, deletedAt, cloudKeepsCopy }` — **local trash entry** (NOT synced). One entry per deleted item: deleting a folder produces one entry for the folder, one for each subfolder and one for each notebook inside (each with its own `parentId`) so every item can be restored individually. `cloudKeepsCopy` is `true` when the item was deleted "só local" with a cloud configured (the heavy `data` is discarded; the item can only be brought back with "Restaurar da nuvem"). When `false` (deleted "local + nuvem" or no cloud), `data` holds the full item for a cloud-less restore.
 
@@ -822,7 +824,7 @@ Flow and files involved:
 | Screen composition | `src/App.tsx` |
 | Hide bars / panels | Settings (**Appearance tab**, `Modals.tsx` `SettingsModal`, Appearance section) → `settings.hideTopBar`, `settings.hideToolbar`, `settings.hideSidebar`, `settings.hidePageList`; conditional rendering in `src/App.tsx`; preview toggles in `TopBar.tsx` always visible (clicking re-shows panel when hidden by settings) and **a floating button per hidden bar** in `App.tsx` (`.ui-restore-btn`): top bar → top center (`top-center`, not to overlap side toolbar), tools → middle of right edge (`right-center`), preview → middle of left edge (`left-center`) |
 | Hide notebook page count | Settings (**Appearance tab**, Appearance section) → `settings.hidePageCount`; conditional rendering of `<span className="page-count">` in `src/components/Dashboard.tsx` |
-| Hide tool cursor | Settings (**Appearance tab**, Appearance section) → `settings.hideToolCursor`; used in `Editor.tsx` to conditionally hide the tool indicator |
+| Hide tool cursor | Settings (**Appearance tab**, Appearance section) → `settings.hideToolCursor` plus `hidePenCursor`, `hideHighlighterCursor`, and `hideEraserCursor`; used in `Editor.tsx` to conditionally hide each tool indicator |
 | Theme support (Dark/Light/System) | Settings (**Appearance tab**) → `settings.theme`; applied in `App.tsx` via CSS classes and media queries. |
 | Mobile safe areas (status bar / notch / gestures) | `index.html` uses `viewport-fit=cover`; `src/styles.css` respects `env(safe-area-inset-top)` in `.topbar` (height/padding) and in the `.ui-restore-btn.top-center` floating button, and `env(safe-area-inset-bottom)` in `.toolbar` in mobile mode — prevents the top bar from being covered/inaccessible on phones with a hidden notification bar (edge-to-edge) |
 | Top bar | `src/components/TopBar.tsx`. Contains a "Back to Dashboard" button, preview toggles on the left, the notebook title in the center, and action buttons (Import, Export, Sync, Settings, **Hide UI bars**) on the right. On mobile, the right side is scrollable. |

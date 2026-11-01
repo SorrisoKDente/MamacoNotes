@@ -20,7 +20,7 @@ import { DEFAULT_SHORTCUTS } from '../types'
 import { renderPdfPages } from '../utils/pdf'
 import type { RenderedPdfPage } from '../utils/pdf'
 import { renderThumbnail } from '../renderer/thumbnail'
-import { exportPageAsPng, exportPagesAsPdf } from '../utils/export'
+import { exportPageAsJpeg, exportPageAsPng, exportPagesAsPdf } from '../utils/export'
 import { testWebdavConnection, ensureRemoteStructure } from '../utils/webdav'
 import { shortcutLabel, normalizeKey, findShortcutAction } from '../utils/shortcuts'
 import { exportBackup, importBackup } from '../utils/backup'
@@ -997,7 +997,7 @@ function ExportModal() {
   const close = useUiStore((s) => s.close)
   const currentPageIndex = useAppStore((s) => s.currentPageIndex)
   const [scope, setScope] = useState<'all' | 'single'>('single')
-  const [format, setFormat] = useState<'png' | 'pdf'>('png')
+  const [format, setFormat] = useState<'png' | 'jpeg' | 'pdf'>('png')
   const [busy, setBusy] = useState(false)
 
   const notebook = useAppStore((s) => s.activeNotebook)
@@ -1006,12 +1006,16 @@ function ExportModal() {
     if (!notebook) return
     setBusy(true)
     try {
-      if (format === 'png') {
+      if (format === 'png' || format === 'jpeg') {
         if (scope === 'single') {
-          await exportPageAsPng(notebook.pages[currentPageIndex], `${safeName(notebook.name)}-pagina-${currentPageIndex + 1}.png`)
+          const extension = format === 'jpeg' ? 'jpg' : 'png'
+          const exportPage = format === 'jpeg' ? exportPageAsJpeg : exportPageAsPng
+          await exportPage(notebook.pages[currentPageIndex], `${safeName(notebook.name)}-pagina-${currentPageIndex + 1}.${extension}`)
         } else {
           for (let i = 0; i < notebook.pages.length; i++) {
-            await exportPageAsPng(notebook.pages[i], `${safeName(notebook.name)}-pagina-${i + 1}.png`)
+            const extension = format === 'jpeg' ? 'jpg' : 'png'
+            const exportPage = format === 'jpeg' ? exportPageAsJpeg : exportPageAsPng
+            await exportPage(notebook.pages[i], `${safeName(notebook.name)}-pagina-${i + 1}.${extension}`)
           }
         }
       } else {
@@ -1038,6 +1042,7 @@ function ExportModal() {
       <label className="form-label">{t('modal.format')}</label>
       <div className="radio-group">
         <label><input type="radio" checked={format === 'png'} onChange={() => setFormat('png')} /> {t('modal.imagePng')}</label>
+        <label><input type="radio" checked={format === 'jpeg'} onChange={() => setFormat('jpeg')} /> {t('modal.imageJpeg')}</label>
         <label><input type="radio" checked={format === 'pdf'} onChange={() => setFormat('pdf')} /> {t('modal.pdfFormat')}</label>
       </div>
       <div className="modal-actions">
@@ -1285,71 +1290,113 @@ function SettingsModal() {
           <div className="settings-section">
             <div className="settings-section-title">{t('modal.sectionAppearance')}</div>
 
-            <label className="form-label">{t('modal.theme')}</label>
-            <select
-              className="form-input"
-              value={settings.theme}
-              onChange={(e) => setSettings({ theme: e.target.value as AppTheme })}
-            >
-              <option value="system">{t('modal.themeSystem')}</option>
-              <option value="light">{t('modal.themeLight')}</option>
-              <option value="dark">{t('modal.themeDark')}</option>
-            </select>
+            <div className="settings-group">
+              <div className="settings-group-title">{t('modal.theme')}</div>
+              <select
+                className="form-input"
+                value={settings.theme}
+                onChange={(e) => setSettings({ theme: e.target.value as AppTheme })}
+              >
+                <option value="system">{t('modal.themeSystem')}</option>
+                <option value="light">{t('modal.themeLight')}</option>
+                <option value="dark">{t('modal.themeDark')}</option>
+              </select>
+            </div>
 
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideTopBar}
-                  onChange={(e) => setSettings({ hideTopBar: e.target.checked })}
-                />
-                {t('modal.hideTopBar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideTopBarHint')}</span>
+            <div className="settings-group">
+              <div className="settings-group-title">{t('modal.appearanceLayout')}</div>
+              <div className="settings-options">
+                <div className="settings-check">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings.hideTopBar}
+                      onChange={(e) => setSettings({ hideTopBar: e.target.checked })}
+                    />
+                    {t('modal.hideTopBar')}
+                  </label>
+                  <span className="modal-hint">{t('modal.hideTopBarHint')}</span>
+                </div>
+                <div className="settings-check">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings.hideToolbar}
+                      onChange={(e) => setSettings({ hideToolbar: e.target.checked })}
+                    />
+                    {t('modal.hideToolbar')}
+                  </label>
+                  <span className="modal-hint">{t('modal.hideToolbarHint')}</span>
+                </div>
+                <div className="settings-check">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings.hidePageList}
+                      onChange={(e) => setSettings({ hidePageList: e.target.checked })}
+                    />
+                    {t('modal.hidePageList')}
+                  </label>
+                  <span className="modal-hint">{t('modal.hidePageListHint')}</span>
+                </div>
+                <div className="settings-check">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings.hidePageCount}
+                      onChange={(e) => setSettings({ hidePageCount: e.target.checked })}
+                    />
+                    {t('modal.hidePageCount')}
+                  </label>
+                  <span className="modal-hint">{t('modal.hidePageCountHint')}</span>
+                </div>
+              </div>
             </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideToolbar}
-                  onChange={(e) => setSettings({ hideToolbar: e.target.checked })}
-                />
-                {t('modal.hideToolbar')}
-              </label>
-              <span className="modal-hint">{t('modal.hideToolbarHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hidePageList}
-                  onChange={(e) => setSettings({ hidePageList: e.target.checked })}
-                />
-                {t('modal.hidePageList')}
-              </label>
-              <span className="modal-hint">{t('modal.hidePageListHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hidePageCount}
-                  onChange={(e) => setSettings({ hidePageCount: e.target.checked })}
-                />
-                {t('modal.hidePageCount')}
-              </label>
-              <span className="modal-hint">{t('modal.hidePageCountHint')}</span>
-            </div>
-            <div className="settings-check">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={settings.hideToolCursor}
-                  onChange={(e) => setSettings({ hideToolCursor: e.target.checked })}
-                />
-                {t('modal.hideToolCursor')}
-              </label>
-              <span className="modal-hint">{t('modal.hideToolCursorHint')}</span>
+
+            <div className="settings-group">
+              <div className="settings-group-title">{t('modal.appearanceCursors')}</div>
+              <div className="settings-options">
+                <div className="settings-check settings-check-featured">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={settings.hideToolCursor || (
+                        settings.hidePenCursor &&
+                        settings.hideHighlighterCursor &&
+                        settings.hideEraserCursor
+                      )}
+                      onChange={(e) => setSettings({
+                        hideToolCursor: e.target.checked,
+                        hidePenCursor: e.target.checked,
+                        hideHighlighterCursor: e.target.checked,
+                        hideEraserCursor: e.target.checked,
+                      })}
+                    />
+                    {t('modal.hideToolCursor')}
+                  </label>
+                  <span className="modal-hint">{t('modal.hideToolCursorHint')}</span>
+                </div>
+                <div className="settings-suboptions">
+                  <div className="settings-check">
+                    <label>
+                      <input type="checkbox" checked={settings.hidePenCursor} onChange={(e) => setSettings({ hideToolCursor: false, hidePenCursor: e.target.checked })} />
+                      {t('modal.hidePenCursor')}
+                    </label>
+                  </div>
+                  <div className="settings-check">
+                    <label>
+                      <input type="checkbox" checked={settings.hideHighlighterCursor} onChange={(e) => setSettings({ hideToolCursor: false, hideHighlighterCursor: e.target.checked })} />
+                      {t('modal.hideHighlighterCursor')}
+                    </label>
+                  </div>
+                  <div className="settings-check">
+                    <label>
+                      <input type="checkbox" checked={settings.hideEraserCursor} onChange={(e) => setSettings({ hideToolCursor: false, hideEraserCursor: e.target.checked })} />
+                      {t('modal.hideEraserCursor')}
+                    </label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

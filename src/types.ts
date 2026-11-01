@@ -187,6 +187,9 @@ export interface AppSettings {
   hidePageList: boolean
   hidePageCount: boolean
   hideToolCursor: boolean
+  hidePenCursor: boolean
+  hideHighlighterCursor: boolean
+  hideEraserCursor: boolean
   layersWidth: number
   pageViewMode: PageViewMode
   lastTextFontFamily: string
@@ -388,6 +391,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hidePageList: false,
   hidePageCount: false,
   hideToolCursor: false,
+  hidePenCursor: false,
+  hideHighlighterCursor: false,
+  hideEraserCursor: false,
   layersWidth: 260,
   pageViewMode: 'vertical',
   lastTextFontFamily: 'Segoe UI, system-ui, sans-serif',
