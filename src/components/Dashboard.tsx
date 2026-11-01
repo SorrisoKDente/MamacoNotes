@@ -346,6 +346,9 @@ export function Dashboard() {
       sidebarRect && x >= sidebarRect.left && x <= sidebarRect.right && y >= sidebarRect.top && y <= sidebarRect.bottom,
     )
     const rootElement = document.querySelector<HTMLElement>('[data-is-root="true"]')
+    if (rootElement && containsPoint(rootElement)) {
+      return { type: 'folder', id: 'root', isSidebar: true }
+    }
     const sidebarElement = Array.from(document.querySelectorAll<HTMLElement>('.tree-item-row'))
       .find((element) => containsPoint(element) && isUsable(element.dataset.id))
     if (pointIsInSidebar) {
@@ -357,6 +360,7 @@ export function Dashboard() {
           isSidebar: true,
         }
       }
+      return { type: 'folder', id: 'root', isSidebar: true }
     }
 
     const dashboardElement = Array.from(document.querySelectorAll<HTMLElement>('.dashboard-item'))

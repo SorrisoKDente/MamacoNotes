@@ -360,7 +360,7 @@ interface AppState {
   selectedIds: string[]
   selectedPageIndices: number[]
   clipboard: { ids: string[]; cut: boolean } | null
-  layerClipboard: { layers: Layer[]; cut: boolean } | null
+  layerClipboard: { layers: Layer[]; folders: LayerFolder[]; cut: boolean } | null
   lastClicked: LastClickedTarget
   currentPageIndex: number
   tool: ToolKind
@@ -440,7 +440,7 @@ interface AppState {
   renameLayer: (index: number, name: string) => Promise<void>
   duplicateLayer: (index: number) => Promise<void>
   deleteLayer: (index: number) => Promise<void>
-  copyLayers: (ids: string[], cut?: boolean) => void
+  copyLayers: (ids: string[], cut?: boolean, folderIds?: string[]) => void
   pasteLayers: () => Promise<void>
   moveLayerToFolder: (
     from: number,
@@ -452,10 +452,10 @@ interface AppState {
   setLayerLocked: (index: number, locked: boolean) => Promise<void>
   setActiveLayer: (id: string) => Promise<void>
   mergeSelectedLayers: (indices: number[]) => Promise<void>
-  addLayerFolder: (name: string) => Promise<void>
+  addLayerFolder: (name: string, parentId?: string | null) => Promise<void>
   renameLayerFolder: (id: string, name: string) => Promise<void>
   deleteLayerFolder: (id: string) => Promise<void>
-  reorderLayerFolder: (id: string, beforeId: string | null) => Promise<void>
+  reorderLayerFolder: (id: string, beforeId: string | null, parentId?: string | null) => Promise<void>
 
   setSettings: (patch: Partial<AppSettings>) => Promise<void>
   setShortcut: (action: keyof AppSettings['shortcuts'], value: string) => Promise<void>
@@ -1783,24 +1783,45 @@ export const useAppStore = create<AppState>((set, get) => {
       await updateNotebookStorage(notebook)
     },
 
-    copyLayers(ids, cut = false) {
+    copyLayers(ids, cut = false, folderIds = []) {
       const ctx = getActiveContext(get)
-      if (!ctx || ids.length === 0) return
+      if (!ctx || (ids.length === 0 && folderIds.length === 0)) return
+      const sourceFolders = ctx.page.layerFolders ?? []
+      const copiedFolderIds = new Set(folderIds)
+      for (const folder of sourceFolders) {
+        let parent = folder.parentId ?? null
+        while (parent) {
+          if (copiedFolderIds.has(parent)) {
+            copiedFolderIds.add(folder.id)
+            break
+          }
+          parent = sourceFolders.find((candidate) => candidate.id === parent)?.parentId ?? null
+        }
+      }
       const selected = ctx.page.layers
-        .filter((layer) => ids.includes(layer.id))
+        .filter((layer) => ids.includes(layer.id) || copiedFolderIds.has(layer.folderId ?? ''))
         .map((layer) => cloneLayerWithNewIds(layer))
-      if (selected.length === 0) return
+      const selectedFolders = (ctx.page.layerFolders ?? [])
+        .filter((folder) => copiedFolderIds.has(folder.id))
+        .map((folder) => ({ ...folder }))
+      if (selected.length === 0 && selectedFolders.length === 0) return
       if (cut) {
         const remaining = ctx.page.layers.filter((layer) => !ids.includes(layer.id))
         if (remaining.length === 0) return
         get().pushUndo()
         ctx.page.layers = remaining
+        ctx.page.layerFolders = (ctx.page.layerFolders ?? []).filter((folder) => !copiedFolderIds.has(folder.id))
+        for (const layer of ctx.page.layers) {
+          if (copiedFolderIds.has(layer.folderId ?? '') && !selected.some((item) => item.id === layer.id)) {
+            layer.folderId = null
+          }
+        }
         ctx.page.activeLayerId = remaining[remaining.length - 1].id
         ctx.page.updatedAt = Date.now()
         ctx.notebook.updatedAt = Date.now()
         void updateNotebookStorage(ctx.notebook)
       }
-      set({ layerClipboard: { layers: selected, cut } })
+      set({ layerClipboard: { layers: selected, folders: selectedFolders, cut } })
     },
 
     async pasteLayers() {
@@ -1809,7 +1830,18 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!ctx || !clip || clip.layers.length === 0) return
       const { notebook, page } = ctx
       get().pushUndo()
-      const clones = clip.layers.map((layer) => cloneLayerWithNewIds(layer))
+      const folderMap = new Map<string, string>()
+      for (const folder of clip.folders) folderMap.set(folder.id, uid())
+      const folders = clip.folders.map((folder) => ({
+        ...folder,
+        id: folderMap.get(folder.id)!,
+        parentId: folder.parentId ? folderMap.get(folder.parentId) ?? null : null,
+      }))
+      const clones = clip.layers.map((layer) => cloneLayerWithNewIds({
+        ...layer,
+        folderId: layer.folderId ? folderMap.get(layer.folderId) ?? null : null,
+      }))
+      page.layerFolders = [...(page.layerFolders ?? []), ...folders]
       const insertAt = page.layers.length
       page.layers.splice(insertAt, 0, ...clones)
       page.activeLayerId = clones[clones.length - 1].id
@@ -1871,7 +1903,7 @@ export const useAppStore = create<AppState>((set, get) => {
       await updateNotebookStorage(notebook)
     },
 
-    async addLayerFolder(name) {
+    async addLayerFolder(name, parentId = null) {
       const ctx = getActiveContext(get)
       if (!ctx) return
       const { notebook, page } = ctx
@@ -1882,6 +1914,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const folder: LayerFolder = {
         id: newId(),
         name: trimmed,
+        parentId,
         order: nextOrder(folders.map((f: LayerFolder) => f.order)),
       }
       folders.push(folder)
@@ -1913,39 +1946,58 @@ export const useAppStore = create<AppState>((set, get) => {
       const folders = page.layerFolders ?? []
       if (!folders.some((f: LayerFolder) => f.id === id)) return
       get().pushUndo()
-      page.layerFolders = folders.filter((f: LayerFolder) => f.id !== id)
+      const removedIds = new Set<string>()
+      const collect = (folderId: string) => {
+        if (removedIds.has(folderId)) return
+        removedIds.add(folderId)
+        for (const child of folders) {
+          if ((child.parentId ?? null) === folderId) collect(child.id)
+        }
+      }
+      collect(id)
+      if (page.layers.filter((layer) => !layer.folderId || !removedIds.has(layer.folderId)).length === 0) return
+      page.layerFolders = folders.filter((f: LayerFolder) => !removedIds.has(f.id))
       const lastClicked = get().lastClicked
-      if (lastClicked && lastClicked.type === 'layerFolder' && lastClicked.id === id) {
+      if (lastClicked && lastClicked.type === 'layerFolder' && removedIds.has(lastClicked.id)) {
         set({ lastClicked: null })
       }
-      for (const l of page.layers) {
-        if ((l.folderId ?? null) === id) l.folderId = null
-      }
+      page.layers = page.layers.filter((layer) => !layer.folderId || !removedIds.has(layer.folderId))
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
     },
 
-    async reorderLayerFolder(id, beforeId) {
+    async reorderLayerFolder(id, beforeId, parentId = null) {
       const ctx = getActiveContext(get)
       if (!ctx) return
       const { notebook, page } = ctx
       const folders = page.layerFolders ?? []
       const folder = folders.find((f: LayerFolder) => f.id === id)
       if (!folder) return
-      const siblings = folders.filter((f: LayerFolder) => f.id !== id)
+      if (parentId === id) return
+      let ancestor = parentId
+      while (ancestor) {
+        if (ancestor === id) return
+        ancestor = folders.find((f) => f.id === ancestor)?.parentId ?? null
+      }
+      const siblings = [...folders]
+        .filter((f: LayerFolder) => f.id !== id && (f.parentId ?? null) === parentId)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      const dragged = { ...folder, parentId }
       const list: LayerFolder[] = []
       if (beforeId) {
         const idx = siblings.findIndex((s: LayerFolder) => s.id === beforeId)
-        if (idx >= 0) list.push(...siblings.slice(0, idx), folder, ...siblings.slice(idx))
-        else list.push(...siblings, folder)
+        if (idx >= 0) list.push(...siblings.slice(0, idx), dragged, ...siblings.slice(idx))
+        else list.push(...siblings, dragged)
       } else {
-        list.push(...siblings, folder)
+        list.push(...siblings, dragged)
       }
       const ordered = list.map((f, i) => ({ ...f, order: i }))
-      if (ordered.every((f, i) => f.id === (folders[i]?.id ?? null) && f.order === folders[i]?.order)) return
+      const currentOrder = siblings
+      if (ordered.every((f, i) => f.id === (currentOrder[i]?.id ?? null) && f.order === currentOrder[i]?.order && (f.parentId ?? null) === (currentOrder[i]?.parentId ?? null))) return
       get().pushUndo()
-      page.layerFolders = ordered
+      const changed = new Map(ordered.map((item) => [item.id, item]))
+      page.layerFolders = folders.map((item) => changed.get(item.id) ?? item)
       page.updatedAt = Date.now()
       notebook.updatedAt = Date.now()
       await updateNotebookStorage(notebook)
@@ -2209,11 +2261,24 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async undo() {
+      if (get().selectedNotebookId !== null) {
+        const entry = undoStack.pop()
+        if (!entry) return
+        const notebook = get().activeNotebook
+        if (!notebook || notebook.id !== entry.notebookId) return
+        const current = notebook.pages[entry.pageIndex]
+        if (current) redoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
+        notebook.pages[entry.pageIndex] = entry.pageSnapshot
+        notebook.updatedAt = Date.now()
+        set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, lastUndoRedo: Date.now() })
+        await updateNotebookStorage({ ...notebook })
+        return
+      }
       const dashboardEntry = dashboardUndoStack.pop()
       if (dashboardEntry) {
         dashboardRedoStack.push(await captureDashboardSnapshot())
         await restoreDashboardSnapshot(dashboardEntry)
-        set({ canUndo: dashboardUndoStack.length > 0 || undoStack.length > 0, canRedo: true, lastUndoRedo: Date.now() })
+        set({ activeNotebook: null, selectedNotebookId: null, currentPageIndex: 0, selectedIds: [], canUndo: dashboardUndoStack.length > 0, canRedo: true, lastUndoRedo: Date.now() })
         return
       }
       const entry = undoStack.pop()
@@ -2230,11 +2295,24 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async redo() {
+      if (get().selectedNotebookId !== null) {
+        const entry = redoStack.pop()
+        if (!entry) return
+        const notebook = get().activeNotebook
+        if (!notebook || notebook.id !== entry.notebookId) return
+        const current = notebook.pages[entry.pageIndex]
+        if (current) undoStack.push({ notebookId: entry.notebookId, pageIndex: entry.pageIndex, pageSnapshot: clonePage(current) })
+        notebook.pages[entry.pageIndex] = entry.pageSnapshot
+        notebook.updatedAt = Date.now()
+        set({ currentPageIndex: entry.pageIndex, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, lastUndoRedo: Date.now() })
+        await updateNotebookStorage({ ...notebook })
+        return
+      }
       const dashboardEntry = dashboardRedoStack.pop()
       if (dashboardEntry) {
         dashboardUndoStack.push(await captureDashboardSnapshot())
         await restoreDashboardSnapshot(dashboardEntry)
-        set({ canUndo: true, canRedo: dashboardRedoStack.length > 0 || redoStack.length > 0, lastUndoRedo: Date.now() })
+        set({ activeNotebook: null, selectedNotebookId: null, currentPageIndex: 0, selectedIds: [], canUndo: true, canRedo: dashboardRedoStack.length > 0, lastUndoRedo: Date.now() })
         return
       }
       const entry = redoStack.pop()

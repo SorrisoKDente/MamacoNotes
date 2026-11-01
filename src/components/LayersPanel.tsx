@@ -41,6 +41,7 @@ export function LayersPanel() {
   const sortedFolders = [...folders].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [opacityDraft, setOpacityDraft] = useState<number | null>(null)
@@ -66,6 +67,7 @@ export function LayersPanel() {
   const dragFolderIdRef = useRef<string | null>(null)
   const dropBeforeRef = useRef<string | null>(null)
   const dropIntoFolderRef = useRef<string | null>(null)
+  const dropFolderIdRef = useRef<string | null>(null)
   const selectedFolderIdRef = useRef<string | null>(null)
   const [dragLayerId, setDragLayerId] = useState<string | null>(null)
   const [dragFolderId, setDragFolderId] = useState<string | null>(null)
@@ -77,6 +79,7 @@ export function LayersPanel() {
 
   useEffect(() => {
     setSelectedIds([])
+    setSelectedFolderIds([])
     setRenamingId(null)
     setSelectedFolderId(null)
     setRenamingFolderId(null)
@@ -157,25 +160,27 @@ export function LayersPanel() {
         if (key === 'a') {
           e.preventDefault()
           setSelectedIds(layers.map((layer) => layer.id))
-        } else if (key === 'c' && selectedIds.length > 0) {
-          e.preventDefault()
-          copyLayers(selectedIds)
-        } else if (key === 'x' && selectedIds.length > 0) {
-          e.preventDefault()
-          copyLayers(selectedIds, true)
-          setSelectedIds([])
+        setSelectedFolderIds(folders.map((folder) => folder.id))
+        } else if (key === 'c' && (selectedIds.length > 0 || selectedFolderIds.length > 0)) {
+        e.preventDefault()
+        copyLayers(selectedIds, false, selectedFolderIds)
+        } else if (key === 'x' && (selectedIds.length > 0 || selectedFolderIds.length > 0)) {
+        e.preventDefault()
+        copyLayers(selectedIds, true, selectedFolderIds)
+        setSelectedIds([])
+        setSelectedFolderIds([])
         } else if (key === 'v') {
           e.preventDefault()
           void pasteLayers()
         }
-      } else if (e.key === 'Delete' && selectedIds.length > 0) {
+      } else if (e.key === 'Delete' && (selectedIds.length > 0 || selectedFolderIds.length > 0)) {
         e.preventDefault()
         void handleDeleteSelected()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [layers, selectedIds, copyLayers, pasteLayers])
+  }, [layers, folders, selectedIds, selectedFolderIds, copyLayers, pasteLayers])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -237,6 +242,12 @@ export function LayersPanel() {
     )
   }
 
+  function toggleFolderSelect(id: string) {
+    setSelectedFolderIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+  }
+
   function selectRange(clickedId: string) {
     const order = [...layers].reverse().map((l) => l.id)
     const clickedPos = order.indexOf(clickedId)
@@ -259,6 +270,7 @@ export function LayersPanel() {
     setSelectedFolderId(null)
     if (e.shiftKey) {
       setLastClicked(null)
+      setSelectedFolderIds([])
       selectRange(layer.id)
       return
     }
@@ -268,17 +280,25 @@ export function LayersPanel() {
       return
     }
     setSelectedIds([layer.id])
+    setSelectedFolderIds([])
     anchorIdRef.current = layer.id
     setLastClicked({ type: 'layer', id: layer.id })
   }
 
-  function onFolderClick(folder: LayerFolder) {
+  function onFolderClick(folder: LayerFolder, e?: React.MouseEvent) {
     if (suppressClickRef.current) {
       suppressClickRef.current = false
       return
     }
+    if (e && isModifier(e)) {
+      toggleFolderSelect(folder.id)
+      setSelectedFolderId(folder.id)
+      return
+    }
     toggleFolderCollapsed(folder.id)
     setSelectedFolderId(folder.id)
+    setSelectedIds([])
+    setSelectedFolderIds([folder.id])
     setLastClicked({ type: 'layerFolder', id: folder.id })
   }
 
@@ -435,6 +455,7 @@ export function LayersPanel() {
     autoscroll(e)
     const row = rowFromPoint(e.clientX, e.clientY)
     if (row && row.type === 'folder') {
+      dropFolderIdRef.current = row.id
       dropIntoFolderRef.current = row.id
       dropBeforeRef.current = null
       setDropIntoFolder(row.id)
@@ -443,6 +464,7 @@ export function LayersPanel() {
       return
     }
     if (row && row.type === 'root') {
+      dropFolderIdRef.current = null
       dropIntoFolderRef.current = null
       dropBeforeRef.current = null
       setDropIntoFolder(null)
@@ -452,11 +474,21 @@ export function LayersPanel() {
     }
     if (row && row.type === 'layer' && row.id !== dragLayerIdRef.current) {
       dropIntoFolderRef.current = null
-      dropBeforeRef.current = row.id
+      const targetLayer = layers.find((layer) => layer.id === row.id)
+      const targetFolderId = targetLayer?.folderId ?? null
+      dropFolderIdRef.current = targetFolderId
+      const displayed = layers
+        .filter((layer) => (layer.folderId ?? null) === targetFolderId)
+        .reverse()
+      const targetIndex = displayed.findIndex((layer) => layer.id === row.id)
+      const targetEl = scrollerRef.current?.querySelector(`[data-layer-id="${row.id}"]`)
+      const afterTarget = targetEl instanceof HTMLElement && e.clientY > targetEl.getBoundingClientRect().top + targetEl.getBoundingClientRect().height / 2
+      const nextLayer = afterTarget && targetIndex >= 0 ? displayed[targetIndex + 1] : undefined
+      dropBeforeRef.current = nextLayer?.id ?? (afterTarget ? null : row.id)
       setDropIntoFolder(null)
       setDropRootActive(false)
       const scroller = scrollerRef.current
-      const el = scroller?.querySelector(`[data-layer-id="${row.id}"]`)
+      const el = scroller?.querySelector(`[data-layer-id="${nextLayer?.id ?? row.id}"]`)
       if (el instanceof HTMLElement && scroller) {
         const sr = scroller.getBoundingClientRect()
         setDropIndicatorY(el.getBoundingClientRect().top - sr.top + scroller.scrollTop)
@@ -464,6 +496,7 @@ export function LayersPanel() {
       return
     }
     const slot = computeLayerSlot(e.clientY)
+    dropFolderIdRef.current = null
     dropIntoFolderRef.current = null
     dropBeforeRef.current = slot.before
     setDropIntoFolder(null)
@@ -473,6 +506,25 @@ export function LayersPanel() {
 
   function updateFolderDropPosition(e: React.PointerEvent) {
     autoscroll(e)
+    const row = rowFromPoint(e.clientX, e.clientY)
+    if (row?.type === 'root') {
+      dropIntoFolderRef.current = null
+      dropBeforeRef.current = null
+      setDropIntoFolder(null)
+      setDropRootActive(true)
+      setDropIndicatorY(null)
+      return
+    }
+    if (row?.type === 'folder' && row.id !== dragFolderIdRef.current) {
+      dropIntoFolderRef.current = row.id
+      dropBeforeRef.current = null
+      setDropIntoFolder(row.id)
+      setDropIndicatorY(null)
+      return
+    }
+    dropIntoFolderRef.current = null
+    setDropIntoFolder(null)
+    setDropRootActive(false)
     const slot = computeFolderSlot(e.clientY)
     dropBeforeRef.current = slot.before
     setDropIndicatorY(slot.y)
@@ -527,14 +579,15 @@ export function LayersPanel() {
       void moveLayerToFolder(from, intoFolder, null)
     } else {
       const beforeLayer = before ? layers.find((l: Layer) => l.id === before) : undefined
-      const targetFolder = beforeLayer ? (beforeLayer.folderId ?? null) : null
+      const targetFolder = beforeLayer ? (beforeLayer.folderId ?? null) : dropFolderIdRef.current
       void moveLayerToFolder(from, targetFolder, before)
     }
   }
 
   function finishFolderDrop(folderId: string) {
     const before = dropBeforeRef.current
-    void reorderLayerFolder(folderId, before)
+    const parentId = dropIntoFolderRef.current
+    void reorderLayerFolder(folderId, before, parentId)
   }
 
   function onPointerUp(e: React.PointerEvent) {
@@ -555,6 +608,7 @@ export function LayersPanel() {
     pressStartRef.current = null
     dropBeforeRef.current = null
     dropIntoFolderRef.current = null
+    dropFolderIdRef.current = null
     setDragLayerId(null)
     setDragFolderId(null)
     setDropIndicatorY(null)
@@ -594,7 +648,7 @@ export function LayersPanel() {
 
   async function handleNewFolder() {
     const name = await promptName(t('layers.newFolderPrompt'))
-    if (name && name.trim()) await addLayerFolder(name.trim())
+    if (name && name.trim()) await addLayerFolder(name.trim(), selectedFolderId)
   }
 
   async function handleDeleteFolder(folder: LayerFolder) {
@@ -609,22 +663,25 @@ export function LayersPanel() {
   async function handleDeleteSelected() {
     const ids = selectedIds.length > 0
       ? selectedIds
-      : activeLayer
+      : selectedFolderIds.length === 0 && activeLayer
         ? [activeLayer.id]
         : []
-    if (ids.length === 0) return
+    const folderIds = selectedFolderIds
+    if (ids.length === 0 && folderIds.length === 0) return
     if (layers.length - ids.length < 1) {
       await confirmAction(t('layers.lastLayerConfirm'))
       return
     }
-    const ok = await confirmAction(t('layers.deleteSelectedConfirm', { count: ids.length }))
+    const ok = await confirmAction(t('layers.deleteSelectedConfirm', { count: ids.length + folderIds.length }))
     if (!ok) return
     const indices = ids
       .map((id) => layers.findIndex((layer) => layer.id === id))
       .filter((index) => index >= 0)
       .sort((a, b) => b - a)
     for (const index of indices) await deleteLayer(index)
+    for (const folderId of folderIds) await deleteLayerFolder(folderId)
     setSelectedIds([])
+    setSelectedFolderIds([])
   }
 
   function openFolderMenu(folderId: string, e: React.MouseEvent) {
@@ -770,13 +827,17 @@ export function LayersPanel() {
 
   function renderFolderRow(folder: LayerFolder) {
     const isCollapsed = collapsedFolderIds.has(folder.id)
-    const isSelected = selectedFolderId === folder.id
+    const isSelected = selectedFolderIds.includes(folder.id) || selectedFolderId === folder.id
     const isDragging = dragFolderId === folder.id
     const isDropTarget = dropIntoFolder === folder.id
     const folderLayerRows = layers
       .filter((l: Layer) => (l.folderId ?? null) === folder.id)
       .reverse()
       .map((layer: Layer) => renderLayerRow(layer))
+    const childFolderRows = folders
+      .filter((child) => (child.parentId ?? null) === folder.id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((child) => renderFolderRow(child))
     return (
       <Fragment key={folder.id}>
         <div
@@ -786,7 +847,7 @@ export function LayersPanel() {
           onPointerMove={(e) => onFolderPointerMove(e, folder)}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onClick={() => onFolderClick(folder)}
+          onClick={(e) => onFolderClick(folder, e)}
           onContextMenu={(e) => {
             if (dragFolderIdRef.current) e.preventDefault()
           }}
@@ -860,6 +921,7 @@ export function LayersPanel() {
               <div className="layer-folder-empty">{t('layers.folderEmpty')}</div>
             )}
             {folderLayerRows}
+            {childFolderRows}
           </div>
         )}
       </Fragment>
@@ -943,13 +1005,15 @@ export function LayersPanel() {
 
       <div ref={scrollerRef} className="layer-scroll">
         {!hasLayers && <div className="layer-empty">{t('layers.add')}</div>}
-        {sortedFolders.map((folder) => renderFolderRow(folder))}
+        {sortedFolders
+          .filter((folder) => (folder.parentId ?? null) === null)
+          .map((folder) => renderFolderRow(folder))}
         {hasLayers &&
           rootLayers
             .slice()
             .reverse()
             .map((layer: Layer) => renderLayerRow(layer))}
-        {dragLayerId !== null && (
+        { (dragLayerId !== null || dragFolderId !== null) && (
           <div className={`layer-root-zone ${dropRootActive ? 'drop-target' : ''}`} data-root-zone>
             <span className="layer-root-zone-line" />
           </div>

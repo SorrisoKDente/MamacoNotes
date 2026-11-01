@@ -151,6 +151,13 @@ is confirmed and cannot remove the final remaining layer. Dashboard metadata act
 also use the global undo/redo history, while `scripts/verify-contextual-editing.ts`
 covers selection and two-layer ordering invariants.
 
+The LayersPanel selection model includes both `selectedIds` for layers and
+`selectedFolderIds` for folders. Its typed clipboard preserves folder contents and
+generates new IDs on paste. Dashboard metadata undo/redo is only consumed while no
+notebook is selected, so restoring a Dashboard snapshot cannot reopen a note.
+Layer folders persist an optional `parentId`, render recursively, and support
+recursive copy/deletion plus drag-and-drop between root and nested folders.
+
 | File | Responsibility |
 |---|---|
 | `canvas.ts` | `PageCanvas` class: renders pages (continuous/separate), layers (visibility/opacity), strokes, images, texts, PDF, templates, selection; coordinate conversion; hit tests |

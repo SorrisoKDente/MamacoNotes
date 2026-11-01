@@ -97,6 +97,7 @@ export interface PdfBackground {
 export interface LayerFolder {
   id: string
   name: string
+  parentId?: string | null
   order?: number
 }
 

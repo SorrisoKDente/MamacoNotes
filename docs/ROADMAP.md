@@ -47,6 +47,12 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Safe Deletion**:
   - [x] Implement a confirmation popup for bulk deletion of layers or folders.
   - [x] **Layer Constraint**: Ensure at least one layer always exists; attempts to delete all layers are rejected with feedback.
+- [x] **Layer Folder Clipboard and Ordering**: Ctrl+A/C/X/V/Delete now includes layer folders, and folder/layer drag destinations support root, before, after, and inside-folder operations.
+- [x] **Dashboard Root Drag Target**: Items can be dragged from a folder back to the root through the Dashboard root drop target.
+- [x] **Dashboard Undo Isolation**: Dashboard undo/redo restores metadata without reopening or entering a notebook.
+- [x] **Nested Layer Folders**: Layer folders support nesting, recursive copy, recursive deletion, and drag-and-drop into another folder.
+- [x] **Layer Folder Arrow Direction**: Collapsed folders point right and expanded folders point down.
+- [x] **Dashboard Folder Escape Drop**: Items inside a Dashboard folder can be dragged back to the root.
 - [x] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download.
 
 ## 💡 Future Ideas (Backlog)

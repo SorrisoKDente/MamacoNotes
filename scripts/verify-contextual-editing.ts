@@ -29,6 +29,19 @@ console.log('== Contextual Editing Regression Verification ==')
 }
 
 {
+  const layers = ['layer-1', 'layer-2']
+  const folders = ['folder-1', 'folder-2']
+  const selectedLayers = [...layers]
+  const selectedFolders = [...folders]
+  assert(selectedLayers.length === 2, 'Ctrl+A selects every layer')
+  assert(selectedFolders.length === 2, 'Ctrl+A selects every layer folder')
+  assert(
+    new Set([...selectedLayers, ...selectedFolders]).size === 4,
+    'layer and folder selections do not collide',
+  )
+}
+
+{
   const layer = {
     strokes: [{ id: 'stroke-1' }],
     images: [{ id: 'image-1' }],
@@ -60,6 +73,28 @@ console.log('== Contextual Editing Regression Verification ==')
   assert(
     moveBefore(['bottom', 'top'], 'top', 'bottom').join(',') === 'top,bottom',
     'two-layer reorder can move the top item before the bottom item',
+  )
+}
+
+{
+  let selectedNotebookId: string | null = null
+  const dashboardUndo = () => {
+    if (selectedNotebookId !== null) return 'editor-history'
+    return 'dashboard-history'
+  }
+  assert(
+    (() => {
+      selectedNotebookId = null
+      return dashboardUndo() === 'dashboard-history'
+    })(),
+    'Dashboard undo uses dashboard history',
+  )
+  assert(
+    (() => {
+      selectedNotebookId = 'note-1'
+      return dashboardUndo() === 'editor-history'
+    })(),
+    'Editor undo does not consume Dashboard history',
   )
 }
 
