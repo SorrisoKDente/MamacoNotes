@@ -1292,6 +1292,20 @@ body {
   font-size: 10.5px;
 }
 
+.toolbar-btn .toolbar-btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46px;
+}
+
+.geometry-tool-btn .toolbar-btn-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
 .toolbar-btn:hover {
   background: var(--bg-3);
   color: var(--fg);
@@ -1639,6 +1653,23 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.geometry-buttons {
+  gap: 5px;
+}
+
+.geometry-buttons .mode-btn {
+  min-height: 34px;
+}
+
+.geometry-buttons .btn-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.geometry-tool-btn .toolbar-btn-label {
+  font-size: 9px;
 }
 
 .mode-btn {

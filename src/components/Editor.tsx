@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, clonePage } from '../store'
 import { useTextStore } from '../textStore'
 import { PageCanvas, strokeBounds, type SelectionRegion } from '../renderer/canvas'
@@ -270,7 +270,7 @@ export function Editor() {
       currentPageIndexRef.current,
     )
     engine.render()
-    if (toolRef.current === 'select') {
+    if (toolRef.current === 'select' || toolRef.current === 'geometry') {
       const sel = selectionRef.current
       const hasInkOrText = sel.strokes.size > 0 || sel.texts.size > 0
       if (hasInkOrText) {
@@ -510,8 +510,13 @@ export function Editor() {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const onHover = (event: PointerEvent) => {
-      if (event.pointerType !== 'mouse' || dragRef.current || !shouldUseCursorOnlyPointerPath(toolRef.current, event.pointerType, false)) {
+    const onHover = (event: MouseEvent | PointerEvent) => {
+      const pointerType = 'pointerType' in event ? event.pointerType : 'mouse'
+      if (
+        (pointerType !== 'mouse' && pointerType !== '') ||
+        dragRef.current ||
+        !shouldUseCursorOnlyPointerPath(toolRef.current, pointerType, false)
+      ) {
         return
       }
       const rect = canvas.getBoundingClientRect()
@@ -521,8 +526,15 @@ export function Editor() {
       updateCursorRef.current(mx, my, 1)
     }
 
+    // Some WebViews/Electron versions do not reliably emit pointermove for a
+    // mouse, or report an empty pointerType. Keep mouse hover independent from
+    // the pointer event path so a blank page can initialize the cursor too.
+    canvas.addEventListener('mousemove', onHover, { passive: true })
     canvas.addEventListener('pointermove', onHover, { passive: true })
-    return () => canvas.removeEventListener('pointermove', onHover)
+    return () => {
+      canvas.removeEventListener('mousemove', onHover)
+      canvas.removeEventListener('pointermove', onHover)
+    }
   }, [page?.id])
 
   // ponytail: ensure unsaved changes are flushed when Editor unmounts (e.g. exiting note / returning to dashboard).
@@ -542,6 +554,17 @@ export function Editor() {
 
   const notebookIdRef = useRef<string | null>(null)
   const pageIdRef = useRef<string | null>(null)
+
+  useLayoutEffect(() => {
+    if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') {
+      requestAnimationFrame(() => {
+        positionToolCursorRef.current(mousePosRef.current.x, mousePosRef.current.y, pointerPressureRef.current)
+        updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y, pointerPressureRef.current)
+      })
+    } else {
+      updateCursorRef.current(-1, -1, 1, false)
+    }
+  }, [tool])
 
   useEffect(() => {
     if (tool !== 'select') {
@@ -905,7 +928,7 @@ export function Editor() {
       !isToolCursorHidden(activeTool, useAppStore.getState().settings) &&
       !panActive
     ) {
-      if (cursor.style.opacity !== '1') positionToolCursor(mx, my, 1)
+      positionToolCursor(mx, my, 1)
     }
     updateCursorRef.current(mx, my, 1)
   }
@@ -1984,7 +2007,8 @@ export function Editor() {
       (tool === 'pen' ||
         tool === 'highlighter' ||
         tool === 'eraser' ||
-        tool === 'text' ||
+      tool === 'geometry' ||
+      tool === 'text' ||
         tool === 'select')
     ) {
       return
@@ -2035,8 +2059,11 @@ export function Editor() {
       return
     }
 
-    if (tool === 'select') {
-      const mode = settings.lastSelectMode
+    if (
+      tool === 'select' ||
+      (tool === 'geometry' && (transformHandleAt(pagePt) !== null || hitTestSelectionBounds(pagePt)))
+    ) {
+      const mode = tool === 'geometry' ? 'click' : settings.lastSelectMode
       const transformHit = transformHandleAt(pagePt)
       if (transformHit) {
         pushUndo()
@@ -2414,7 +2441,15 @@ export function Editor() {
       handle: null,
       startPan: { ...panRef.current },
     }
-    engine.beginStroke(tool, color, size, pos.x, pos.y, pointerPressureRef.current)
+    engine.beginStroke(
+      tool === 'geometry' ? 'pen' : tool,
+      color,
+      size,
+      pos.x,
+      pos.y,
+      pointerPressureRef.current,
+      tool === 'geometry' ? settings.geometryShape : undefined,
+    )
     trace('editor.down', tool, e.pointerType, `id=${e.pointerId}`, `page=${pageRef.current?.id.slice(0, 6)}`)
     requestRender()
   }
@@ -2720,7 +2755,20 @@ export function Editor() {
       if (e.pointerId !== dragOwnerIdRef.current) return
       const events = (e.nativeEvent as any).getCoalescedEvents?.() || [e.nativeEvent]
       for (const ev of events) {
-        engine.extendStroke(ev.clientX, ev.clientY, isMouse ? 1 : (ev.pressure || 0.5))
+        const shape = useAppStore.getState().settings.geometryShape
+        const constrain = toolRef.current === 'geometry' && (e.shiftKey || (ev as PointerEvent).shiftKey)
+          ? shape === 'rectangle' || shape === 'ellipse' || shape === 'triangle'
+            ? 'square'
+            : shape === 'line' || shape === 'arrow'
+              ? 'direction'
+              : false
+          : false
+        engine.extendStroke(
+          ev.clientX,
+          ev.clientY,
+          isMouse ? 1 : (ev.pressure || 0.5),
+          constrain,
+        )
       }
       return
     }
@@ -2995,6 +3043,15 @@ export function Editor() {
           // Fold the finished stroke into the cached page bitmap: the render
           // after releasing the pen is a blit instead of a full page repaint.
           engine.commitStrokeToPageCache(drawPage, committed)
+          if (committed.geometry) {
+            selectionRef.current = {
+              strokes: new Set([committed.id]),
+              images: new Set(),
+              texts: new Set(),
+            }
+            setSelectedImageId(null)
+            requestRender()
+          }
         }
       } else {
         // Another pointer moved the owner: the stroke is dropped on purpose.
@@ -3720,15 +3777,11 @@ export function Editor() {
             ref={canvasRef}
             className="editor-canvas"
             onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={trackMouse}
             onMouseMove={trackMouse}
             style={{ touchAction: 'none' }}
           />
-          {(tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
-            <ToolCursor
-              ref={toolCursorRef}
-              color={cursorColor(tool, settings)}
-            />
-          )}
+          <ToolCursor ref={toolCursorRef} color={cursorColor(tool, settings)} />
           {tool === 'text' && inlineText && page && (
             <InlineTextInput
               canvas={canvasRef.current}

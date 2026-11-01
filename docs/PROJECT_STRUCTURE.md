@@ -122,7 +122,7 @@ Initialization flow:
 |---|---|
 | `src/main.tsx` | React Bootstrap + PWA registration |
 | `src/App.tsx` | Root component; screen composition (Dashboard or TopBar + PageList + Editor + Toolbar + LayersPanel + Modals); init + auto-sync; Escape key → `ink:esc`; Android back button (Capacitor `@capacitor/app`) → `ink:esc` |
-| `src/types.ts` | **All domain data types** + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) + **`APP_VERSION`** (version constant) |
+| `src/types.ts` | **All domain data types** + geometric tool types (`GeometricShape`) + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) + **`APP_VERSION`** (version constant) |
 | `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`, `notebooksContent`, `pdfImages`); version migration fills missing `order` field in old folders/notebooks, converts old pages (flat arrays) to the layer model (`migrateLayers`), splits page content into `notebooksContent` (`migrateToMetaContent`, v7 → v8) and extracts PDF background images into `pdfImages` (`migratePdfImages`, v8 → v9) |
 | `src/store.ts` | **Main store (Zustand)**: all CRUD for notebooks/folders/pages/templates, layer actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge), undo/redo, clipboard, **local trash** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, sync progress (`syncProgress`, including full remote paths), external-content revision (`syncRevision`) and persistence |
 | `src/uiStore.ts` | Modal store (`openModal`, `modalData`, `open`, `close`) |
@@ -205,7 +205,7 @@ preserve the indicated insertion slot.
 
 | File | Responsibility |
 |---|---|
-| `useShortcuts.ts` | `initGlobalShortcuts()` — shortcut map → global action; `useEditorShortcuts()` |
+| `useShortcuts.ts` | `initGlobalShortcuts()` — shortcut map → global action, including configurable geometric shape shortcuts; `useEditorShortcuts()` |
 | `useIsMobile.ts` | Mobile detection (media query `(max-width:1024px) and (pointer:coarse)`) |
 
 ### `electron/` — desktop
@@ -590,7 +590,7 @@ Key points:
   hysteresis and a max of ~32 width changes per stroke), so a 200-sample pen stroke needs
   ~29 `stroke()` calls instead of one per sample. Thumbnails and PDF/PNG exports therefore
   match the appearance of the live notes.
-- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unnecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs, **throttled to one write per frame** and only writing properties that changed (layout-thrash free); there is a single `onPointerMove` handler (no duplicate `onMouseMove`). High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
+- **Rendering Performance**: `Editor.tsx` uses a **requestAnimationFrame (RAF) loop** optimized with an `isDirtyRef` flag to avoid unnecessary drawing when the canvas is idle, ensuring high performance on mobile devices. High-frequency updates (like the tool cursor position) are performed via **direct DOM manipulation** using refs, **throttled to one write per frame** and only writing properties that changed (layout-thrash free); drawing uses the main `onPointerMove` handler, while mouse hover also has a lightweight native `mousemove` fallback for WebViews/Electron runtimes that omit or mishandle `pointerType`. High-precision input devices (like tablets) are supported via **coalesced events** (`getCoalescedEvents`) for the smoothest possible strokes.
   - **Page cache** (`pageCache`/`getPageCache` in `canvas.ts`): the whole page — background
     template, PDF and layers, everything except the stroke being drawn — is rendered once
     into an offscreen bitmap. While a stroke is in progress each frame is a single blit plus
@@ -779,7 +779,7 @@ Flow and files involved:
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx`. Clicking anywhere inside a selection bounding box allows dragging. |
 | Scrollbars (vertical/horizontal) | `Editor.tsx` (`updateScrollbars`, `scroll-v/h`) + `src/styles.css` (`.editor-scrollbar`). High-contrast design, interactive, and auto-hides after 1.5s. |
 | Move screen | `src/components/Editor.tsx` (`pan` tool). Supports dragging with the mouse/touch, or **holding the configured shortcut** (default: `Alt`) to pan temporarily with any tool active. Restricted by `getPanLimits` and `clampPan`. |
-| Strokes: drawing and pressure | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getPageCache`, `commitStrokeToPageCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, shared with thumbnails/export) |
+| Strokes and geometric tools: drawing, pressure, and line/rectangle/ellipse/arrow/triangle rendering | `src/renderer/canvas.ts` (`beginStroke`, `extendStroke`, `renderStroke`, `getPageCache`, `commitStrokeToPageCache`) + `src/renderer/drawUtils.ts` (`tracePressurePolyline`, shared with thumbnails/export) + `src/components/Toolbar.tsx` (`GeometryPanel`) |
 | Stroke eraser | `src/components/Editor.tsx` (`eraseAtPage`, `eraseSegment`); partial-erase masks follow transformed strokes via `src/types.ts` (`transformStrokeErasures`) |
 | Image eraser | `src/utils/imageErase.ts` + `Editor.tsx` |
 | Selection modes (click/lasso/circle/rect) | `src/components/Toolbar.tsx` (`SelectPanel`) + `Editor.tsx` |
@@ -884,6 +884,7 @@ Flow and files involved:
 | Shortcut normalization/registration | `src/hooks/useShortcuts.ts` (`initGlobalShortcuts` automatically disables shortcuts when a modal is open or when the user is typing in an input field to prevent interference). |
 | Key labels and normalization | `src/utils/shortcuts.ts` |
 | Hide bars / free rotation / selection mode shortcuts (`toggleHideToolbar`, `toggleHideTopBar`, `toggleFreeRotate`, `selectClick`, `selectFree`, `selectCircle`, `selectRect`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`. Note: the `pan` shortcut is handled exclusively as a "hold-to-activate" modifier in `Editor.tsx` and does not switch the global tool state. |
+| Geometric shape shortcuts (`geometryLine`, `geometryRectangle`, `geometryEllipse`, `geometryArrow`, `geometryTriangle`) | `src/types.ts` (`DEFAULT_SHORTCUTS`) + `src/hooks/useShortcuts.ts`; configurable in `SettingsModal` like the other shortcuts |
 | Rename (F2) | `src/types.ts` (`DEFAULT_SHORTCUTS.rename` = `f2`) + `src/hooks/useShortcuts.ts` (dispatches `ink:rename`; each panel that has a name renames its selected/active item — sidebar folder/notebook, layers panel active layer, topbar notebook title — see section 7) |
 | Keyboard Shortcut Configuration UI | `Modals.tsx` (`SettingsModal` → "Shortcuts" tab). Allows searching by name, mapping keys (including standalone modifiers like `Alt`), and **restoring default shortcuts** independently from other settings. |
 | Key labels and normalization | `src/utils/shortcuts.ts` (`normalizeKey` handles combinations and standalone modifier keys) |

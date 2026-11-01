@@ -134,6 +134,51 @@ export function drawStroke(
   ctx.lineJoin = 'round'
   ctx.strokeStyle = color
 
+  if (stroke.geometry) {
+    const start = pts[0]
+    const end = pts[pts.length - 1]
+    ctx.lineWidth = stroke.size * scale
+    ctx.beginPath()
+    if (stroke.geometry === 'line' || stroke.geometry === 'arrow') {
+      ctx.moveTo(start.x * scale, start.y * scale)
+      ctx.lineTo(end.x * scale, end.y * scale)
+    } else if (stroke.geometry === 'rectangle') {
+      ctx.rect(start.x * scale, start.y * scale, (end.x - start.x) * scale, (end.y - start.y) * scale)
+    } else if (stroke.geometry === 'ellipse') {
+      ctx.ellipse(
+        ((start.x + end.x) / 2) * scale,
+        ((start.y + end.y) / 2) * scale,
+        (Math.abs(end.x - start.x) / 2) * scale,
+        (Math.abs(end.y - start.y) / 2) * scale,
+        0,
+        0,
+        Math.PI * 2,
+      )
+    } else {
+      const left = Math.min(start.x, end.x)
+      const right = Math.max(start.x, end.x)
+      const top = Math.min(start.y, end.y)
+      const bottom = Math.max(start.y, end.y)
+      ctx.moveTo(((left + right) / 2) * scale, top * scale)
+      ctx.lineTo(right * scale, bottom * scale)
+      ctx.lineTo(left * scale, bottom * scale)
+      ctx.closePath()
+    }
+    ctx.stroke()
+    if (stroke.geometry === 'arrow') {
+      const angle = Math.atan2(end.y - start.y, end.x - start.x)
+      const head = Math.max(8, stroke.size * 4) * scale
+      ctx.beginPath()
+      ctx.moveTo(end.x * scale, end.y * scale)
+      ctx.lineTo(end.x * scale - head * Math.cos(angle - Math.PI / 6), end.y * scale - head * Math.sin(angle - Math.PI / 6))
+      ctx.moveTo(end.x * scale, end.y * scale)
+      ctx.lineTo(end.x * scale - head * Math.cos(angle + Math.PI / 6), end.y * scale - head * Math.sin(angle + Math.PI / 6))
+      ctx.stroke()
+    }
+    ctx.restore()
+    return
+  }
+
   if (stroke.kind === 'highlighter') {
     ctx.globalAlpha = 0.35
     ctx.lineWidth = stroke.size * scale

@@ -71,9 +71,11 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 ### Advanced Drawing Tools
 - [ ] **Dynamic Canvas**: Option to create notes with an "infinite" auto-growing canvas (limited to separate pages mode).
 - [x] **Format Support**: Add JPEG export support.
-- [ ] **Geometric Tools**: 
-  - Eyedropper tool for color picking.
-  - Dedicated geometric shapes tool.
-  - "Shift" shortcut during drawing to snap to straight lines.
-  - Automatic shape and handwriting correction (similar to Samsung Notes).
+- [ ] **Geometric Tools**:
+  - [ ] Eyedropper tool for color picking.
+  - [x] Dedicated geometric shapes tool: line, rectangle, ellipse, arrow, and triangle.
+  - [x] Shift during rectangle, ellipse, and triangle drawing keeps equal dimensions.
+  - [x] Shift during line and arrow drawing locks the direction to 45-degree increments.
+  - [x] Shape-specific configurable shortcuts.
+- [ ] **Automatic shape and handwriting correction**: Recognize and correct hand-drawn shapes and handwriting (similar to Samsung Notes). This remains separate from the geometric shapes tool and is intentionally not implemented.
 - [ ] **AI Integration**: Handwriting-to-Text conversion (OCR).

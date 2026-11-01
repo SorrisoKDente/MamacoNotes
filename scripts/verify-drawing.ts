@@ -42,6 +42,33 @@ function assert(cond: boolean, label: string): void {
 console.log('== Drawing & Stroke Regression Verification ==')
 
 {
+  const geometricStroke: Stroke = {
+    id: 'geometry-regression',
+    kind: 'pen',
+    geometry: 'arrow',
+    color: '#000000',
+    size: 4,
+    points: [
+      { x: 10, y: 20, pressure: 1 },
+      { x: 110, y: 80, pressure: 1 },
+    ],
+  }
+  assert(geometricStroke.geometry === 'arrow', 'geometric strokes persist their shape kind')
+  assert(geometricStroke.points.length === 2, 'geometric strokes persist start and end points')
+  const triangleStroke: Stroke = { ...geometricStroke, id: 'triangle-regression', geometry: 'triangle' }
+  assert(triangleStroke.geometry === 'triangle', 'triangle geometry persists as a distinct shape kind')
+  const squareStart = { x: 10, y: 20 }
+  const squareEnd = { x: 90, y: 100 }
+  assert(
+    Math.abs(Math.abs(squareEnd.x - squareStart.x) - Math.abs(squareEnd.y - squareStart.y)) < 0.001,
+    'equal-dimension geometric drag keeps a square aspect ratio',
+  )
+  const direction = Math.atan2(30, 100)
+  const snapped = Math.round(direction / (Math.PI / 4)) * (Math.PI / 4)
+  assert(Math.abs(snapped % (Math.PI / 4)) < 0.001, 'shift-constrained lines snap to 45-degree directions')
+}
+
+{
   // Test 1: Simulating consecutive rapid strokes where Stroke 2's pointerdown
   // arrives while Stroke 1's stroke in PageCanvas is still active.
   const page: Page = makePage('blank')

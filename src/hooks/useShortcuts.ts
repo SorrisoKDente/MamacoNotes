@@ -42,6 +42,16 @@ export function initGlobalShortcuts(): () => void {
       case 'highlighter':
         s.setTool('highlighter')
         break
+      case 'geometryLine':
+      case 'geometryRectangle':
+      case 'geometryEllipse':
+      case 'geometryArrow':
+      case 'geometryTriangle': {
+        const shape = action.slice('geometry'.length).toLowerCase() as 'line' | 'rectangle' | 'ellipse' | 'arrow' | 'triangle'
+        s.setTool('geometry')
+        void s.setSettings({ geometryShape: shape })
+        break
+      }
       case 'text':
         s.setTool('text')
         break

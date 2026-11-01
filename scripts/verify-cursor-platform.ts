@@ -30,6 +30,10 @@ for (const tool of ['pen', 'highlighter', 'eraser'] as ToolKind[]) {
     `${tool} hover uses the lightweight cursor path`,
   )
   assert(
+    shouldUseCursorOnlyPointerPath(tool, '', false),
+    `${tool} hover accepts mouse events without a pointerType`,
+  )
+  assert(
     !shouldUseCursorOnlyPointerPath(tool, 'mouse', true),
     `${tool} drag keeps the drawing path`,
   )

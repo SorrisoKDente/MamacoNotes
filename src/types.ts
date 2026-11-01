@@ -14,7 +14,8 @@ export interface Rect {
   h: number
 }
 
-export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'select' | 'text' | 'pan'
+export type ToolKind = 'pen' | 'highlighter' | 'eraser' | 'geometry' | 'select' | 'text' | 'pan'
+export type GeometricShape = 'line' | 'rectangle' | 'ellipse' | 'arrow' | 'triangle'
 
 export type TextAlign = 'left' | 'center' | 'right'
 export type TextMarker = 'none' | 'disc' | 'number'
@@ -59,6 +60,7 @@ export interface Stroke {
   color: string
   size: number
   points: StrokePoint[]
+  geometry?: GeometricShape
   /**
    * Z-order of the element inside its layer (bottom = lower). Optional for
    * backward compatibility: elements without it keep the legacy group order
@@ -178,6 +180,7 @@ export interface AppSettings {
   lastHighlighterColor: string
   lastHighlighterSize: number
   lastEraserSize: number
+  geometryShape: GeometricShape
   lastSelectMode: SelectMode
   selectDelimitedOnly: boolean
   eraserMode: EraserMode
@@ -306,6 +309,11 @@ export type ShortcutActionId =
   | 'pen'
   | 'eraser'
   | 'highlighter'
+  | 'geometryLine'
+  | 'geometryRectangle'
+  | 'geometryEllipse'
+  | 'geometryArrow'
+  | 'geometryTriangle'
   | 'text'
   | 'undo'
   | 'redo'
@@ -342,6 +350,11 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
   pen: 'p',
   eraser: 'e',
   highlighter: 'h',
+  geometryLine: 'shift+1',
+  geometryRectangle: 'shift+2',
+  geometryEllipse: 'shift+3',
+  geometryArrow: 'shift+4',
+  geometryTriangle: 'shift+5',
   text: 't',
   undo: 'ctrl+z',
   redo: 'ctrl+y',
@@ -382,6 +395,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastHighlighterColor: '#ffe84d',
   lastHighlighterSize: 18,
   lastEraserSize: 20,
+  geometryShape: 'line',
   lastSelectMode: 'click',
   selectDelimitedOnly: false,
   eraserMode: 'both',

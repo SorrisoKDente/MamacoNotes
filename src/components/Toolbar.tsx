@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode, Ref } from 'react'
 import { useAppStore } from '../store'
 import { useTextStore } from '../textStore'
 import { PRESET_COLORS, normalizeHex } from '../utils/colors'
 import { getSystemFonts } from '../utils/fonts'
-import type { EraserMode, SelectMode, TextAlign, TextDirection, TextMarker, ToolKind } from '../types'
+import type { EraserMode, GeometricShape, SelectMode, TextAlign, TextDirection, TextMarker, ToolKind } from '../types'
 import { getActiveLayer } from '../types'
 import { useI18n } from '../i18n'
 import { clamp } from '../utils/math'
@@ -20,6 +20,7 @@ export function Toolbar() {
   const redo = useAppStore((s) => s.redo)
 
   const [panelOpen, setPanelOpen] = useState(false)
+  const [panelTop, setPanelTop] = useState(0)
   const selectedTextId = useTextStore((s) => s.selectedTextId)
 
   // ponytail: auto-open panel when a text is selected
@@ -32,6 +33,15 @@ export function Toolbar() {
   const rotationOpen = useAppStore((s) => s.rotationOpen)
   const setRotationOpen = useAppStore((s) => s.setRotationOpen)
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const geometryButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!panelOpen || tool !== 'geometry') return
+    const toolbar = toolbarRef.current
+    const button = geometryButtonRef.current
+    if (!toolbar || !button) return
+    setPanelTop(button.getBoundingClientRect().top - toolbar.getBoundingClientRect().top)
+  }, [panelOpen, tool])
 
   useEffect(() => {
     const onEsc = () => {
@@ -86,7 +96,7 @@ export function Toolbar() {
   return (
     <div ref={toolbarRef} className="toolbar" onPointerDown={(e) => e.stopPropagation()}>
       {rotationOpen && <RotationPanel />}
-      {panelOpen && <ToolPanel tool={tool} />}
+      {panelOpen && <ToolPanel tool={tool} style={{ top: panelTop }} />}
 
       <div className="toolbar-buttons">
         <ToolbarButton
@@ -109,6 +119,14 @@ export function Toolbar() {
           active={!rotationOpen && tool === 'eraser'}
           onClick={() => selectTool('eraser')}
           shortcut={settings.shortcuts.eraser}
+        />
+        <ToolbarButton
+          icon="△"
+          label={t('tool.geometry')}
+          active={!rotationOpen && tool === 'geometry'}
+          onClick={() => selectTool('geometry')}
+          className="geometry-tool-btn"
+          buttonRef={geometryButtonRef}
         />
         <ToolbarButton
           icon={<IconKeyboard />}
@@ -154,6 +172,8 @@ function ToolbarButton({
   onClick,
   shortcut,
   disabled,
+  className,
+  buttonRef,
 }: {
   icon: ReactNode
   label: string
@@ -161,13 +181,16 @@ function ToolbarButton({
   onClick: () => void
   shortcut?: string
   disabled?: boolean
+  className?: string
+  buttonRef?: Ref<HTMLButtonElement>
 }) {
   return (
     <button
-      className={`toolbar-btn ${active ? 'active' : ''}`}
+      className={`toolbar-btn ${className ?? ''} ${active ? 'active' : ''}`}
       onClick={onClick}
       title={label + (shortcut ? ` (${shortcut})` : '')}
       disabled={disabled}
+      ref={buttonRef}
     >
       <span className="toolbar-btn-icon">{icon}</span>
       <span className="toolbar-btn-label">{label}</span>
@@ -209,17 +232,51 @@ function PenIcon({ size, color, line = false }: { size: number; color: string; l
   return <canvas ref={ref} className="pen-icon-canvas" />
 }
 
-function ToolPanel({ tool }: { tool: ToolKind }) {
+function ToolPanel({ tool, style }: { tool: ToolKind; style?: CSSProperties }) {
   const selectedTextId = useTextStore((s) => s.selectedTextId)
   if (selectedTextId && (tool === 'select' || tool === 'text')) return <TextPanel />
 
   if (tool === 'pen') return <PenPanel />
   if (tool === 'highlighter') return <PenPanel highlighter />
   if (tool === 'eraser') return <EraserPanel />
+  if (tool === 'geometry') return <GeometryPanel style={style} />
   if (tool === 'text') return <TextPanel />
   if (tool === 'select') return <SelectPanel />
   if (tool === 'pan') return <PanPanel />
   return null
+}
+
+function GeometryPanel({ style }: { style?: CSSProperties }) {
+  const { t } = useI18n()
+  const shape = useAppStore((s) => s.settings.geometryShape)
+  const setSettings = useAppStore((s) => s.setSettings)
+  const shapes: GeometricShape[] = ['line', 'rectangle', 'ellipse', 'arrow', 'triangle']
+  return (
+    <div className="tool-panel" style={style}>
+      <div className="panel-label">{t('tool.geometryShape')}</div>
+      <div className="mode-buttons geometry-buttons">
+        {shapes.map((item) => (
+          <button
+            key={item}
+            className={`mode-btn ${shape === item ? 'active' : ''}`}
+            onClick={() => setSettings({ geometryShape: item })}
+            title={t(`tool.geometry.${item}Hint`)}
+          >
+            <span className="btn-icon">{geometryIcon(item)}</span>
+            <span className="btn-label">{t(`tool.geometry.${item}`)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function geometryIcon(shape: GeometricShape): ReactNode {
+  if (shape === 'line') return '╱'
+  if (shape === 'rectangle') return '□'
+  if (shape === 'ellipse') return '○'
+  if (shape === 'triangle') return '△'
+  return '↗'
 }
 
 // ponytail: replaced local clampNum with central clamp

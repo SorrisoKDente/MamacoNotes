@@ -218,8 +218,16 @@ export class PageCanvas {
     }
   }
 
-  beginStroke(tool: ToolKind, color: string, size: number, px: number, py: number, pressure = 1) {
-    const p = this.toPageCoords(px, py)
+  beginStroke(
+    tool: ToolKind,
+    color: string,
+    size: number,
+    px: number,
+    py: number,
+    pressure = 1,
+    geometry?: Stroke['geometry'],
+  ) {
+    let p = this.toPageCoords(px, py)
     // A new stroke starting while the previous one is still active means its
     // pointerup was swallowed: log it, that is the "second stroke disappears" bug.
     if (this.drawing) trace('engine.begin(stale)', `pts=${this.currentStroke?.points.length ?? 0}`)
@@ -231,13 +239,14 @@ export class PageCanvas {
       color,
       size,
       points: [{ x: p.x, y: p.y, pressure }],
+      geometry,
     }
     this.lastPoint = p
   }
 
-  extendStroke(px: number, py: number, pressure = 1) {
+  extendStroke(px: number, py: number, pressure = 1, constrain: 'square' | 'direction' | false = false) {
     if (!this.drawing || !this.currentStroke) return
-    const p = this.toPageCoords(px, py)
+    let p = this.toPageCoords(px, py)
     const last = this.currentStroke.points[this.currentStroke.points.length - 1]
     const dx = p.x - last.x
     const dy = p.y - last.y
@@ -248,7 +257,29 @@ export class PageCanvas {
     // during lag spikes, while still catching extreme palm-rejection artifacts.
     if (distSq > 1000 * 1000) return
 
-    this.currentStroke.points.push({ x: p.x, y: p.y, pressure })
+    if (this.currentStroke.geometry && constrain === 'square') {
+      const start = this.currentStroke.points[0]
+      const side = Math.max(Math.abs(p.x - start.x), Math.abs(p.y - start.y))
+      p = {
+        x: start.x + Math.sign(p.x - start.x || 1) * side,
+        y: start.y + Math.sign(p.y - start.y || 1) * side,
+      }
+    } else if (this.currentStroke.geometry && constrain === 'direction') {
+      const start = this.currentStroke.points[0]
+      const distance = Math.hypot(p.x - start.x, p.y - start.y)
+      const angle = Math.atan2(p.y - start.y, p.x - start.x)
+      const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+      p = {
+        x: start.x + Math.cos(snappedAngle) * distance,
+        y: start.y + Math.sin(snappedAngle) * distance,
+      }
+    }
+    if (this.currentStroke.geometry) {
+      if (this.currentStroke.points.length === 1) this.currentStroke.points.push({ x: p.x, y: p.y, pressure })
+      else this.currentStroke.points[1] = { x: p.x, y: p.y, pressure }
+    } else {
+      this.currentStroke.points.push({ x: p.x, y: p.y, pressure })
+    }
     this.lastPoint = p
     this.callbacks.onRequestRerender()
   }
@@ -1077,6 +1108,53 @@ export class PageCanvas {
     }
 
     ctx.save()
+    if (stroke.geometry) {
+      const start = pts[0]
+      const end = pts[pts.length - 1]
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = stroke.color
+      ctx.lineWidth = stroke.size
+      ctx.beginPath()
+      if (stroke.geometry === 'line' || stroke.geometry === 'arrow') {
+        ctx.moveTo(start.x, start.y)
+        ctx.lineTo(end.x, end.y)
+      } else if (stroke.geometry === 'rectangle') {
+        ctx.rect(start.x, start.y, end.x - start.x, end.y - start.y)
+      } else if (stroke.geometry === 'ellipse') {
+        ctx.ellipse(
+          (start.x + end.x) / 2,
+          (start.y + end.y) / 2,
+          Math.abs(end.x - start.x) / 2,
+          Math.abs(end.y - start.y) / 2,
+          0,
+          0,
+          Math.PI * 2,
+        )
+      } else {
+        const left = Math.min(start.x, end.x)
+        const right = Math.max(start.x, end.x)
+        const top = Math.min(start.y, end.y)
+        const bottom = Math.max(start.y, end.y)
+        ctx.moveTo((left + right) / 2, top)
+        ctx.lineTo(right, bottom)
+        ctx.lineTo(left, bottom)
+        ctx.closePath()
+      }
+      ctx.stroke()
+      if (stroke.geometry === 'arrow') {
+        const angle = Math.atan2(end.y - start.y, end.x - start.x)
+        const head = Math.max(8, stroke.size * 4)
+        ctx.beginPath()
+        ctx.moveTo(end.x, end.y)
+        ctx.lineTo(end.x - head * Math.cos(angle - Math.PI / 6), end.y - head * Math.sin(angle - Math.PI / 6))
+        ctx.moveTo(end.x, end.y)
+        ctx.lineTo(end.x - head * Math.cos(angle + Math.PI / 6), end.y - head * Math.sin(angle + Math.PI / 6))
+        ctx.stroke()
+      }
+      ctx.restore()
+      return
+    }
     if (stroke.kind === 'highlighter') {
       ctx.globalAlpha = 0.35
       ctx.lineCap = 'round'
