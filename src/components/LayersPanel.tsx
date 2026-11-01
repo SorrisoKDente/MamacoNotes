@@ -55,6 +55,7 @@ export function LayersPanel() {
   const [resizing, setResizing] = useState(false)
 
   const anchorIdRef = useRef<string | null>(null)
+  const anchorFolderIdRef = useRef<string | null>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const asideRef = useRef<HTMLElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -86,6 +87,7 @@ export function LayersPanel() {
     setCollapsedFolderIds(new Set())
     setMenuOpen(null)
     anchorIdRef.current = null
+    anchorFolderIdRef.current = null
   }, [currentPageIndex, notebook?.id])
 
   useEffect(() => {
@@ -257,8 +259,24 @@ export function LayersPanel() {
       anchorIdRef.current = clickedId
       return
     }
+
     const [from, to] = anchorPos < clickedPos ? [anchorPos, clickedPos] : [clickedPos, anchorPos]
     setSelectedIds(order.slice(from, to + 1))
+  }
+
+  function selectFolderRange(clickedId: string) {
+    const order = [...folders]
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((folder) => folder.id)
+    const clickedPos = order.indexOf(clickedId)
+    const anchorPos = anchorFolderIdRef.current !== null ? order.indexOf(anchorFolderIdRef.current) : -1
+    if (clickedPos === -1 || anchorPos === -1) {
+      setSelectedFolderIds([clickedId])
+      anchorFolderIdRef.current = clickedId
+      return
+    }
+    const [from, to] = anchorPos < clickedPos ? [anchorPos, clickedPos] : [clickedPos, anchorPos]
+    setSelectedFolderIds(order.slice(from, to + 1))
   }
 
   function onItemClick(e: React.MouseEvent, layer: Layer) {
@@ -270,6 +288,7 @@ export function LayersPanel() {
     setSelectedFolderId(null)
     if (e.shiftKey) {
       setLastClicked(null)
+      setSelectedFolderId(null)
       setSelectedFolderIds([])
       selectRange(layer.id)
       return
@@ -282,6 +301,7 @@ export function LayersPanel() {
     setSelectedIds([layer.id])
     setSelectedFolderIds([])
     anchorIdRef.current = layer.id
+    anchorFolderIdRef.current = null
     setLastClicked({ type: 'layer', id: layer.id })
   }
 
@@ -295,10 +315,18 @@ export function LayersPanel() {
       setSelectedFolderId(folder.id)
       return
     }
+    if (e?.shiftKey) {
+      setSelectedIds([])
+      setSelectedFolderId(folder.id)
+      selectFolderRange(folder.id)
+      return
+    }
     toggleFolderCollapsed(folder.id)
     setSelectedFolderId(folder.id)
     setSelectedIds([])
     setSelectedFolderIds([folder.id])
+    anchorFolderIdRef.current = folder.id
+    anchorIdRef.current = null
     setLastClicked({ type: 'layerFolder', id: folder.id })
   }
 
@@ -480,18 +508,30 @@ export function LayersPanel() {
       const displayed = layers
         .filter((layer) => (layer.folderId ?? null) === targetFolderId)
         .reverse()
-      const targetIndex = displayed.findIndex((layer) => layer.id === row.id)
-      const targetEl = scrollerRef.current?.querySelector(`[data-layer-id="${row.id}"]`)
-      const afterTarget = targetEl instanceof HTMLElement && e.clientY > targetEl.getBoundingClientRect().top + targetEl.getBoundingClientRect().height / 2
-      const nextLayer = afterTarget && targetIndex >= 0 ? displayed[targetIndex + 1] : undefined
-      dropBeforeRef.current = nextLayer?.id ?? (afterTarget ? null : row.id)
+        .filter((layer) => layer.id !== dragLayerIdRef.current)
+      const rowElements = displayed
+        .map((layer) => scrollerRef.current?.querySelector(`[data-layer-id="${layer.id}"]`))
+        .filter((element): element is HTMLElement => element instanceof HTMLElement)
+      let visualInsertIndex = rowElements.length
+      for (let index = 0; index < rowElements.length; index += 1) {
+        const rect = rowElements[index].getBoundingClientRect()
+        if (e.clientY < rect.top + rect.height / 2) {
+          visualInsertIndex = index
+          break
+        }
+      }
+      const internalRemaining = [...displayed].reverse()
+      const internalInsertIndex = internalRemaining.length - visualInsertIndex
+      dropBeforeRef.current = internalRemaining[internalInsertIndex]?.id ?? null
       setDropIntoFolder(null)
       setDropRootActive(false)
       const scroller = scrollerRef.current
-      const el = scroller?.querySelector(`[data-layer-id="${nextLayer?.id ?? row.id}"]`)
-      if (el instanceof HTMLElement && scroller) {
+      if (scroller) {
         const sr = scroller.getBoundingClientRect()
-        setDropIndicatorY(el.getBoundingClientRect().top - sr.top + scroller.scrollTop)
+        const indicator = visualInsertIndex < rowElements.length
+          ? rowElements[visualInsertIndex].getBoundingClientRect().top
+          : (rowElements[rowElements.length - 1]?.getBoundingClientRect().bottom ?? e.clientY)
+        setDropIndicatorY(indicator - sr.top + scroller.scrollTop)
       }
       return
     }

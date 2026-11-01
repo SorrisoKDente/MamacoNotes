@@ -1893,7 +1893,9 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         insertAt = hi >= 0 ? hi + 1 : rest.length
       }
-      if ((layer.folderId ?? null) === target && rest[insertAt - 1]?.id === layer.id) return
+      const candidate = [...rest]
+      candidate.splice(insertAt, 0, { ...layer, folderId: target })
+      if (candidate.length === page.layers.length && candidate.every((item, index) => item.id === page.layers[index]?.id && (item.folderId ?? null) === (page.layers[index]?.folderId ?? null))) return
       get().pushUndo()
       page.layers.splice(from, 1)
       layer.folderId = target

@@ -157,6 +157,12 @@ generates new IDs on paste. Dashboard metadata undo/redo is only consumed while 
 notebook is selected, so restoring a Dashboard snapshot cannot reopen a note.
 Layer folders persist an optional `parentId`, render recursively, and support
 recursive copy/deletion plus drag-and-drop between root and nested folders.
+The LayersPanel uses the displayed top-to-bottom order for drag calculations and
+converts the final slot to the persisted bottom-to-top layer order; Shift-click
+selects continuous layer or folder ranges.
+Layer drops are resolved from the actual visual gaps between rendered rows rather
+than only from the row under the pointer, so long moves across multiple layers
+preserve the indicated insertion slot.
 
 | File | Responsibility |
 |---|---|

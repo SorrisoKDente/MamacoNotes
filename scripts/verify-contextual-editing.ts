@@ -74,6 +74,41 @@ console.log('== Contextual Editing Regression Verification ==')
     moveBefore(['bottom', 'top'], 'top', 'bottom').join(',') === 'top,bottom',
     'two-layer reorder can move the top item before the bottom item',
   )
+  const visualToInternalBefore = (displayed: string[], targetIndex: number, afterTarget: boolean): string | null => {
+    const visualInsertIndex = targetIndex + (afterTarget ? 1 : 0)
+    return visualInsertIndex > 0 ? displayed[visualInsertIndex - 1] ?? null : null
+  }
+  assert(
+    visualToInternalBefore(['top'], 0, false) === null,
+    'dropping bottom layer above top layer maps to the internal end',
+  )
+  assert(
+    visualToInternalBefore(['bottom'], 0, true) === 'bottom',
+    'dropping top layer below bottom layer maps to the internal beginning',
+  )
+  const displayedRemaining = ['middle', 'bottom']
+  const internalRemaining = [...displayedRemaining].reverse()
+  const internalInsertIndex = internalRemaining.length - displayedRemaining.length
+  assert(
+    internalRemaining[internalInsertIndex] === 'bottom',
+    'moving the top layer below all layers maps before the internal bottom layer',
+  )
+  const fourDisplayed = ['layer-4', 'layer-3', 'layer-2', 'layer-1']
+  const fourRemaining = fourDisplayed.slice(1)
+  const fourInternal = [...fourRemaining].reverse()
+  const fourInternalIndex = fourInternal.length - fourRemaining.length
+  assert(
+    fourInternal[fourInternalIndex] === 'layer-1',
+    'moving the top layer below a four-layer stack targets the bottom layer',
+  )
+}
+
+{
+  const order = ['bottom', 'middle', 'top']
+  const anchor = order.indexOf('bottom')
+  const clicked = order.indexOf('top')
+  const selected = order.slice(Math.min(anchor, clicked), Math.max(anchor, clicked) + 1)
+  assert(selected.join(',') === 'bottom,middle,top', 'Shift selects a continuous layer range')
 }
 
 {

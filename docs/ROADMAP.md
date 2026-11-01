@@ -53,6 +53,8 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Nested Layer Folders**: Layer folders support nesting, recursive copy, recursive deletion, and drag-and-drop into another folder.
 - [x] **Layer Folder Arrow Direction**: Collapsed folders point right and expanded folders point down.
 - [x] **Dashboard Folder Escape Drop**: Items inside a Dashboard folder can be dragged back to the root.
+- [x] **Layer Range Selection**: Shift-click selects a continuous range of layers or layer folders.
+- [x] **Layer Drop Slot Mapping**: Layer drag-and-drop uses the actual visual gaps and maps them to persisted bottom-to-top order, including long moves across four or more layers.
 - [x] **Android Direct APK Download**: Implement direct APK file downloading for Android updates (similar to Windows/Linux) instead of redirecting users to GitHub for manual download.
 
 ## 💡 Future Ideas (Backlog)
