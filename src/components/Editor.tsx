@@ -13,7 +13,7 @@ import { useI18n } from '../i18n'
 import { isMobileNow } from '../hooks/useIsMobile'
 import { clamp } from '../utils/math'
 import { trace } from '../utils/debug'
-import { shouldUseCursorOnlyPointerPath } from '../utils/cursor'
+import { isPenPointer, isToolCursorHidden, isTouchPointer, shouldUseCursorOnlyPointerPath } from '../utils/cursor'
 
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 8
@@ -209,6 +209,7 @@ export function Editor() {
   const cursorPendingRef = useRef({ mx: 0, my: 0, pressure: 1, visible: true })
   const cursorWrittenRef = useRef<Record<string, string>>({})
   const cursorWrittenElRef = useRef<HTMLElement | null>(null)
+  const positionToolCursorRef = useRef<(mx: number, my: number, pressure: number) => void>(() => {})
 
   const toolRef = useRef<ToolKind>(tool)
   toolRef.current = tool
@@ -504,7 +505,7 @@ export function Editor() {
     if (!canvas) return
 
     const onHover = (event: PointerEvent) => {
-      if (event.pointerType !== 'mouse' || dragRef.current || !shouldUseCursorOnlyPointerPath(toolRef.current, 'mouse', false)) {
+      if (event.pointerType !== 'mouse' || dragRef.current || !shouldUseCursorOnlyPointerPath(toolRef.current, event.pointerType, false)) {
         return
       }
       const rect = engineRef.current?.getRect()
@@ -885,8 +886,44 @@ export function Editor() {
 
     pointerPressureRef.current = 1
     mousePosRef.current = { x: mx, y: my }
+    const cursor = toolCursorRef.current
+    const activeTool = toolRef.current
+    if (
+      cursor &&
+      (activeTool === 'pen' || activeTool === 'highlighter' || activeTool === 'eraser') &&
+      !isToolCursorHidden(activeTool, useAppStore.getState().settings)
+    ) {
+      positionToolCursor(mx, my, 1)
+    }
     updateCursorRef.current(mx, my, 1)
   }
+
+  function positionToolCursor(mx: number, my: number, pressure: number) {
+    const activeTool = toolRef.current
+    const cursor = toolCursorRef.current
+    if (!cursor || isToolCursorHidden(activeTool, useAppStore.getState().settings)) return
+    const currentSettings = useAppStore.getState().settings
+    const diameter = cursorDisplaySize(activeTool, currentSettings, zoomRef.current, pressure)
+    if (cursor.style.opacity !== '1') cursor.style.opacity = '1'
+    const size = `${diameter}px`
+    if (cursor.style.width !== size) cursor.style.width = size
+    if (cursor.style.height !== size) cursor.style.height = size
+    cursor.style.transform = `translate3d(${mx - diameter / 2}px, ${my - diameter / 2}px, 0)`
+  }
+  positionToolCursorRef.current = positionToolCursor
+
+  useEffect(() => {
+    return useAppStore.subscribe((state, previous) => {
+      if (
+        state.settings.lastPenSize !== previous.settings.lastPenSize ||
+        state.settings.lastHighlighterSize !== previous.settings.lastHighlighterSize ||
+        state.settings.lastEraserSize !== previous.settings.lastEraserSize
+      ) {
+        positionToolCursorRef.current(mousePosRef.current.x, mousePosRef.current.y, pointerPressureRef.current)
+        updateCursorRef.current(mousePosRef.current.x, mousePosRef.current.y, pointerPressureRef.current)
+      }
+    })
+  }, [])
 
   function getPointerPos(e: PointerEvent) {
     return { x: e.clientX, y: e.clientY }
@@ -2437,9 +2474,10 @@ export function Editor() {
           return
         }
         const currentSettings = useAppStore.getState().settings
+        const hidden = isToolCursorHidden(t, currentSettings)
         const isDrawing = dragRef.current?.kind === 'draw'
         const diameter = cursorDisplaySize(t, currentSettings, zoomRef.current, isDrawing ? p : 1)
-        apply('opacity', '1')
+        apply('opacity', hidden ? '0' : '1')
         apply('width', `${diameter}px`)
         apply('height', `${diameter}px`)
         apply('transform', `translate3d(${x - diameter / 2}px, ${y - diameter / 2}px, 0)`)
@@ -2477,10 +2515,18 @@ export function Editor() {
     const canvas = canvasRef.current
     if (!engine || !canvas || !page) return
 
-    const isMouse = e.pointerType === 'mouse'
+    const pointerType = e.pointerType as string
+    const isMouse = pointerType === 'mouse' || pointerType === ''
     pointerPressureRef.current = isMouse ? 1 : (e.pressure || 0.5)
 
-    if (shouldUseCursorOnlyPointerPath(tool, e.pointerType, !!dragRef.current)) {
+    if (shouldUseCursorOnlyPointerPath(tool, pointerType, !!dragRef.current)) {
+      if (isMouse) {
+        const rect = engine.getRect()
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
+        mousePosRef.current = { x: mx, y: my }
+        updateCursorRef.current(mx, my, 1)
+      }
       return
     }
 
@@ -2502,8 +2548,14 @@ export function Editor() {
         }
       }
       updateCursorRef.current(mx, my, pointerPressureRef.current)
-    } else if (toolCursorRef.current) {
-      toolCursorRef.current.style.opacity = '0'
+    } else if (isPenPointer(pointerType)) {
+      const rect = engine.getRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      mousePosRef.current = { x: mx, y: my }
+      updateCursorRef.current(mx, my, pointerPressureRef.current)
+    } else if (isTouchPointer(pointerType)) {
+      updateCursorRef.current(-1, -1, 1, false)
     }
 
     const pos = getPointerPos(e.nativeEvent)
@@ -3138,6 +3190,10 @@ export function Editor() {
     settings.lastEraserSize,
     settings.lastPenColor,
     settings.lastHighlighterColor,
+    settings.hideToolCursor,
+    settings.hidePenCursor,
+    settings.hideHighlighterCursor,
+    settings.hideEraserCursor,
     updateCursorDOM,
   ])
 
@@ -3628,9 +3684,10 @@ export function Editor() {
             ref={canvasRef}
             className="editor-canvas"
             onMouseDown={(e) => e.preventDefault()}
+            onMouseMove={trackMouse}
             style={{ touchAction: 'none' }}
           />
-          {showToolCursor && (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
+          {(tool === 'pen' || tool === 'highlighter' || tool === 'eraser') && (
             <ToolCursor
               ref={toolCursorRef}
               color={cursorColor(tool, settings)}

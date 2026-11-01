@@ -1,4 +1,4 @@
-import { shouldUseCursorOnlyPointerPath } from '../src/utils/cursor'
+import { isMousePointer, isPenPointer, isToolCursorHidden, isTouchPointer, shouldUseCursorOnlyPointerPath } from '../src/utils/cursor'
 import { shouldShowFullscreen } from '../src/utils/platform'
 import type { ToolKind } from '../src/types'
 
@@ -30,6 +30,19 @@ for (const tool of ['pen', 'highlighter', 'eraser'] as ToolKind[]) {
 
 assert(!shouldUseCursorOnlyPointerPath('select', 'mouse', false), 'select hover keeps selection hit testing')
 assert(!shouldUseCursorOnlyPointerPath('pen', 'touch', false), 'touch input keeps gesture processing')
+assert(isMousePointer('mouse') && isMousePointer(''), 'mouse pointer variants are recognized')
+assert(isPenPointer('pen'), 'pen pointer is recognized separately')
+assert(isTouchPointer('touch'), 'touch pointer is recognized separately')
+const cursorSettings = {
+  hideToolCursor: false,
+  hidePenCursor: false,
+  hideHighlighterCursor: true,
+  hideEraserCursor: false,
+}
+assert(!isToolCursorHidden('pen', cursorSettings), 'pen cursor remains visible when enabled')
+assert(isToolCursorHidden('highlighter', cursorSettings), 'highlighter cursor follows its individual setting')
+assert(!isToolCursorHidden('eraser', cursorSettings), 'eraser cursor remains visible when enabled')
+assert(isToolCursorHidden('pen', { ...cursorSettings, hideToolCursor: true }), 'master cursor setting hides every tool')
 
 const originalWindow = globalThis.window
 Object.defineProperty(globalThis, 'window', {

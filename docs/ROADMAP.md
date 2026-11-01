@@ -22,7 +22,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Layer Element Z-Ordering (Images/Strokes/Text)**: Within a single layer, images render in a fixed order relative to strokes and text, making it impossible to write or place text over an image without creating a new layer. Fixed with a per-element `order` (new content lands on top) plus bring-to-front/forward/backward/send-to-back actions in the Select panel.
 - [x] **Intermittent Missing Stroke**: sometimes a stroke drawn right after another one does not appear / is not kept (the "second stroke" disappears).
 - [x] **Desktop Cursor Stutter**: the remaining slight stutter was reduced through a lightweight native hover path and cursor-layer optimization. Re-test later with pages containing multiple or large PDF backgrounds to confirm performance under heavier rendering loads. The cursor-size change issue is not included here; it appeared only in a reverted implementation and was observed while changing size, not while drawing.
-- [ ] **Tool Cursor Visibility and Size**: the tool cursor may not appear in the browser even when cursor hiding is disabled, and its diameter may not change smoothly while drawing.
+- [x] **Tool Cursor Visibility and Size**: browser visibility and immediate cursor resizing were fixed without forcing canvas renders.
 - [x] **Canvas Trembling and Blurring**: the page can appear to shake slightly or become blurred while writing.
 - [x] **PDF Background Blurring After Erase**: on pages with a PDF background, erasing a stroke can leave all page strokes blurred.
 - [x] **Mobile Sync Not Applying to Open Note**: on a phone, accepting a cloud conflict for one note may show no visible change in the currently open note, while other notes synchronize correctly.
@@ -37,6 +37,7 @@ This document tracks current bugs, planned improvements, and long-term ideas for
 - [x] **Sync Progress Details**: Show synchronization progress in the cloud tab, including percentage and the file currently being synchronized.
 - [x] **Dashboard Sync Button**: Add a cloud synchronization button to the Dashboard, not only to the editor/top bar.
 - [x] **Consistent Desktop Backup Filename**: Format Desktop/Electron backup export filenames with a date-timestamp (`mamaco-notes-backup-YYYY-MM-DD-HHmmss.json`), matching the Android mobile behavior.
+- [ ] **F2 File Rename**: Rename the active notebook/file with the F2 shortcut from the Dashboard and Editor.
 - [ ] **Context-Aware Shortcuts (Ctrl+A)**: 
   - **Page Preview**: Select all pages.
   - **Canvas**: Select all strokes, images, and text.
