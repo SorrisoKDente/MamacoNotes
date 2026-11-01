@@ -1943,6 +1943,8 @@ body {
   box-sizing: border-box;
   opacity: 0;
   transform: translate(-100px, -100px);
+  contain: layout style paint;
+  will-change: transform, opacity;
 }
 
 .inline-text-input {

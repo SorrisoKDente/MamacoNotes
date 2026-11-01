@@ -497,6 +497,28 @@ export function Editor() {
     }
   }, [page?.id])
 
+  // Keep idle mouse hover out of React's delegated pointer-event path. Drawing,
+  // touch and drag events still use the main handler below.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const onHover = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || dragRef.current || !shouldUseCursorOnlyPointerPath(toolRef.current, 'mouse', false)) {
+        return
+      }
+      const rect = engineRef.current?.getRect()
+      if (!rect) return
+      const mx = event.clientX - rect.left
+      const my = event.clientY - rect.top
+      mousePosRef.current = { x: mx, y: my }
+      updateCursorRef.current(mx, my, 1)
+    }
+
+    canvas.addEventListener('pointermove', onHover, { passive: true })
+    return () => canvas.removeEventListener('pointermove', onHover)
+  }, [page?.id])
+
   // ponytail: ensure unsaved changes are flushed when Editor unmounts (e.g. exiting note / returning to dashboard).
   useEffect(() => {
     return () => {
@@ -2459,11 +2481,6 @@ export function Editor() {
     pointerPressureRef.current = isMouse ? 1 : (e.pressure || 0.5)
 
     if (shouldUseCursorOnlyPointerPath(tool, e.pointerType, !!dragRef.current)) {
-      const rect = engine.getRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
-      mousePosRef.current = { x: mx, y: my }
-      updateCursorRef.current(mx, my, 1)
       return
     }
 
