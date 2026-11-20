@@ -36,7 +36,6 @@ import {
   nextLayerOrder,
   normalizePage,
   uid,
-  NOTEBOOKS_DIR,
 } from './types'
 import { db } from './db'
 import { trace } from './utils/debug'
@@ -44,6 +43,7 @@ import { isMobileNow } from './hooks/useIsMobile'
 import { makeTransport } from './utils/webdav'
 import {
   applyConflictChoices,
+  downloadNotebook,
   FOLDERS_PATH,
   hashFolders,
   runSync,
@@ -2482,30 +2482,27 @@ export const useAppStore = create<AppState>((set, get) => {
           restored = true
         }
       } else {
-        const text = await transport.downloadFile(
-          `${cloud.webdavPath}/${NOTEBOOKS_DIR}/${id}.json`,
-        )
-        const data = JSON.parse(text) as { notebook?: Notebook }
-        const nb = data.notebook
-        if (nb) {
-          const norm = normalizeRestoredNotebook(nb)
-          const summary: NotebookSummary = {
-            id: norm.id,
-            name: norm.name,
-            folderId: norm.folderId,
-            createdAt: norm.createdAt,
-            updatedAt: norm.updatedAt,
-            order: norm.order,
-            pageCount: norm.pages.length,
-          }
-          const existingIndex = get().notebooks.findIndex((n) => n.id === id)
-          const notebooks = [...get().notebooks]
-          if (existingIndex >= 0) notebooks[existingIndex] = summary
-          else notebooks.push(summary)
-          set({ notebooks: sortNotebooksByOrder(notebooks), dataVersion: get().dataVersion + 1 })
-          await db.putNotebook(norm)
-          restored = true
+        // `downloadNotebook` rehydrates the PDF backgrounds from their separate
+        // `pdfs/<pageId>.png` files, so a notebook restored from the cloud does
+        // not come back with blank PDF pages.
+        const nb = await downloadNotebook(cloud.webdavPath, transport, id)
+        const norm = normalizeRestoredNotebook(nb)
+        const summary: NotebookSummary = {
+          id: norm.id,
+          name: norm.name,
+          folderId: norm.folderId,
+          createdAt: norm.createdAt,
+          updatedAt: norm.updatedAt,
+          order: norm.order,
+          pageCount: norm.pages.length,
         }
+        const existingIndex = get().notebooks.findIndex((n) => n.id === id)
+        const notebooks = [...get().notebooks]
+        if (existingIndex >= 0) notebooks[existingIndex] = summary
+        else notebooks.push(summary)
+        set({ notebooks: sortNotebooksByOrder(notebooks), dataVersion: get().dataVersion + 1 })
+        await db.putNotebook(norm)
+        restored = true
       }
       if (!restored) {
         throw new Error(t('error.trashRestoreCloudFailed', { name: item.name }))

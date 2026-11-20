@@ -232,20 +232,21 @@ export function validateContentRange(
 }
 
 /**
- * Downloads a text resource on native platforms using HTTP Range requests
- * (responseType 'arraybuffer' returns base64, so the server-side content never
- * crosses the bridge in a single large call — avoiding the Android OOM for big
- * notebook JSON downloads). On web/desktop it falls back to plain fetch.
+ * Streams a remote resource, handing each received chunk to `onChunk`. On
+ * native platforms it uses HTTP Range requests (responseType 'arraybuffer'
+ * returns base64, so the server-side content never crosses the bridge in a
+ * single large call — avoiding the Android OOM for big downloads). On
+ * web/desktop it falls back to plain fetch.
  */
-export async function downloadText(
+async function readResource(
   url: string,
-  headers: Record<string, string> = {},
-): Promise<{ ok: boolean; status: number; text: string }> {
+  headers: Record<string, string>,
+  onChunk: (bytes: Uint8Array) => void,
+): Promise<{ ok: boolean; status: number }> {
   if (Capacitor.isNativePlatform()) {
     const allHeaders = { ...headers }
     let offset = 0
     let total: number | null = null
-    let chunks: Uint8Array[] = []
     let chunkSize = DOWNLOAD_CHUNK
 
     for (;;) {
@@ -273,12 +274,12 @@ export async function downloadText(
         // Server ignored Range and returned the whole body in one shot.
         if (res.status === 200) {
           bytes = decodeCapacitorData(res.data, isJson)
-          const text = bytes ? new TextDecoder('utf-8').decode(bytes) : ''
-          return { ok: true, status: 200, text }
+          if (bytes && bytes.length > 0) onChunk(bytes)
+          return { ok: true, status: 200 }
         }
 
         if (res.status !== 206) {
-          return { ok: res.status >= 200 && res.status < 300, status: res.status, text: '' }
+          return { ok: res.status >= 200 && res.status < 300, status: res.status }
         }
 
         bytes = decodeCapacitorData(res.data, isJson)
@@ -295,7 +296,7 @@ export async function downloadText(
       }
 
       if (!bytes || bytes.length === 0) break
-      chunks.push(bytes)
+      onChunk(bytes)
 
       offset += bytes.length
       if (total !== null && offset >= total) break
@@ -306,16 +307,47 @@ export async function downloadText(
       }
     }
 
-    const decoder = new TextDecoder('utf-8')
-    let text = ''
-    for (const chunk of chunks) {
-      text += decoder.decode(chunk, { stream: true })
-    }
-    text += decoder.decode()
-    return { ok: true, status: 206, text }
+    return { ok: true, status: 206 }
   }
 
   const res = await withRetry(() => fetch(url, { headers }))
-  if (!res.ok) return { ok: false, status: res.status, text: '' }
-  return { ok: true, status: res.status, text: await res.text() }
+  if (!res.ok) return { ok: false, status: res.status }
+  onChunk(new Uint8Array(await res.arrayBuffer()))
+  return { ok: true, status: res.status }
+}
+
+/**
+ * Downloads a text resource. Chunks are decoded incrementally so a huge
+ * notebook JSON never has to exist twice in memory on Android.
+ */
+export async function downloadText(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<{ ok: boolean; status: number; text: string }> {
+  const decoder = new TextDecoder('utf-8')
+  let text = ''
+  const { ok, status } = await readResource(url, headers, (bytes) => {
+    text += decoder.decode(bytes, { stream: true })
+  })
+  if (!ok) return { ok, status, text: '' }
+  return { ok: true, status, text: text + decoder.decode() }
+}
+
+/** Downloads a binary resource (e.g. a PDF page image) into memory. */
+export async function downloadBytes(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<{ ok: boolean; status: number; bytes: Uint8Array | null }> {
+  const chunks: Uint8Array[] = []
+  const { ok, status } = await readResource(url, headers, (bytes) => chunks.push(bytes))
+  if (!ok) return { ok: false, status, bytes: null }
+  let length = 0
+  for (const chunk of chunks) length += chunk.length
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+  return { ok: true, status, bytes }
 }

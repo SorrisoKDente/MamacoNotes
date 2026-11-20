@@ -3,6 +3,7 @@ import type {
   ConflictChoice,
   Folder,
   Notebook,
+  Page,
   NotebookSummary,
   SyncConflictItem,
   SyncManifest,
@@ -10,7 +11,7 @@ import type {
   SyncProgress,
   SyncResult,
 } from '../types'
-import { normalizePage, uid, NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
+import { normalizePage, uid, NOTEBOOKS_DIR, FOLDERS_DIR, PDFS_DIR } from '../types'
 import { t } from '../i18n'
 import { RemoteFileNotFoundError } from './webdav'
 import type { Transport } from './webdav'
@@ -20,9 +21,195 @@ import { isBrowserFetchError } from './http'
 export const MANIFEST_PATH = 'manifest.json'
 export const FOLDERS_PATH = `${FOLDERS_DIR}/folders.json`
 export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const PNG_BASE64_HEADER = 'data:image/png;base64,'
 
 function notebookPath(basePath: string, id: string): string {
   return `${basePath}/${NOTEBOOKS_DIR}/${id}.json`
+}
+
+/** Remote path of a page's PDF background image. */
+export function pdfFilePath(basePath: string, pageId: string): string {
+  return `${basePath}/${PDFS_DIR}/${pageId}.png`
+}
+
+/**
+ * Fingerprint of a PDF background image. PDF backgrounds are immutable (set
+ * once when the PDF is imported), so this only has to tell "already uploaded"
+ * from "new". The dataUrl is sampled instead of read end to end so a push of a
+ * notebook with 100+ PDF pages stays cheap; the length and the tail are always
+ * included, so a changed image never hashes the same.
+ */
+export function pdfHash(dataUrl: string): string {
+  const length = dataUrl.length
+  const stride = Math.max(1, Math.floor(length / 4096))
+  let hash = 0x811c9dc5
+  for (let i = 0; i < length; i += stride) {
+    hash = Math.imul(hash ^ dataUrl.charCodeAt(i), 0x01000193)
+  }
+  for (let i = Math.max(0, length - 64); i < length; i++) {
+    hash = Math.imul(hash ^ dataUrl.charCodeAt(i), 0x01000193)
+  }
+  return `${length.toString(36)}-${(hash >>> 0).toString(36)}`
+}
+
+/** Decodes a PNG dataUrl into raw bytes; null when it is not PNG base64. */
+export function decodePngDataUrl(dataUrl: string): Uint8Array | null {
+  if (!dataUrl.startsWith(PNG_BASE64_HEADER)) return null
+  try {
+    const binary = atob(dataUrl.slice(PNG_BASE64_HEADER.length))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  } catch {
+    return null
+  }
+}
+
+export function encodePngDataUrl(bytes: Uint8Array): string {
+  let binary = ''
+  // btoa takes a binary string; chunk it so a full-page image never exceeds
+  // the argument limit of String.fromCharCode.
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return PNG_BASE64_HEADER + btoa(binary)
+}
+
+/**
+ * Splits a notebook into the JSON payload (pages without their PDF bitmap) and
+ * the bitmaps to upload as separate files. Only PNG base64 dataUrls are split;
+ * anything else stays inline as a safe fallback, so a background is never lost.
+ */
+function splitPdfBackgrounds(nb: Notebook): {
+  notebook: Notebook
+  pdfs: Map<string, string>
+} {
+  const pdfs = new Map<string, string>()
+  const pages = nb.pages.map((page) => {
+    const dataUrl = page.pdf?.dataUrl
+    if (!page.pdf || !dataUrl || !dataUrl.startsWith(PNG_BASE64_HEADER)) return page
+    pdfs.set(page.id, dataUrl)
+    const lightPdf = { name: page.pdf.name, pageNumber: page.pdf.pageNumber }
+    return { ...page, pdf: lightPdf as Page['pdf'] }
+  })
+  return { notebook: pdfs.size > 0 ? { ...nb, pages } : nb, pdfs }
+}
+
+interface UploadNotebookArgs {
+  basePath: string
+  transport: Transport
+  notebook: Notebook
+  previous?: SyncManifestNotebook
+}
+
+/**
+ * Uploads a notebook with its PDF backgrounds as separate `pdfs/<pageId>.png`
+ * files and returns the manifest entry to store. A bitmap is only uploaded when
+ * its hash differs from the previous entry's, so the hot path (a stroke made a
+ * notebook dirty) rewrites the small notebook JSON and never the PDF images.
+ */
+async function uploadNotebook({
+  basePath,
+  transport,
+  notebook,
+  previous,
+}: UploadNotebookArgs): Promise<SyncManifestNotebook> {
+  const { notebook: lightNotebook, pdfs } = splitPdfBackgrounds(notebook)
+  const hashes: Record<string, string> = {}
+  let pdfDirectoryReady = false
+  for (const [pageId, dataUrl] of pdfs) {
+    const hash = pdfHash(dataUrl)
+    hashes[pageId] = hash
+    if (previous?.pdfs?.[pageId] === hash) continue
+    // Decoded one image at a time: a PDF-heavy notebook must never hold every
+    // page bitmap in memory at once (Android OOM).
+    const bytes = decodePngDataUrl(dataUrl)
+    if (!bytes) throw new Error(t('error.invalidNotebook'))
+    if (!pdfDirectoryReady) {
+      await transport.ensureDirectory(`${basePath}/${PDFS_DIR}`)
+      pdfDirectoryReady = true
+    }
+    await transport.uploadFile(pdfFilePath(basePath, pageId), bytes, 'image/png')
+  }
+  // The notebook file goes last: it is only visible once every bitmap it
+  // references is on the server.
+  await transport.uploadFile(
+    notebookPath(basePath, notebook.id),
+    new TextEncoder().encode(
+      JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: lightNotebook }),
+    ),
+    'application/json',
+  )
+  // Backgrounds of pages removed from the notebook leave no orphan files.
+  for (const pageId of Object.keys(previous?.pdfs ?? {})) {
+    if (hashes[pageId]) continue
+    try {
+      await transport.deleteRemoteFile(pdfFilePath(basePath, pageId))
+    } catch {
+      // Orphan image only — never fails the notebook upload.
+    }
+  }
+  const entry: SyncManifestNotebook = {
+    id: notebook.id,
+    name: notebook.name,
+    updatedAt: notebook.updatedAt,
+    deleted: false,
+  }
+  if (Object.keys(hashes).length > 0) entry.pdfs = hashes
+  return entry
+}
+
+/**
+ * Rehydrates the PDF backgrounds of a downloaded notebook from
+ * `pdfs/<pageId>.png`. Only "light" pages are fetched (a page whose JSON still
+ * carries the dataUrl, or has no PDF, is left alone). A missing file (404)
+ * leaves that page without a background instead of failing the pull; a network
+ * failure aborts the pull so it is retried on the next sync.
+ */
+async function hydratePdfBackgrounds(
+  basePath: string,
+  transport: Transport,
+  notebook: Notebook,
+): Promise<Notebook> {
+  const pending = notebook.pages.filter((page) => page.pdf && !page.pdf.dataUrl)
+  if (pending.length === 0) return notebook
+  const dataUrls = new Map<string, string>()
+  for (const page of pending) {
+    try {
+      const bytes = await transport.downloadBinaryFile(pdfFilePath(basePath, page.id))
+      dataUrls.set(page.id, encodePngDataUrl(bytes))
+    } catch (e) {
+      const notFound =
+        e instanceof RemoteFileNotFoundError ||
+        (e as { name?: string } | null)?.name === 'RemoteFileNotFoundError'
+      if (notFound) continue
+      throw e
+    }
+  }
+  if (dataUrls.size === 0) return notebook
+  return {
+    ...notebook,
+    pages: notebook.pages.map((page) => {
+      const dataUrl = dataUrls.get(page.id)
+      return dataUrl && page.pdf ? { ...page, pdf: { ...page.pdf, dataUrl } } : page
+    }),
+  }
+}
+
+/**
+ * Downloads one notebook with its PDF backgrounds rehydrated. Used by the trash
+ * "restore from cloud", which reads a remote notebook outside the sync plan.
+ */
+export async function downloadNotebook(
+  basePath: string,
+  transport: Transport,
+  id: string,
+): Promise<Notebook> {
+  const text = await transport.downloadFile(notebookPath(basePath, id))
+  const data = JSON.parse(text)
+  const nb = data?.notebook as Notebook | undefined
+  if (!nb) throw new Error(t('error.invalidNotebook'))
+  return hydratePdfBackgrounds(basePath, transport, nb)
 }
 
 function notebookDisplayPath(
@@ -75,12 +262,21 @@ export function parseManifest(text: string): SyncManifest {
           typeof data.folders?.updatedAt === 'number' ? data.folders.updatedAt : 0,
       },
       notebooks: Array.isArray(data.notebooks)
-        ? data.notebooks.map((n) => ({
-            id: String(n?.id ?? ''),
-            name: String(n?.name ?? ''),
-            updatedAt: typeof n?.updatedAt === 'number' ? n.updatedAt : 0,
-            deleted: !!n?.deleted,
-          }))
+        ? data.notebooks.map((n) => {
+            const pdfs: Record<string, string> = {}
+            if (n?.pdfs && typeof n.pdfs === 'object') {
+              for (const [pageId, hash] of Object.entries(n.pdfs)) {
+                if (typeof hash === 'string') pdfs[pageId] = hash
+              }
+            }
+            return {
+              id: String(n?.id ?? ''),
+              name: String(n?.name ?? ''),
+              updatedAt: typeof n?.updatedAt === 'number' ? n.updatedAt : 0,
+              deleted: !!n?.deleted,
+              ...(Object.keys(pdfs).length > 0 ? { pdfs } : {}),
+            }
+          })
         : [],
     }
   } catch {
@@ -612,18 +808,15 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       report('upload', displayFile(id, summary.name))
       const nb = await input.getNotebook(id)
       if (!nb) throw new Error(t('error.invalidNotebook'))
-      const path = notebookPath(basePath, nb.id)
-      await transport.uploadFile(
-        path,
-        new TextEncoder().encode(JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb })),
-        'application/json',
+      manifest = upsertManifestNotebook(
+        manifest,
+        await uploadNotebook({
+          basePath,
+          transport,
+          notebook: nb,
+          previous: manifest.notebooks.find((entry) => entry.id === nb.id),
+        }),
       )
-      manifest = upsertManifestNotebook(manifest, {
-        id: nb.id,
-        name: nb.name,
-        updatedAt: nb.updatedAt,
-        deleted: false,
-      })
       state.notebooks[nb.id] = nb.updatedAt
       manifestChanged = true
       result.pushed.push(nb.name)
@@ -639,8 +832,9 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       const text = await transport.downloadFile(notebookPath(basePath, id))
       const data = JSON.parse(text)
-      const nb = data?.notebook as Notebook | undefined
-      if (!nb) throw new Error(t('error.invalidNotebook'))
+      const parsed = data?.notebook as Notebook | undefined
+      if (!parsed) throw new Error(t('error.invalidNotebook'))
+      const nb = await hydratePdfBackgrounds(basePath, transport, parsed)
       pulledNotebooks.push(nb)
       state.notebooks[id] = nb.updatedAt
       result.pulled.push(nb.name)
@@ -655,20 +849,15 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
           try {
             const nb = await input.getNotebook(id)
             if (!nb) throw new Error(t('error.invalidNotebook'))
-            const path = notebookPath(basePath, id)
-            await transport.uploadFile(
-              path,
-              new TextEncoder().encode(
-                JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
-              ),
-              'application/json',
+            manifest = upsertManifestNotebook(
+              manifest,
+              await uploadNotebook({
+                basePath,
+                transport,
+                notebook: nb,
+                previous: manifest.notebooks.find((entry) => entry.id === id),
+              }),
             )
-            manifest = upsertManifestNotebook(manifest, {
-              id,
-              name: nb.name,
-              updatedAt: nb.updatedAt,
-              deleted: false,
-            })
             state.notebooks[id] = nb.updatedAt
             manifestChanged = true
             result.pushed.push(nb.name)
@@ -709,6 +898,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       report('delete', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       const entry = manifest.notebooks.find((n) => n.id === id)
       await transport.deleteRemoteFile(notebookPath(basePath, id))
+      for (const pageId of Object.keys(entry?.pdfs ?? {})) {
+        try {
+          await transport.deleteRemoteFile(pdfFilePath(basePath, pageId))
+        } catch {
+          // Orphan image only — the notebook deletion itself succeeded.
+        }
+      }
       manifest = upsertManifestNotebook(manifest, {
         id,
         name: entry?.name ?? id,
@@ -920,7 +1116,7 @@ export async function applyConflictChoices(
     const data = JSON.parse(text)
     const nb = data?.notebook as Notebook | undefined
     if (!nb) throw new Error(t('error.invalidRemoteNotebook'))
-    return nb
+    return hydratePdfBackgrounds(basePath, transport, nb)
   }
 
   for (const [index, [id, choice]] of choiceEntries.entries()) {
@@ -1004,20 +1200,15 @@ export async function applyConflictChoices(
         try {
           const nb = await input.getNotebook(id)
           if (!nb) throw new Error(t('error.invalidNotebook'))
-          const path = notebookPath(basePath, id)
-          await transport.uploadFile(
-            path,
-            new TextEncoder().encode(
-              JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
-            ),
-            'application/json',
+          manifest = upsertManifestNotebook(
+            manifest,
+            await uploadNotebook({
+              basePath,
+              transport,
+              notebook: nb,
+              previous: manifest.notebooks.find((entry) => entry.id === id),
+            }),
           )
-          manifest = upsertManifestNotebook(manifest, {
-            id,
-            name: nb.name,
-            updatedAt: nb.updatedAt,
-            deleted: false,
-          })
           state.notebooks[id] = nb.updatedAt
           delete state.tombstones[id]
           manifestChanged = true
@@ -1062,25 +1253,14 @@ export async function applyConflictChoices(
           const remote = await loadRemote(id)
           const copy = cloneNotebookAsCopy(remote, t('copySuffix'))
           newNotebooks.push(copy)
-          await transport.uploadFile(
-            notebookPath(basePath, copy.id),
-            new TextEncoder().encode(
-              JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: copy }),
-            ),
-            'application/json',
+          manifest = upsertManifestNotebook(
+            manifest,
+            await uploadNotebook({ basePath, transport, notebook: copy }),
           )
-          manifest = upsertManifestNotebook(manifest, {
-            id,
-            name: nb.name,
-            updatedAt: nb.updatedAt,
-            deleted: false,
-          })
-          manifest = upsertManifestNotebook(manifest, {
-            id: copy.id,
-            name: copy.name,
-            updatedAt: copy.updatedAt,
-            deleted: false,
-          })
+          manifest = upsertManifestNotebook(
+            manifest,
+            await uploadNotebook({ basePath, transport, notebook: nb, previous: entry }),
+          )
           state.notebooks[id] = nb.updatedAt
           state.notebooks[copy.id] = copy.updatedAt
           manifestChanged = true

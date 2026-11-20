@@ -4,6 +4,7 @@ export const APP_VERSION = '2.4.1'
 
 export const NOTEBOOKS_DIR = 'notebooks'
 export const FOLDERS_DIR = 'folders'
+export const PDFS_DIR = 'pdfs'
 
 export type PageViewMode = 'separate' | 'vertical' | 'horizontal'
 
@@ -228,6 +229,13 @@ export interface SyncManifestNotebook {
   name: string
   updatedAt: number
   deleted: boolean
+  /**
+   * Hash of each page's PDF background image, keyed by pageId. The notebook
+   * JSON carries no `pdf.dataUrl`; the bitmap lives in `pdfs/<pageId>.png` and
+   * is only re-uploaded when its hash changes (PDF backgrounds are immutable,
+   * so a per-stroke sync never touches the images).
+   */
+  pdfs?: Record<string, string>
 }
 
 export interface SyncManifest {

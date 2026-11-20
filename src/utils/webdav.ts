@@ -2,7 +2,7 @@ import type { CloudSettings } from '../types'
 import { NOTEBOOKS_DIR, FOLDERS_DIR } from '../types'
 import { t } from '../i18n'
 import { logger } from './logger'
-import { customFetch, downloadText, isBrowserFetchError, isConnectionError } from './http'
+import { customFetch, downloadBytes, downloadText, isBrowserFetchError, isConnectionError } from './http'
 import { Capacitor } from '@capacitor/core'
 import { uploadFileStreaming } from './chunkedIo'
 
@@ -220,10 +220,10 @@ async function effectiveBaseUrl(settings: CloudSettings): Promise<string> {
   return `${info.apiBase}/dav/${encodeURIComponent(info.mountName)}`
 }
 
-async function koofrDownloadFile(
+async function koofrDownloadResponse(
   settings: CloudSettings,
   filePath: string,
-): Promise<string> {
+): Promise<Response> {
   const { apiBase, mountId } = await koofrInfo(settings)
   const url =
     `${apiBase}/content/api/v2/mounts/${encodeURIComponent(mountId)}/files/get` +
@@ -241,7 +241,21 @@ async function koofrDownloadFile(
     throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
   }
   markWebdavSuccess()
-  return await res.text()
+  return res
+}
+
+async function koofrDownloadFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<string> {
+  return (await koofrDownloadResponse(settings, filePath)).text()
+}
+
+async function koofrDownloadBinaryFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<Uint8Array> {
+  return new Uint8Array(await (await koofrDownloadResponse(settings, filePath)).arrayBuffer())
 }
 
 async function verifyUploadedJson(
@@ -503,6 +517,33 @@ async function downloadFile(
   }
 }
 
+/**
+ * Downloads a binary remote file (PDF page images live as `pdfs/<pageId>.png`).
+ * Kept separate from `downloadFile`, which decodes text, so the image bytes
+ * arrive intact on web, desktop and Android (chunked Range download).
+ */
+async function downloadBinaryFile(
+  settings: CloudSettings,
+  filePath: string,
+): Promise<Uint8Array> {
+  const base = await effectiveBaseUrl(settings)
+  const url = joinUrl(base, filePath)
+  try {
+    if (koofrApiBase(settings)) return await koofrDownloadBinaryFile(settings, filePath)
+    const res = await downloadBytes(url, { Authorization: authHeader(settings) })
+    if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
+    if (!res.ok || !res.bytes) {
+      if (res.status === 404) throw new RemoteFileNotFoundError(filePath)
+      throw new Error(t('error.downloadFailed', { filePath, status: res.status }))
+    }
+    markWebdavSuccess()
+    return res.bytes
+  } catch (err) {
+    logger.error(`Download failed: ${filePath}`, err)
+    rethrowConnectionError(err)
+  }
+}
+
 async function deleteRemoteFile(
   settings: CloudSettings,
   filePath: string,
@@ -579,6 +620,7 @@ export interface Transport {
   listDirectory: (dirPath: string) => Promise<string[]>
   uploadFile: (filePath: string, bytes: Uint8Array | Blob, contentType: string) => Promise<void>
   downloadFile: (filePath: string) => Promise<string>
+  downloadBinaryFile: (filePath: string) => Promise<Uint8Array>
   deleteRemoteFile: (filePath: string) => Promise<void>
 }
 
@@ -589,6 +631,7 @@ export function makeTransport(settings: CloudSettings): Transport {
     uploadFile: (filePath, bytes, contentType) =>
       uploadFile(settings, filePath, bytes, contentType),
     downloadFile: (filePath) => downloadFile(settings, filePath),
+    downloadBinaryFile: (filePath) => downloadBinaryFile(settings, filePath),
     deleteRemoteFile: (filePath) => deleteRemoteFile(settings, filePath),
   }
 }

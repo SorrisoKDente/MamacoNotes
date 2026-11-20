@@ -122,6 +122,12 @@ class FakeTransport implements Transport {
     return content
   }
 
+  async downloadBinaryFile(filePath: string): Promise<Uint8Array> {
+    const content = this.files.get(filePath)
+    if (content === undefined) throw new RemoteFileNotFoundError(filePath)
+    return new TextEncoder().encode(content)
+  }
+
   async deleteRemoteFile(filePath: string): Promise<void> {
     this.files.delete(filePath)
   }
