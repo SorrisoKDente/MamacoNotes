@@ -121,7 +121,7 @@ Fluxo de inicialização:
 | `src/main.tsx` | Bootstrap React + registro PWA |
 | `src/App.tsx` | Componente raiz; composição da tela (TopBar, Sidebar, PageList, Editor, Toolbar, Modals); init + auto-sync; tecla Escape → `ink:esc`; botão de voltar do Android (Capacitor `@capacitor/app`) → `ink:esc` |
 | `src/types.ts` | **Todos os tipos de dados** do domínio + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + helpers de camadas (`normalizePage`, `getActiveLayer`) + `TrashItem` (entrada da lixeira local) + **`APP_VERSION`** (constante de versão) |
-| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`, `notebooksContent`, `pdfImages`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos, converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`), separa o conteúdo das páginas em `notebooksContent` (`migrateToMetaContent`, v7 → v8) e extrai as imagens de fundo de PDF para `pdfImages` (`migratePdfImages`, v8 → v9) |
+| `src/db.ts` | **Camada de persistência IndexedDB** (object stores: `folders`, `notebooks`, `pages`, `settings`, `cloudSync`, `templates`, `trash`, `pdfImages`); migração de versão preenche o campo `order` ausente de pastas/cadernos antigos, converte páginas antigas (arrays planos) para o modelo de camadas (`migrateLayers`), separa o conteúdo das páginas em `notebooksContent` (`migrateToMetaContent`, v7 → v8), extrai as imagens de fundo de PDF para `pdfImages` (`migratePdfImages`, v8 → v9) e divide o conteúdo por caderno em registros por página (`migratePages`, v9 → v10) |
 | `src/store.ts` | **Store principal (Zustand)**: todo CRUD de cadernos/pastas/páginas/modelos, ações de camadas (adicionar/renomear/duplicar/excluir/reordenar/visibilidade/opacidade/lock/ativo/merge), undo/redo, clipboard, **lixeira local** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, progresso (`syncProgress`, incluindo caminhos remotos completos), revisão de conteúdo externo (`syncRevision`) e persistência |
 | `src/uiStore.ts` | Store de modais (`openModal`, `modalData`, `open`, `close`) |
 | `src/textStore.ts` | Estado de edição de texto (draft, seleção, rotação) |
@@ -208,6 +208,7 @@ Fluxo de inicialização:
 | `scripts/verify-eraser.ts` | Verificação de regressão da borracha standalone: tamanho/raio do apagamento com clique único, matemática da máscara de interseção e o fluxo completo da **sobreposição de máscara da borracha** (apagar → arrastar um traço no escopo para a área apagada → a máscara acompanha o traço, então nada desaparece). Rode com `npm test` ou `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-cursor-platform.ts` | Verificação de regressão do caminho leve do cursor desktop e da visibilidade da tela cheia no navegador/nativo. Rode com `npm test` |
 | `scripts/verify-download.ts` | Verificação independente da correção de download no Android... |
+| `scripts/verify-pages-store.ts` | Verificação standalone da **persistência por página** (db v9 → v10): `putNotebook` grava um registro por página, um put sem mudanças grava **zero** registros, uma página editada grava exatamente um, reordenar regrava apenas as páginas movidas e `getNotebook` preserva a ordem, `getFirstPage` devolve a primeira página com o `dataUrl` do PDF reidratado, e páginas/cadernos removidos não deixam registros órfãos. `scripts/verify-pdf-images.ts` cobre a store `pdfImages`, a regra de páginas leves e a migração v8 → atual. Rode com `npm test` |
 | `scripts/bench-p0-1.ts` | **Fixture do benchmark de performance do P0-1**: lê um backup local (`argv[2]`), escolhe a página com PDF com mais traços e grava o `public/bench-p0-1-page.json` (ignorado pelo git). O `bench/p0-1.html` (no dev server) então roda o `PageCanvas` real no Chromium sobre essa página e reporta o custo por frame de um traço com o cache de bitmap da página **ligado vs desligado** (`?dpr=`, `?frames=`, `?passes=`), além da comparação de pixels dos dois caminhos. Rode `npm run bench:p0-1` e abra `/bench/p0-1.html` — o benchmark só roda num navegador real |
 
 ---
@@ -247,13 +248,14 @@ Hierarquia: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke |
 
 ### 5.2 Persistência (IndexedDB) — `src/db.ts`
 
-Banco `mamaco-notes`, versão **9**, com object stores:
+Banco `mamaco-notes`, versão **10**, com object stores:
 
 | Store | Conteúdo | Chave |
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
 | `notebooks` | `NotebookSummary[]` (metadados leves: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
-| `notebooksContent` | `{ id, pages: Page[] }` — desenhos completos das páginas; os fundos de PDF são armazenados **leves** (`pdf` sem `dataUrl`); camadas podem conter máscaras persistidas de apagamento parcial (`strokeErasures`) | `id` |
+| `pages` | `PageRecord { key, notebookId, order, page }` — **um registro por página**; `page` é o desenho completo da página com o fundo de PDF **leve** (`pdf` sem `dataUrl`); camadas podem conter máscaras persistidas de apagamento parcial (`strokeErasures`) | `key` = `notebookId:pageId` (+ índice `byNotebook` em `[notebookId, order]`) |
+| `notebooksContent` | **Apenas legado** (pré-v10): `{ id, pages: Page[] }`. A migração v9 → v10 move suas páginas para `pages` e a esvazia; o código atual nunca lê nem grava nela. | `id` |
 | `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — imagens de fundo de páginas de PDF (imutáveis, gravadas apenas quando novas) | `pageId` (+ índice `byNotebook` em `notebookId`) |
 | `settings` | 1 registro `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 registro `CloudSyncState` | `id` |
@@ -297,13 +299,33 @@ Toda escrita em dados no app passa por `store.ts`, que chama `db.*`.
 > imutáveis `page.pdf.dataUrl` de fundo de `notebooksContent` para a nova object store
 > `pdfImages` (keyPath `pageId`, índice `byNotebook` em `notebookId`) e reescreve o registro
 > de conteúdo com páginas "leves" (`pdf` sem `dataUrl`). Assim, `putNotebook` grava apenas
-> as páginas leves em `notebooksContent` e faz upsert dos blobs em `pdfImages` somente
+> as páginas leves e faz upsert dos blobs em `pdfImages` somente
 > quando são novos — rastreados por um cache em memória de `pageId → dataUrl length` — de
 > modo que um commit por traço nunca re-serializa as imagens grandes de PDF (causa raiz do
 > congelamento da UI ao soltar o traço em cadernos com muitos PDFs). `getNotebook`/
 > `getFirstPage` reidratam o `dataUrl` de `pdfImages`, então páginas/canvas/miniaturas em
 > memória se comportam exatamente como antes; `deleteNotebook` também remove os blobs do
 > caderno (sem vazamentos). Sync/backup não mudam, pois leem cadernos totalmente reidratados.
+>
+> **Migração 9 → 10 (registros por página)**: `migratePages()` divide cada registro de
+> `notebooksContent` em um registro de `pages` por página (`key = notebookId:pageId`,
+> `order` = índice no array de páginas) dentro de uma única transação, apagando o registro
+> de conteúdo conforme avança — assim a store legada termina vazia e o JSON das páginas
+> nunca é duplicado. A divisão roda sempre que a store legada ainda tiver registros (não
+> apenas durante a troca de versão), então um app encerrado entre o commit da atualização
+> e a migração ainda migra na próxima abertura, em vez de carregar cadernos vazios.
+> Depois disso, `putNotebook` compara as páginas recebidas com um espelho em memória
+> (`pageId → { stamp, order }`) populado por `getNotebook` e atualizado por `putNotebook`/
+> `deleteNotebook` somente depois que a transação confirma; página ausente do espelho é
+> sempre gravada. O stamp é o `updatedAt` mais a forma estrutural da página (tamanho,
+> rotação, fundo, template, camada ativa e, por camada, id/nome/visibilidade/opacidade/
+> trava/pasta, contagem de elementos, total de pontos e número de máscaras de borracha) —
+> é assim que `putNotebook` sabe quais páginas mudaram e regrava **apenas** elas: um commit de traço em um caderno de 127 páginas com
+> PDF grava um registro em vez de clonar o caderno inteiro. A ordem das páginas fica no
+> registro e é servida pelo índice `byNotebook`, então reordenar toca apenas as páginas
+> movidas, e `getFirstPage` lê um único registro via cursor. Páginas removidas (e seu blob
+> em `pdfImages`) são apagadas na mesma transação; `deleteNotebook` remove todos os
+> registros de página do caderno.
 
 ### 5.3 Stores (Zustand)
 

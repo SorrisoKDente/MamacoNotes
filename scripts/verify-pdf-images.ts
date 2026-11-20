@@ -1,22 +1,24 @@
 /**
- * Verification script for the PDF-background persistence split (db v8 -> v9).
+ * Verification script for the PDF-background persistence split (db v8 -> v9)
+ * and for the per-page store that replaced the notebook content record
+ * (v9 -> v10).
  *
  * Root cause it guards against: `putNotebook` used to structured-clone the
  * ENTIRE notebook — including every full-resolution PDF page image embedded as
  * a base64 `dataUrl` — into IndexedDB on every stroke commit, freezing the UI
  * for notebooks with many PDF pages. The fix moves those immutable blobs to a
  * dedicated `pdfImages` object store and persists only "light" pages (pdf
- * without dataUrl) in `notebooksContent`, so per-stroke writes stay small.
+ * without dataUrl).
  *
  * This script proves:
- *  1. `putNotebook` writes light pages + extracts the blobs into `pdfImages`
+ *  1. `putNotebook` writes light page records + extracts the blobs into `pdfImages`
  *  2. `getNotebook` rehydrates the `dataUrl` so in-memory pages are unchanged
  *  3. a second put (simulating the hot path after a stroke) keeps pdfImages
- *     intact and the content record light (no re-clone of the big strings)
+ *     intact and the page records light (no re-clone of the big strings)
  *  4. removing a page cleans its orphaned blob from `pdfImages`
- *  5. `deleteNotebook` removes the notebook's blobs from `pdfImages`
- *  6. migrating a v8 database (full pages embedded) to v9 extracts the blobs
- *     and rewrites the content record to light
+ *  5. `deleteNotebook` removes the notebook's page records and blobs
+ *  6. migrating a v8 database (full pages embedded in notebooksContent) to the
+ *     current version extracts the blobs and rewrites light page records
  *
  * Run: npx tsx scripts/verify-pdf-images.ts
  */
@@ -80,16 +82,34 @@ interface PdfImageRecord {
   dataUrl: string
 }
 
-interface LightContent {
-  id: string
-  pages: { id: string; pdf?: { name: string; pageNumber: number; dataUrl?: string } }[]
+interface PageRecord {
+  key: string
+  notebookId: string
+  order: number
+  page: { id: string; pdf?: { name: string; pageNumber: number; dataUrl?: string } }
 }
 
-async function readLightContent(db: IDBDatabase, id: string): Promise<LightContent | undefined> {
+async function readPageRecords(db: IDBDatabase, notebookId: string): Promise<PageRecord[]> {
   return new Promise((resolve, reject) => {
-    const t = db.transaction('notebooksContent', 'readonly')
-    const req = t.objectStore('notebooksContent').get(id)
-    req.onsuccess = () => resolve(req.result as LightContent | undefined)
+    const t = db.transaction('pages', 'readonly')
+    const req = t
+      .objectStore('pages')
+      .index('byNotebook')
+      .getAll(IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]))
+    req.onsuccess = () => resolve(req.result as PageRecord[])
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function readPage(
+  db: IDBDatabase,
+  notebookId: string,
+  pageId: string,
+): Promise<PageRecord | undefined> {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction('pages', 'readonly')
+    const req = t.objectStore('pages').get(`${notebookId}:${pageId}`)
+    req.onsuccess = () => resolve(req.result as PageRecord | undefined)
     req.onerror = () => reject(req.error)
   })
 }
@@ -129,7 +149,7 @@ async function main(): Promise<void> {
 
   const { db, closeDb } = await import('../src/db')
 
-  console.log('== putNotebook writes light content + extracts blobs ==')
+  console.log('== putNotebook writes light page records + extracts blobs ==')
   const nb = {
     id: 'nb1',
     name: 'teste',
@@ -146,11 +166,11 @@ async function main(): Promise<void> {
     req.onerror = () => reject(req.error)
   })
 
-  const light = (await readLightContent(idb, 'nb1'))!
-  assert(light.pages.length === 3, 'content record has 3 pages')
-  assert(!light.pages[0].pdf?.dataUrl && light.pages[0].pdf?.name === 'teste.pdf', 'page 1 pdf is light (no dataUrl)')
-  assert(!light.pages[1].pdf?.dataUrl && light.pages[1].pdf?.pageNumber === 1, 'page 2 pdf is light (no dataUrl)')
-  assert(light.pages[2].pdf === undefined, 'page without pdf stays without pdf')
+  const records = await readPageRecords(idb, 'nb1')
+  assert(records.length === 3, 'notebook has 3 page records')
+  assert(!records[0].page.pdf?.dataUrl && records[0].page.pdf?.name === 'teste.pdf', 'page 1 pdf is light (no dataUrl)')
+  assert(!records[1].page.pdf?.dataUrl && records[1].page.pdf?.pageNumber === 1, 'page 2 pdf is light (no dataUrl)')
+  assert(records[2].page.pdf === undefined, 'page without pdf stays without pdf')
   assert((await countPdfImages(idb)) === 2, 'pdfImages has exactly 2 blobs')
 
   const img1 = (await readPdfImage(idb, 'p1'))!
@@ -165,7 +185,7 @@ async function main(): Promise<void> {
   assert(loaded.pages[1].pdf?.dataUrl === dataUrlB, 'page 2 dataUrl rehydrated')
   assert(loaded.pages[2].pdf === undefined, 'page without pdf unaffected')
 
-  console.log('== second put (hot path) does not lose blobs, keeps content light ==')
+  console.log('== second put (hot path) does not lose blobs, keeps records light ==')
   const nbAfterStroke = {
     ...nb,
     pages: [
@@ -176,8 +196,8 @@ async function main(): Promise<void> {
   }
   await db.putNotebook(nbAfterStroke as never)
   assert((await countPdfImages(idb)) === 2, 'pdfImages still has 2 blobs after second put')
-  const light2 = (await readLightContent(idb, 'nb1'))!
-  assert(!light2.pages[0].pdf?.dataUrl, 'content record still light after second put')
+  const light2 = await readPage(idb, 'nb1', 'p1')
+  assert(!light2!.page.pdf?.dataUrl, 'page record still light after second put')
   assert((await readPdfImage(idb, 'p1'))!.dataUrl === dataUrlA, 'blob p1 intact after second put')
 
   console.log('== removing a page cleans its orphaned blob ==')
@@ -188,18 +208,19 @@ async function main(): Promise<void> {
   await db.putNotebook(nbWithoutPage2 as never)
   assert((await countPdfImages(idb)) === 1, 'p2 blob removed from pdfImages')
   assert((await readPdfImage(idb, 'p2')) === undefined, 'orphaned p2 blob gone')
+  assert((await readPageRecords(idb, 'nb1')).length === 2, 'removed page record gone')
 
-  console.log('== deleteNotebook cleans blobs ==')
+  console.log('== deleteNotebook cleans blobs and page records ==')
   await db.deleteNotebook('nb1')
   assert((await countPdfImages(idb)) === 0, 'pdfImages empty after notebook deletion')
-  assert((await readLightContent(idb, 'nb1')) === undefined, 'content record removed')
+  assert((await readPageRecords(idb, 'nb1')).length === 0, 'page records removed')
 
   console.log('\nAll pdfImages checks done — migration scenario below.\n')
 
-  // ---- Migration v8 -> v9 ----
+  // ---- Migration v8 -> current ----
   // Build a fresh v8 database that already contains full pages (pdf with
   // dataUrl) inside notebooksContent, as pre-upgrade installs would.
-  // The db module's v9 connection must be closed first, otherwise the
+  // The db module's current connection must be closed first, otherwise the
   // deleteDatabase below is blocked and open(name, 8) would never succeed.
   await closeDb()
   idb.close()
@@ -230,18 +251,27 @@ async function main(): Promise<void> {
     req.onerror = () => reject(req.error)
   })
 
-  // Reopen at v9 via the db module: with the connection reset by closeDb(), the
-  // next openDb() reconnects and runs the 8 -> 9 migration, extracting the blob.
+  // Reopen at the current version via the db module: with the connection reset
+  // by closeDb(), the next openDb() reconnects and runs the migrations,
+  // extracting the blob and splitting the content record into a page record.
   const migrated = (await db.getNotebook('old-nb'))!
-  assert(migrated.pages[0].pdf?.dataUrl === dataUrlA, 'v8 -> v9 migration rehydrates the old dataUrl')
-  const idb9 = await new Promise<IDBDatabase>((resolve, reject) => {
+  assert(migrated.pages[0].pdf?.dataUrl === dataUrlA, 'migration rehydrates the old dataUrl')
+  const idb10 = await new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open('mamaco-notes')
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
-  const migratedLight = (await readLightContent(idb9, 'old-nb'))!
-  assert(!migratedLight.pages[0].pdf?.dataUrl, 'v8 -> v9 migration rewrote content to light')
-  assert((await readPdfImage(idb9, 'old-p1'))!.dataUrl === dataUrlA, 'v8 -> v9 migration stored the blob in pdfImages')
+  const migratedRecord = (await readPage(idb10, 'old-nb', 'old-p1'))!
+  assert(!migratedRecord.page.pdf?.dataUrl, 'migration wrote a light page record')
+  assert(migratedRecord.notebookId === 'old-nb' && migratedRecord.order === 0, 'page record keyed and ordered')
+  assert((await readPdfImage(idb10, 'old-p1'))!.dataUrl === dataUrlA, 'migration stored the blob in pdfImages')
+  const legacyCount = await new Promise<number>((resolve, reject) => {
+    const t = idb10.transaction('notebooksContent', 'readonly')
+    const req = t.objectStore('notebooksContent').count()
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+  assert(legacyCount === 0, 'legacy notebooksContent records migrated and emptied')
 
   console.log(`\n${passed} passed, ${failed} failed`)
   if (failed > 0) process.exit(1)

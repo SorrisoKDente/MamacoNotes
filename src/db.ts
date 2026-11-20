@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, normalizePage } from './types'
 import { hashFolders } from './utils/sync'
 
 const DB_NAME = 'mamaco-notes'
-const DB_VERSION = 9
+const DB_VERSION = 10
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -12,6 +12,55 @@ interface PdfImageRecord {
   notebookId: string
   dataUrl: string
 }
+
+/**
+ * One record per page (v10). Keyed by `notebookId:pageId` so a page can be
+ * rewritten without touching the other pages of the notebook, and indexed by
+ * `[notebookId, order]` so loading a notebook returns its pages already in
+ * order.
+ */
+interface PageRecord {
+  key: string
+  notebookId: string
+  order: number
+  page: Page
+}
+
+function pageKey(notebookId: string, pageId: string): string {
+  return `${notebookId}:${pageId}`
+}
+
+/**
+ * Cheap fingerprint of a page's persisted content. Writing a page only when
+ * its stamp changed is what makes a stroke commit cost O(1) page writes
+ * instead of re-cloning every page of the notebook.
+ *
+ * Every page mutation in the app bumps `page.updatedAt` (Editor, store page and
+ * layer actions, background color modal), so the timestamp is the primary
+ * discriminator; the structural fields are a second line of defense for edits
+ * that land in the same millisecond as the previous write (layer toggles,
+ * undo/redo restoring an older snapshot). Point counts catch drawing changes
+ * without serializing the page.
+ */
+function pageStamp(page: Page): string {
+  let sig = `${page.updatedAt}|${page.rotation}|${page.width}x${page.height}|${page.backgroundColor}|${page.template}|${page.activeLayerId ?? ''}`
+  for (const layer of page.layers ?? []) {
+    let points = 0
+    for (const stroke of layer.strokes) points += stroke.points.length
+    sig += `#${layer.id},${layer.name},${layer.visible ? 1 : 0},${layer.opacity},${layer.locked ? 1 : 0},${layer.folderId ?? ''},${layer.strokes.length},${layer.images.length},${layer.texts.length},${points},${layer.strokeErasures?.length ?? 0}`
+  }
+  return sig
+}
+
+/**
+ * In-memory mirror of what is already persisted in `pages`:
+ * pageId -> { stamp, order }. Populated when a notebook is loaded and kept in
+ * sync by `putNotebook`/`deleteNotebook` (only once their transaction commits),
+ * so a page that did not change is never rewritten. A page missing from the
+ * mirror is always written — the mirror can only make writes cheaper, never
+ * hide an unknown page.
+ */
+const knownPageState = new Map<string, { stamp: string; order: number }>()
 
 /**
  * In-memory cache of which PDF backgrounds are already persisted in the
@@ -128,7 +177,6 @@ function migratePdfImages(db: IDBDatabase): Promise<void> {
         const pages = record.pages.map((p) => {
           if (p.pdf && p.pdf.dataUrl) {
             pdfStore.put({ pageId: p.id, notebookId: record.id, dataUrl: p.pdf.dataUrl })
-            knownPdfLength.set(p.id, p.pdf.dataUrl.length)
             changed = true
             return { ...p, pdf: stripPdfDataUrl(p.pdf) as Page['pdf'] }
           }
@@ -189,6 +237,53 @@ function migrateToMetaContent(db: IDBDatabase): Promise<void> {
   })
 }
 
+/**
+ * Migration 9 -> 10: split each per-notebook `notebooksContent` record into one
+ * `pages` record per page. The content record is removed in the same atomic
+ * transaction, so the legacy store ends up empty and the page JSON is never
+ * duplicated; an aborted transaction rolls everything back. Idempotent: pages
+ * already migrated are written again with the same values, orphans stay gone.
+ */
+function migratePages(db: IDBDatabase): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['notebooksContent', 'pages'], 'readwrite')
+    const contentStore = tx.objectStore('notebooksContent')
+    const pageStore = tx.objectStore('pages')
+    const cursor = contentStore.openCursor()
+    cursor.onsuccess = () => {
+      const cur = cursor.result
+      if (!cur) return
+      const record = cur.value as { id: string; pages?: Page[] }
+      const pages = record.pages ?? []
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i]
+        pageStore.put({ key: pageKey(record.id, page.id), notebookId: record.id, order: i, page })
+      }
+      cur.delete()
+      cur.continue()
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/**
+ * Number of pre-v10 `notebooksContent` records still waiting to be split into
+ * `pages`. Checked on every open — not only while upgrading — because the
+ * migrations run after the version upgrade commits: an app killed in that
+ * window would otherwise leave the legacy records behind forever and every
+ * notebook would load with zero pages.
+ */
+function countLegacyContent(db: IDBDatabase): Promise<number> {
+  if (!db.objectStoreNames.contains('notebooksContent')) return Promise.resolve(0)
+  return new Promise((resolve, reject) => {
+    const t = db.transaction('notebooksContent', 'readonly')
+    const req = t.objectStore('notebooksContent').count()
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
@@ -220,18 +315,26 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('trash')) {
         db.createObjectStore('trash', { keyPath: 'id' })
       }
-      if (!db.objectStoreNames.contains('notebooksContent')) {
+      // Legacy pre-v10 content store. Only old databases still carry it; it is
+      // migrated into `pages` and emptied by `migratePages`.
+      if (oldVersion > 0 && oldVersion < 8 && !db.objectStoreNames.contains('notebooksContent')) {
         db.createObjectStore('notebooksContent', { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains('pages')) {
+        const pageStore = db.createObjectStore('pages', { keyPath: 'key' })
+        pageStore.createIndex('byNotebook', ['notebookId', 'order'])
       }
       if (!db.objectStoreNames.contains('pdfImages')) {
         const pdfStore = db.createObjectStore('pdfImages', { keyPath: 'pageId' })
         pdfStore.createIndex('byNotebook', 'notebookId')
       }
 
-      if (oldVersion < 4) needsOrderMigration = true
-      if (oldVersion < 5) needsLayersMigration = true
-      if (oldVersion < 8) needsMetaContentMigration = true
-      if (oldVersion < 9) needsPdfImagesMigration = true
+      if (oldVersion > 0) {
+        if (oldVersion < 4) needsOrderMigration = true
+        if (oldVersion < 5) needsLayersMigration = true
+        if (oldVersion < 8) needsMetaContentMigration = true
+        if (oldVersion < 9) needsPdfImagesMigration = true
+      }
     }
 
     req.onsuccess = async () => {
@@ -251,6 +354,11 @@ function openDb(): Promise<IDBDatabase> {
         if (needsPdfImagesMigration) {
           await migratePdfImages(db)
         }
+        // Runs for a fresh v10 database too (no legacy store -> 0 records) and
+        // self-heals a migration interrupted after the upgrade committed.
+        if ((await countLegacyContent(db)) > 0) {
+          await migratePages(db)
+        }
       } catch (e) {
         console.error('Database migration failed', e)
         reject(e)
@@ -267,8 +375,8 @@ function openDb(): Promise<IDBDatabase> {
 /**
  * Closes the cached IndexedDB connection and clears the module's promise so a
  * subsequent `openDb()` reconnects. Used by tests that rebuild the database
- * from an older version (e.g. verifying the v8 -> v9 migration), and could be
- * used on app logout.
+ * from an older version (e.g. verifying the page-store migrations), and could
+ * be used on app logout.
  */
 export async function closeDb(): Promise<void> {
   if (dbPromise) {
@@ -334,6 +442,19 @@ async function rehydratePdfPages(notebookId: string, pages: Page[]): Promise<Pag
   })
 }
 
+async function readPageRecords(notebookId: string): Promise<PageRecord[]> {
+  const db = await openDb()
+  return new Promise<PageRecord[]>((resolve, reject) => {
+    const t = db.transaction('pages', 'readonly')
+    const req = t
+      .objectStore('pages')
+      .index('byNotebook')
+      .getAll(IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]))
+    req.onsuccess = () => resolve(req.result as PageRecord[])
+    req.onerror = () => reject(req.error)
+  })
+}
+
 export const db = {
   async getFolders(): Promise<Folder[]> {
     const all = await tx('folders', 'readonly', (s) => s.getAll())
@@ -352,35 +473,39 @@ export const db = {
   async getNotebook(id: string): Promise<Notebook | undefined> {
     const meta = await tx<NotebookSummary | undefined>('notebooks', 'readonly', (s) => s.get(id))
     if (!meta) return undefined
-    const content = await tx<{ id: string; pages: Page[] } | undefined>(
-      'notebooksContent',
-      'readonly',
-      (s) => s.get(id),
-    )
-    const pages = await rehydratePdfPages(id, content?.pages ?? [])
+    const records = await readPageRecords(id)
+    for (const record of records) {
+      knownPageState.set(record.page.id, { stamp: pageStamp(record.page), order: record.order })
+    }
+    const pages = await rehydratePdfPages(id, records.map((r) => r.page))
     return {
       ...meta,
       pages,
     }
   },
   async getFirstPage(id: string): Promise<Page | undefined> {
-    const content = await tx<{ id: string; pages: Page[] } | undefined>(
-      'notebooksContent',
-      'readonly',
-      (s) => s.get(id),
-    )
-    const first = content?.pages?.[0]
-    if (!first) return undefined
-    if (first.pdf && !first.pdf.dataUrl) {
-      const rec = await tx<PdfImageRecord | undefined>('pdfImages', 'readonly', (s) =>
-        s.get(first.id),
-      )
+    const db = await openDb()
+    const first = await new Promise<PageRecord | undefined>((resolve, reject) => {
+      const t = db.transaction('pages', 'readonly')
+      // The `byNotebook` index is [notebookId, order], so the first cursor hit
+      // is the first page — the rest of the notebook is never deserialized.
+      const req = t
+        .objectStore('pages')
+        .index('byNotebook')
+        .openCursor(IDBKeyRange.bound([id, -Infinity], [id, Infinity]))
+      req.onsuccess = () => resolve(req.result?.value as PageRecord | undefined)
+      req.onerror = () => reject(req.error)
+    })
+    const page = first?.page
+    if (!page) return undefined
+    if (page.pdf && !page.pdf.dataUrl) {
+      const rec = await tx<PdfImageRecord | undefined>('pdfImages', 'readonly', (s) => s.get(page.id))
       if (rec) {
-        knownPdfLength.set(first.id, rec.dataUrl.length)
-        return { ...first, pdf: { ...first.pdf, dataUrl: rec.dataUrl } }
+        knownPdfLength.set(page.id, rec.dataUrl.length)
+        return { ...page, pdf: { ...page.pdf, dataUrl: rec.dataUrl } }
       }
     }
-    return first
+    return page
   },
   async putNotebook(notebook: Notebook): Promise<void> {
     const summary: NotebookSummary = {
@@ -394,64 +519,103 @@ export const db = {
       favorite: notebook.favorite,
     }
     // PDF backgrounds are stored separately (see `pdfImages`) so a per-stroke
-    // write never re-serializes the heavy dataUrls. The `notebooksContent`
-    // record keeps only "light" pages (pdf without dataUrl).
+    // write never re-serializes the heavy dataUrls. Page records keep only
+    // "light" pages (pdf without dataUrl).
     const lightPages = notebook.pages.map((p) => {
       if (!p.pdf || !p.pdf.dataUrl) return p
       return { ...p, pdf: stripPdfDataUrl(p.pdf) as Page['pdf'] }
     })
-    // We must use a single transaction to ensure consistency.
     const db = await openDb()
     return new Promise((resolve, reject) => {
-      const t = db.transaction(['notebooks', 'notebooksContent', 'pdfImages'], 'readwrite')
+      const t = db.transaction(['notebooks', 'pages', 'pdfImages'], 'readwrite')
       t.objectStore('notebooks').put(summary)
-      const contentStore = t.objectStore('notebooksContent')
+      const pageStore = t.objectStore('pages')
       const pdfStore = t.objectStore('pdfImages')
-      // Detect new/deleted pages from the previously persisted (light) content.
-      const getReq = contentStore.get(notebook.id)
-      getReq.onsuccess = () => {
-        const oldRecord = getReq.result as { id: string; pages: Page[] } | undefined
-        const oldIds = new Set((oldRecord?.pages ?? []).map((p) => p.id))
-        const newIds = new Set(notebook.pages.map((p) => p.id))
-        for (const p of notebook.pages) {
-          if (p.pdf && p.pdf.dataUrl) {
-            const len = p.pdf.dataUrl.length
-            if (knownPdfLength.get(p.id) !== len) {
-              pdfStore.put({ pageId: p.id, notebookId: notebook.id, dataUrl: p.pdf.dataUrl })
-              knownPdfLength.set(p.id, len)
-            }
-          }
+      // Detect new/deleted pages and which pages actually changed from the
+      // persisted records. Only those are rewritten, so committing a stroke on
+      // a 100-page notebook costs one page write instead of a whole-notebook
+      // structured clone.
+      const keysReq = pageStore
+        .index('byNotebook')
+        .getAllKeys(IDBKeyRange.bound([notebook.id, -Infinity], [notebook.id, Infinity]))
+      keysReq.onsuccess = () => {
+        // Keys of the records currently persisted for this notebook. Whatever
+        // is left once the incoming pages are consumed belongs to deleted
+        // pages and is removed below.
+        const staleKeys = new Set(keysReq.result as string[])
+        const written: { id: string; stamp: string; order: number }[] = []
+        for (let i = 0; i < lightPages.length; i++) {
+          const page = lightPages[i]
+          const key = pageKey(notebook.id, page.id)
+          staleKeys.delete(key)
+          const stamp = pageStamp(page)
+          const known = knownPageState.get(page.id)
+          if (known && known.stamp === stamp && known.order === i) continue
+          pageStore.put({ key, notebookId: notebook.id, order: i, page })
+          written.push({ id: page.id, stamp, order: i })
         }
-        for (const id of oldIds) {
-          if (!newIds.has(id)) {
-            pdfStore.delete(id)
+        const droppedPageIds: string[] = []
+        for (const key of staleKeys) {
+          pageStore.delete(key)
+          droppedPageIds.push(key.slice(notebook.id.length + 1))
+        }
+        for (const id of droppedPageIds) pdfStore.delete(id)
+        const pdfWrites: { id: string; length: number }[] = []
+        for (const p of notebook.pages) {
+          if (!p.pdf || !p.pdf.dataUrl) continue
+          const length = p.pdf.dataUrl.length
+          if (knownPdfLength.get(p.id) === length) continue
+          pdfStore.put({ pageId: p.id, notebookId: notebook.id, dataUrl: p.pdf.dataUrl })
+          pdfWrites.push({ id: p.id, length })
+        }
+        // The caches only claim what the transaction actually committed.
+        t.oncomplete = () => {
+          for (const entry of written) {
+            knownPageState.set(entry.id, { stamp: entry.stamp, order: entry.order })
+          }
+          for (const entry of pdfWrites) knownPdfLength.set(entry.id, entry.length)
+          for (const id of droppedPageIds) {
+            knownPageState.delete(id)
             knownPdfLength.delete(id)
           }
+          resolve()
         }
-        contentStore.put({ id: notebook.id, pages: lightPages })
       }
-      t.oncomplete = () => resolve()
       t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
     })
   },
   async deleteNotebook(id: string): Promise<void> {
     const db = await openDb()
     return new Promise((resolve, reject) => {
-      const t = db.transaction(['notebooks', 'notebooksContent', 'pdfImages'], 'readwrite')
+      const t = db.transaction(['notebooks', 'pages', 'pdfImages'], 'readwrite')
       t.objectStore('notebooks').delete(id)
-      t.objectStore('notebooksContent').delete(id)
+      const range = IDBKeyRange.bound([id, -Infinity], [id, Infinity])
+      const pageStore = t.objectStore('pages')
+      const pageCursor = pageStore.index('byNotebook').openCursor(range)
+      const droppedPageIds: string[] = []
+      pageCursor.onsuccess = () => {
+        const cur = pageCursor.result
+        if (!cur) return
+        droppedPageIds.push((cur.value as PageRecord).page.id)
+        cur.delete()
+        cur.continue()
+      }
       const pdfStore = t.objectStore('pdfImages')
-      const idx = pdfStore.index('byNotebook')
-      const curReq = idx.openCursor(IDBKeyRange.only(id))
-      curReq.onsuccess = () => {
-        const cur = curReq.result
+      const pdfCursor = pdfStore.index('byNotebook').openCursor(IDBKeyRange.only(id))
+      pdfCursor.onsuccess = () => {
+        const cur = pdfCursor.result
         if (!cur) return
         knownPdfLength.delete(cur.value.pageId)
         cur.delete()
         cur.continue()
       }
-      t.oncomplete = () => resolve()
+      t.oncomplete = () => {
+        for (const pageId of droppedPageIds) knownPageState.delete(pageId)
+        resolve()
+      }
       t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
     })
   },
   async updateNotebookMeta(summary: NotebookSummary): Promise<void> {

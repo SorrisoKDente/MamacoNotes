@@ -123,7 +123,7 @@ Initialization flow:
 | `src/main.tsx` | React Bootstrap + PWA registration |
 | `src/App.tsx` | Root component; screen composition (Dashboard or TopBar + PageList + Editor + Toolbar + LayersPanel + Modals); init + auto-sync; Escape key → `ink:esc`; Android back button (Capacitor `@capacitor/app`) → `ink:esc` |
 | `src/types.ts` | **All domain data types** + geometric tool types (`GeometricShape`) + `DEFAULT_SETTINGS` + `DEFAULT_SHORTCUTS` + factories (`makePage`, `makeNotebook`, `makeFolder`, `makeLayer`, `makeTextElement`, `uid`, `newId`) + layer helpers (`normalizePage`, `getActiveLayer`) + `TrashItem` (local trash entry) + **`APP_VERSION`** (version constant) |
-| `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `settings`, `cloudSync`, `templates`, `trash`, `notebooksContent`, `pdfImages`); version migration fills missing `order` field in old folders/notebooks, converts old pages (flat arrays) to the layer model (`migrateLayers`), splits page content into `notebooksContent` (`migrateToMetaContent`, v7 → v8) and extracts PDF background images into `pdfImages` (`migratePdfImages`, v8 → v9) |
+| `src/db.ts` | **IndexedDB persistence layer** (object stores: `folders`, `notebooks`, `pages`, `settings`, `cloudSync`, `templates`, `trash`, `pdfImages`); version migration fills missing `order` field in old folders/notebooks, converts old pages (flat arrays) to the layer model (`migrateLayers`), splits page content into `notebooksContent` (`migrateToMetaContent`, v7 → v8), extracts PDF background images into `pdfImages` (`migratePdfImages`, v8 → v9) and splits the per-notebook content into per-page records (`migratePages`, v9 → v10) |
 | `src/store.ts` | **Main store (Zustand)**: all CRUD for notebooks/folders/pages/templates, layer actions (add/rename/duplicate/delete/reorder/visibility/opacity/lock/active/merge), undo/redo, clipboard, **local trash** (`restoreFromTrash`, `restoreFromCloud`, `purgeTrashItem`, `runTrashPurge`), sync, sync progress (`syncProgress`, including full remote paths), external-content revision (`syncRevision`) and persistence |
 | `src/uiStore.ts` | Modal store (`openModal`, `modalData`, `open`, `close`) |
 | `src/textStore.ts` | Text editing state (draft, selection, rotation) |
@@ -229,6 +229,7 @@ preserve the indicated insertion slot.
 | `scripts/verify-eraser.ts` | Standalone eraser regression verification: single-click erasure size/radius, intersection mask math, and the end-to-end **eraser mask overlap** flow (erase → drag a scoped stroke over the erased region → the mask travels with the stroke, so nothing disappears). Run with `npm test` or `npx tsx scripts/verify-eraser.ts` |
 | `scripts/verify-cursor-platform.ts` | Regression verification for the lightweight desktop cursor path, PAN cursor suppression, and browser/native fullscreen visibility. Run with `npm test` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
+| `scripts/verify-pages-store.ts` | Standalone **per-page persistence** regression (db v9 → v10): `putNotebook` writes one record per page, an unchanged put writes **zero** page records, a single edited page writes exactly one, reordering rewrites only the moved pages and `getNotebook` preserves order, `getFirstPage` returns the first page with its PDF `dataUrl` rehydrated, and removed pages / whole notebooks leave no orphan records. `scripts/verify-pdf-images.ts` covers the sibling `pdfImages` store, the light-page rule and the v8 → current migration. Run with `npm test` |
 | `scripts/bench-p0-1.ts` | **P0-1 performance benchmark fixture**: reads a local backup (`argv[2]`), picks the PDF page with the most strokes and writes the gitignored `public/bench-p0-1-page.json`. `bench/p0-1.html` (dev server) then drives the real `PageCanvas` in Chromium over that page and reports the per-frame cost of a stroke with the page bitmap cache **ON vs OFF** (`?dpr=`, `?frames=`, `?passes=`), plus a pixel comparison of both paths. Run `npm run bench:p0-1`, then open `/bench/p0-1.html` — the canvas benchmark only runs in a real browser |
 
 ---
@@ -268,13 +269,14 @@ Hierarchy: **Folder** → **Notebook** → **Page** → **Layer** → (Stroke | 
 
 ### 5.2 Persistence (IndexedDB) — `src/db.ts`
 
-Database `mamaco-notes`, version **9**, with object stores:
+Database `mamaco-notes`, version **10**, with object stores:
 
 | Store | Content | Key |
 |---|---|---|
 | `folders` | `Folder[]` | `id` |
 | `notebooks` | `NotebookSummary[]` (light metadata: id, name, folderId, timestamps, order, pageCount, favorite) | `id` |
-| `notebooksContent` | `{ id, pages: Page[] }` — full page drawings; PDF backgrounds are stored **light** (`pdf` without `dataUrl`). Layers may include persisted circular `strokeErasures` masks for precise partial erasing. | `id` |
+| `pages` | `PageRecord { key, notebookId, order, page }` — **one record per page**; `page` is a full page drawing with PDF backgrounds stored **light** (`pdf` without `dataUrl`). Layers may include persisted circular `strokeErasures` masks for precise partial erasing. | `key` = `notebookId:pageId` (+ index `byNotebook` on `[notebookId, order]`) |
+| `notebooksContent` | **Legacy only** (pre-v10): `{ id, pages: Page[] }`. The v9 → v10 migration moves its pages into `pages` and empties it; the current code never reads or writes it. | `id` |
 | `pdfImages` | `PdfImageRecord { pageId, notebookId, dataUrl }` — immutable PDF page background images (written only when new) | `pageId` (+ index `byNotebook` on `notebookId`) |
 | `settings` | 1 record `{ id:'main', ...AppSettings }` | `id` |
 | `cloudSync` | 1 record `CloudSyncState` | `id` |
@@ -324,6 +326,26 @@ All data writes in the app go through `store.ts`, which calls `db.*`.
 > `pdfImages`, so in-memory pages/canvas/thumbnails behave exactly as before;
 > `deleteNotebook` also removes that notebook's blobs (no leaks). Sync/backup are unchanged
 > because they read fully rehydrated notebooks.
+>
+> **Migration 9 → 10 (per-page records)**: `migratePages()` splits each
+> `notebooksContent` record into one `pages` record per page (`key = notebookId:pageId`,
+> `order` = index in the page array) inside one transaction, deleting the content record as
+> it goes — so the legacy store ends up empty and the page JSON is never duplicated. The
+> split runs whenever the legacy store still has records (not only during the version
+> upgrade), so an app killed between the upgrade commit and the migration still migrates on
+> the next open instead of loading empty notebooks.
+> `putNotebook` then diffs the incoming pages against an in-memory mirror (`pageId →
+> { stamp, order }`) populated by `getNotebook` and updated by `putNotebook`/
+> `deleteNotebook` only after their transaction commits; a page missing from the mirror is
+> always written. The stamp is `updatedAt` plus the page's structural shape (size, rotation,
+> background, template, active layer, and each layer's id/name/visibility/opacity/lock/
+> folder, element counts, point total and erasure count), which is how `putNotebook` knows
+> which pages changed and rewrites **only** those:
+> committing a stroke on a 127-page PDF notebook writes one page record instead of cloning
+> the whole notebook. Page order lives in the record and is served by the `byNotebook`
+> index, so reordering touches only the moved pages, and `getFirstPage` reads a single
+> record via a cursor. Removed pages (and their `pdfImages` blob) are deleted in the same
+> transaction; `deleteNotebook` removes every page record of the notebook.
 
 ### 5.3 Stores (Zustand)
 
