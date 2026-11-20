@@ -516,8 +516,8 @@ console.log('== Drawing & Stroke Regression Verification ==')
   assert(!shouldUsePageCache(false, false), 'idle renders never serve the page bitmap cache')
   assert(shouldUsePageCache(true, true), 'active stroke previews may serve the page bitmap cache')
   assert(
-    !shouldUsePageCache(true, true, true),
-    'PDF pages render directly during a stroke to avoid double rasterization blur',
+    shouldUsePageCache(true, true),
+    'PDF pages serve the page bitmap cache during a stroke too (no per-frame PDF re-rasterization)',
   )
   const maskScale = maskRenderScale(1600, 2200, 0.75, 2)
   assert(

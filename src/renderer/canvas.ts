@@ -48,12 +48,8 @@ export function maskRenderScale(width: number, height: number, zoom: number, dpr
   return pageRenderScale(width, height, zoom, dpr)
 }
 
-export function shouldUsePageCache(
-  drawing: boolean,
-  hasCurrentStroke: boolean,
-  hasPdfBackground = false,
-): boolean {
-  return drawing && hasCurrentStroke && !hasPdfBackground
+export function shouldUsePageCache(drawing: boolean, hasCurrentStroke: boolean): boolean {
+  return drawing && hasCurrentStroke
 }
 
 export class PageCanvas {
@@ -481,8 +477,8 @@ export class PageCanvas {
     drawCurrentStroke: boolean,
   ): boolean {
     const drawingNow = drawCurrentStroke && !!this.currentStroke
-    if (!shouldUsePageCache(this.drawing, drawingNow, !!page.pdf)) {
-      this.notePath(page.pdf && drawingNow ? 'full(pdf-stroke)' : 'full(idle)')
+    if (!shouldUsePageCache(this.drawing, drawingNow)) {
+      this.notePath('full(idle)')
       return false
     }
     if (!this.cacheSharpEnough(page)) {

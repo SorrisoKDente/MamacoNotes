@@ -1747,6 +1747,7 @@ export function Editor() {
     if (!drag) return
     if (drag.kind === 'draw') {
       const stroke = engine?.endStroke()
+      window.dispatchEvent(new CustomEvent('ink:stroke-end'))
       const pg = pageRef.current
       if (stroke && stroke.points.length >= 1 && pg) {
         // ponytail: always commit if it has at least 1 point.
@@ -2451,6 +2452,8 @@ export function Editor() {
       tool === 'geometry' ? settings.geometryShape : undefined,
     )
     trace('editor.down', tool, e.pointerType, `id=${e.pointerId}`, `page=${pageRef.current?.id.slice(0, 6)}`)
+    // Lets the page list hold its thumbnail generation until the pen is lifted.
+    window.dispatchEvent(new CustomEvent('ink:stroke-start'))
     requestRender()
   }
 
@@ -3011,6 +3014,7 @@ export function Editor() {
     if (drag?.kind === 'draw') {
       if (isOwner) {
         const stroke = engine.endStroke()
+        window.dispatchEvent(new CustomEvent('ink:stroke-end'))
         const drawPage = pageRef.current
 
         // ponytail: only discard if it's literally empty (0 points).

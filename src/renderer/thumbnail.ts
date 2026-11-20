@@ -53,32 +53,62 @@ async function loadLayerImages(layer: Layer): Promise<Map<string, HTMLImageEleme
   return images
 }
 
-function loadPdfImage(
+/**
+ * Decoded PDF page images, keyed by their `dataUrl`. A PDF page is a multi-MB
+ * base64 image, so decoding it again on every thumbnail regeneration blocked
+ * the main thread (and competed with the live stroke). The promises are cached
+ * (not the bitmaps) so concurrent requests share one decode; a small LRU keeps
+ * mixed pages from holding an unbounded number of large images.
+ */
+const PDF_IMAGE_CACHE_LIMIT = 4
+const pdfImageCache = new Map<string, Promise<HTMLImageElement | null>>()
+
+function decodePdfImage(dataUrl: string): Promise<HTMLImageElement | null> {
+  const cached = pdfImageCache.get(dataUrl)
+  if (cached) {
+    // Refresh recency (Map keeps insertion order).
+    pdfImageCache.delete(dataUrl)
+    pdfImageCache.set(dataUrl, cached)
+    return cached
+  }
+  const pending = new Promise<HTMLImageElement | null>((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => {
+      pdfImageCache.delete(dataUrl)
+      resolve(null)
+    }
+    img.src = dataUrl
+  })
+  pdfImageCache.set(dataUrl, pending)
+  while (pdfImageCache.size > PDF_IMAGE_CACHE_LIMIT) {
+    const oldest = pdfImageCache.keys().next().value
+    if (oldest === undefined) break
+    pdfImageCache.delete(oldest)
+  }
+  return pending
+}
+
+async function loadPdfImage(
   ctx: CanvasRenderingContext2D,
   dataUrl: string,
   page: Page,
   scale: number,
 ): Promise<void> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const s = Math.min((page.width * scale) / img.width, (page.height * scale) / img.height)
-      const w = img.width * s
-      const h = img.height * s
-      ctx.save()
-      ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(
-        img,
-        Math.floor((page.width * scale - w) / 2),
-        Math.floor((page.height * scale - h) / 2),
-        Math.floor(w),
-        Math.floor(h),
-      )
-      ctx.restore()
-      resolve()
-    }
-    img.onerror = () => resolve()
-    img.src = dataUrl
-  })
+  const img = await decodePdfImage(dataUrl)
+  if (!img) return
+  const s = Math.min((page.width * scale) / img.width, (page.height * scale) / img.height)
+  const w = img.width * s
+  const h = img.height * s
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(
+    img,
+    Math.floor((page.width * scale - w) / 2),
+    Math.floor((page.height * scale - h) / 2),
+    Math.floor(w),
+    Math.floor(h),
+  )
+  ctx.restore()
 }

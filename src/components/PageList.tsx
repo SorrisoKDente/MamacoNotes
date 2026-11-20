@@ -126,22 +126,51 @@ export function PageList() {
 
   const thumbTimesRef = useRef<Record<string, number>>({})
   const previousPagesRef = useRef<typeof pages | null>(null)
+  /** True while a stroke is being drawn on the canvas (see the ink events below). */
+  const inkActiveRef = useRef(false)
+  const [inkEpoch, setInkEpoch] = useState(0)
 
   useEffect(() => {
-    if (previousPagesRef.current !== pages) {
-      thumbTimesRef.current = {}
-      previousPagesRef.current = pages
+    const onStrokeStart = () => {
+      inkActiveRef.current = true
     }
-    for (const p of pages) {
-      const lastTime = thumbTimesRef.current[p.id]
-      if (thumbs[p.id] && lastTime === p.updatedAt) continue
-      thumbTimesRef.current = { ...thumbTimesRef.current, [p.id]: p.updatedAt }
-      void (async () => {
-        const thumb = await renderThumbnail(p, 160, 207)
-        setThumbs((prev) => ({ ...prev, [p.id]: thumb }))
-      })()
+    const onStrokeEnd = () => {
+      if (!inkActiveRef.current) return
+      inkActiveRef.current = false
+      // Re-run the thumbnail effect once, now that the pen was lifted.
+      setInkEpoch((n) => n + 1)
     }
-  }, [pages, dataVersion])
+    window.addEventListener('ink:stroke-start', onStrokeStart)
+    window.addEventListener('ink:stroke-end', onStrokeEnd)
+    return () => {
+      window.removeEventListener('ink:stroke-start', onStrokeStart)
+      window.removeEventListener('ink:stroke-end', onStrokeEnd)
+    }
+  }, [])
+
+  useEffect(() => {
+    // Never rasterize thumbnails while the user is writing: `renderThumbnail`
+    // redraws the whole page (and decodes its PDF image) on the main thread, so
+    // it competes directly with the stroke preview. Stroke end bumps `inkEpoch`
+    // and the short debounce collapses the persist-driven `dataVersion` bursts.
+    if (inkActiveRef.current) return
+    const timer = window.setTimeout(() => {
+      if (previousPagesRef.current !== pages) {
+        thumbTimesRef.current = {}
+        previousPagesRef.current = pages
+      }
+      for (const p of pages) {
+        const lastTime = thumbTimesRef.current[p.id]
+        if (thumbs[p.id] && lastTime === p.updatedAt) continue
+        thumbTimesRef.current = { ...thumbTimesRef.current, [p.id]: p.updatedAt }
+        void (async () => {
+          const thumb = await renderThumbnail(p, 160, 207)
+          setThumbs((prev) => ({ ...prev, [p.id]: thumb }))
+        })()
+      }
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [pages, dataVersion, inkEpoch])
 
   const filteredIndices = useMemo(() => {
     if (!searchTerm.trim()) return null
