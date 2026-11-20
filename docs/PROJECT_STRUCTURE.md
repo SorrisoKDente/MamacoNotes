@@ -229,6 +229,7 @@ preserve the indicated insertion slot.
 | `scripts/verify-eraser.ts` | Standalone eraser regression verification: single-click erasure size/radius, intersection mask math, and the end-to-end **eraser mask overlap** flow (erase → drag a scoped stroke over the erased region → the mask travels with the stroke, so nothing disappears). Run with `npm test` or `npx tsx scripts/verify-eraser.ts` |
 | `scripts/verify-cursor-platform.ts` | Regression verification for the lightweight desktop cursor path, PAN cursor suppression, and browser/native fullscreen visibility. Run with `npm test` |
 | `scripts/verify-download.ts` | Standalone verification of the Android download fix... |
+| `scripts/bench-p0-1.ts` | **P0-1 performance benchmark fixture**: reads a local backup (`argv[2]`), picks the PDF page with the most strokes and writes the gitignored `public/bench-p0-1-page.json`. `bench/p0-1.html` (dev server) then drives the real `PageCanvas` in Chromium over that page and reports the per-frame cost of a stroke with the page bitmap cache **ON vs OFF** (`?dpr=`, `?frames=`, `?passes=`), plus a pixel comparison of both paths. Run `npm run bench:p0-1`, then open `/bench/p0-1.html` — the canvas benchmark only runs in a real browser |
 
 ---
 

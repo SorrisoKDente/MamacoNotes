@@ -201,3 +201,6 @@ android/gradle/gradle-daemon-jvm.properties
 # Vite
 dist/
 .vite/
+
+# Benchmark fixture generated from a local backup
+public/bench-p0-1-page.json

@@ -208,6 +208,7 @@ Fluxo de inicialização:
 | `scripts/verify-eraser.ts` | Verificação de regressão da borracha standalone: tamanho/raio do apagamento com clique único, matemática da máscara de interseção e o fluxo completo da **sobreposição de máscara da borracha** (apagar → arrastar um traço no escopo para a área apagada → a máscara acompanha o traço, então nada desaparece). Rode com `npm test` ou `npx tsx scripts/verify-zorder.ts` |
 | `scripts/verify-cursor-platform.ts` | Verificação de regressão do caminho leve do cursor desktop e da visibilidade da tela cheia no navegador/nativo. Rode com `npm test` |
 | `scripts/verify-download.ts` | Verificação independente da correção de download no Android... |
+| `scripts/bench-p0-1.ts` | **Fixture do benchmark de performance do P0-1**: lê um backup local (`argv[2]`), escolhe a página com PDF com mais traços e grava o `public/bench-p0-1-page.json` (ignorado pelo git). O `bench/p0-1.html` (no dev server) então roda o `PageCanvas` real no Chromium sobre essa página e reporta o custo por frame de um traço com o cache de bitmap da página **ligado vs desligado** (`?dpr=`, `?frames=`, `?passes=`), além da comparação de pixels dos dois caminhos. Rode `npm run bench:p0-1` e abra `/bench/p0-1.html` — o benchmark só roda num navegador real |
 
 ---
 

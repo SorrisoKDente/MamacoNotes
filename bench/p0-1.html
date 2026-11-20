@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P0-1 page cache benchmark</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0f0f17;
+        color: #e6e6f0;
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+      }
+      /* The canvas stays visible on purpose: an occluded canvas lets Chromium
+         deprioritize rasterization and inflates the per-frame spread. */
+      #stage {
+        position: relative;
+        z-index: 0;
+      }
+      #out {
+        position: relative;
+        z-index: 1;
+        margin: 0;
+        padding: 16px;
+        overflow: auto;
+        background: #0f0f17;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <pre id="out">running P0-1 benchmark… (this takes about a minute)</pre>
+    <script type="module" src="./p0-1.ts"></script>
+  </body>
+</html>
