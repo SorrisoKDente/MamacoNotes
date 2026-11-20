@@ -14,6 +14,43 @@ import { useI18n } from './i18n'
 import { checkForUpdates } from './utils/updateCheck'
 import { isNativePlatform } from './utils/platform'
 
+/**
+ * Bottom bar offered right after pages are deleted. Pages are not moved to the
+ * local trash (it only holds notebooks and folders), so this short-lived bar is
+ * the way back from a wrong delete.
+ */
+function PageDeleteUndoBar() {
+  const { t } = useI18n()
+  const pending = useAppStore((s) => s.pageDeleteUndo)
+  const undoPageDelete = useAppStore((s) => s.undoPageDelete)
+  const dismissPageDeleteUndo = useAppStore((s) => s.dismissPageDeleteUndo)
+
+  useEffect(() => {
+    if (!pending) return
+    const id = window.setTimeout(() => dismissPageDeleteUndo(), 10_000)
+    return () => window.clearTimeout(id)
+  }, [pending, dismissPageDeleteUndo])
+
+  if (!pending) return null
+  const count = pending.pages.length
+  return (
+    <div className="page-undo-bar" role="status">
+      <span>{count === 1 ? t('pageList.pageDeleted') : t('pageList.pagesDeleted', { count })}</span>
+      <button className="btn primary small" onClick={() => void undoPageDelete()}>
+        {t('tool.undo')}
+      </button>
+      <button
+        className="page-undo-close"
+        title={t('modal.close')}
+        aria-label={t('modal.close')}
+        onClick={dismissPageDeleteUndo}
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
 export default function App() {
   const { t } = useI18n()
   const loaded = useAppStore((s) => s.loaded)
@@ -194,6 +231,7 @@ export default function App() {
           )}
         </>
       )}
+      <PageDeleteUndoBar />
       <ModalsHost />
     </div>
   )

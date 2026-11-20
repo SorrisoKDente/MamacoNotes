@@ -197,6 +197,8 @@ export const ptBRMessages: Record<string, string> = {
   'pageList.rotateCcwSelectedTitle': 'Girar páginas selecionadas 90° anti-horário',
   'pageList.deleteSelectedTitle': 'Excluir páginas selecionadas',
   'pageList.deletePagesConfirm': 'Excluir {{count}} página(s) selecionada(s)?',
+  'pageList.pageDeleted': 'Página excluída',
+  'pageList.pagesDeleted': '{{count}} páginas excluídas',
 
   // ===== Barra lateral (Sidebar.tsx) =====
   'sidebar.myNotebooks': 'Meus Cadernos',

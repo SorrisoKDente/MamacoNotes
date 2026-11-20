@@ -287,6 +287,16 @@ export interface TrashItem {
   cloudKeepsCopy: boolean
 }
 
+/**
+ * Last page deletion of a notebook, kept in memory so the UI can offer an
+ * immediate undo. Pages never go to the local trash (`TrashItem` only covers
+ * notebooks and folders), so this is the only way back from a wrong delete.
+ */
+export interface PageDeleteUndo {
+  notebookId: string
+  pages: { index: number; page: Page }[]
+}
+
 export interface SyncConflictItem {
   id: string
   name: string

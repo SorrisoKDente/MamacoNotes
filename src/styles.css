@@ -4096,3 +4096,57 @@ body {
   backdrop-filter: blur(2px);
   display: none;
 }
+
+/* Immediate undo after deleting pages (pages never enter the local trash) */
+.page-undo-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 420px);
+  padding: 8px 10px 8px 14px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 12.5px;
+}
+
+.page-undo-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-undo-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.page-undo-close:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
+/* On touch layouts the toolbar becomes a bottom row, so the undo bar sits
+   under the top bar instead of covering the tools. */
+@media (max-width: 1024px) and (pointer: coarse) {
+  .page-undo-bar {
+    top: calc(var(--topbar-h) + 10px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+  }
+}

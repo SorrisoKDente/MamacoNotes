@@ -24,7 +24,7 @@
     "android:open": "cap open android",
     "typecheck": "tsc --noEmit",
     "bench:p0-1": "npx tsx scripts/bench-p0-1.ts",
-    "test": "npx tsx scripts/verify-sync.ts && npx tsx scripts/verify-drawing.ts && npx tsx scripts/verify-zorder.ts && npx tsx scripts/verify-undo-redo.ts && npx tsx scripts/verify-trash.ts && npx tsx scripts/verify-toolbar.ts && npx tsx scripts/verify-eraser.ts && npx tsx scripts/verify-cursor-platform.ts && npx tsx scripts/verify-contextual-editing.ts && npx tsx scripts/verify-pages-store.ts && npx tsx scripts/verify-pdf-images.ts && npx tsx scripts/verify-sync-pdfs.ts && npx tsx scripts/verify-sync-binary.ts"
+    "test": "npx tsx scripts/verify-sync.ts && npx tsx scripts/verify-drawing.ts && npx tsx scripts/verify-zorder.ts && npx tsx scripts/verify-undo-redo.ts && npx tsx scripts/verify-page-delete-undo.ts && npx tsx scripts/verify-trash.ts && npx tsx scripts/verify-toolbar.ts && npx tsx scripts/verify-eraser.ts && npx tsx scripts/verify-cursor-platform.ts && npx tsx scripts/verify-contextual-editing.ts && npx tsx scripts/verify-pages-store.ts && npx tsx scripts/verify-pdf-images.ts && npx tsx scripts/verify-sync-pdfs.ts && npx tsx scripts/verify-sync-binary.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

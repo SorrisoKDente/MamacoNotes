@@ -12,6 +12,7 @@ import type {
   Notebook,
   NotebookSummary,
   Page,
+  PageDeleteUndo,
   PageTemplate,
   Stroke,
   SyncManifest,
@@ -370,6 +371,7 @@ interface AppState {
   rotationOpen: boolean
   syncRevision: number
   syncProgress: SyncProgress | null
+  pageDeleteUndo: PageDeleteUndo | null
 
   init: () => Promise<void>
   selectFolder: (id: string | null) => void
@@ -435,6 +437,8 @@ interface AppState {
   movePage: (from: number, to: number) => Promise<void>
   rotatePageBy: (index: number, delta: number) => Promise<void>
   updatePage: (index: number, patch: Partial<Page>) => Promise<void>
+  undoPageDelete: () => Promise<void>
+  dismissPageDeleteUndo: () => void
 
   addLayer: (folderId?: string | null) => Promise<void>
   renameLayer: (index: number, name: string) => Promise<void>
@@ -492,6 +496,14 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => {
   const undoStack: UndoEntry[] = []
   const redoStack: UndoEntry[] = []
+  // Stroke entries address a page by position (`pageIndex`), so any change to
+  // the page list (add/insert/duplicate/delete/move) makes them point at the
+  // wrong page. Those operations discard the stroke history instead of letting
+  // a later undo write an old snapshot over a page that shifted into the index.
+  function resetStrokeHistory(): void {
+    undoStack.length = 0
+    redoStack.length = 0
+  }
   const dashboardUndoStack: DashboardUndoEntry[] = []
   const dashboardRedoStack: DashboardUndoEntry[] = []
   let dashboardHistorySuspended = false
@@ -663,6 +675,13 @@ export const useAppStore = create<AppState>((set, get) => {
       for (const f of filled.folders) await db.putFolder(f)
     }
 
+    // A pulled notebook replaces the page list, so positional stroke entries and
+    // a pending page deletion no longer describe the pages on screen.
+    if (activeNotebook !== prev.activeNotebook) {
+      resetStrokeHistory()
+      set({ pageDeleteUndo: null, canUndo: false, canRedo: false })
+    }
+
     let currentPageIndex = prev.currentPageIndex
     if (activeNotebook && activeNotebook.id === prev.selectedNotebookId) {
       currentPageIndex = Math.min(prev.currentPageIndex, activeNotebook.pages.length - 1)
@@ -762,6 +781,7 @@ export const useAppStore = create<AppState>((set, get) => {
     canUndo: false,
     canRedo: false,
     lastUndoRedo: 0,
+    pageDeleteUndo: null,
 
     async init() {
       try {
@@ -875,6 +895,7 @@ export const useAppStore = create<AppState>((set, get) => {
         currentPageIndex,
         selectedIds: [],
         selectedPageIndices: [],
+        pageDeleteUndo: null,
       })
     },
     async toggleFavorite(id) {
@@ -958,7 +979,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       notebook.updatedAt = Date.now()
       const newSel = cloneIndices.sort((a, b) => a - b)
-      set({ currentPageIndex: newSel[newSel.length - 1], selectedPageIndices: newSel })
+      resetStrokeHistory()
+      set({
+        currentPageIndex: newSel[newSel.length - 1],
+        selectedPageIndices: newSel,
+        canUndo: false,
+        canRedo: false,
+      })
       await updateNotebookStorage(notebook)
     },
 
@@ -979,13 +1006,24 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const cur = get().currentPageIndex
       let newCur = cur
+      const removedPages: PageDeleteUndo['pages'] = []
       for (const i of toDelete) {
+        const page = notebook.pages[i]
+        if (page) removedPages.push({ index: i, page: clonePage(page) })
         notebook.pages.splice(i, 1)
         if (i < cur) newCur -= 1
       }
       newCur = Math.max(0, Math.min(newCur, notebook.pages.length - 1))
       notebook.updatedAt = Date.now()
-      set({ currentPageIndex: newCur, selectedPageIndices: [] })
+      resetStrokeHistory()
+      set({
+        currentPageIndex: newCur,
+        selectedPageIndices: [],
+        canUndo: false,
+        canRedo: false,
+        pageDeleteUndo:
+          removedPages.length > 0 ? { notebookId: notebook.id, pages: removedPages } : null,
+      })
       await updateNotebookStorage(notebook)
     },
 
@@ -1465,8 +1503,9 @@ export const useAppStore = create<AppState>((set, get) => {
       }))
       notebook.pages.push(...pages)
       notebook.updatedAt = Date.now()
+      resetStrokeHistory()
       await updateNotebookStorage(notebook)
-      set({ currentPageIndex: notebook.pages.length - 1 })
+      set({ currentPageIndex: notebook.pages.length - 1, canUndo: false, canRedo: false })
     },
 
     async applyTemplateToPage(index, template) {
@@ -1634,8 +1673,9 @@ export const useAppStore = create<AppState>((set, get) => {
       })
       notebook.pages.push(page)
       notebook.updatedAt = Date.now()
+      resetStrokeHistory()
       await updateNotebookStorage(notebook)
-      set({ currentPageIndex: notebook.pages.length - 1 })
+      set({ currentPageIndex: notebook.pages.length - 1, canUndo: false, canRedo: false })
     },
 
     async addPageAfter(index, template) {
@@ -1650,8 +1690,9 @@ export const useAppStore = create<AppState>((set, get) => {
       notebook.updatedAt = Date.now()
       const newIndex = Math.max(0, Math.min(index, notebook.pages.length - 1)) + 1
       const selectedPageIndices = get().selectedPageIndices.map((x) => (x >= newIndex ? x + 1 : x))
+      resetStrokeHistory()
       await updateNotebookStorage(notebook)
-      set({ currentPageIndex: newIndex, selectedPageIndices })
+      set({ currentPageIndex: newIndex, selectedPageIndices, canUndo: false, canRedo: false })
     },
 
     async duplicatePage(index) {
@@ -1671,14 +1712,17 @@ export const useAppStore = create<AppState>((set, get) => {
       const selectedPageIndices = get().selectedPageIndices.map((x) =>
         x >= cloneIndex ? x + 1 : x,
       )
+      resetStrokeHistory()
       await updateNotebookStorage(notebook)
-      set({ currentPageIndex: cloneIndex, selectedPageIndices })
+      set({ currentPageIndex: cloneIndex, selectedPageIndices, canUndo: false, canRedo: false })
     },
 
     async deletePage(index) {
       const notebook = get().activeNotebook
       if (!notebook) return
       if (notebook.pages.length <= 1) return
+      const removed = notebook.pages[index]
+      if (!removed) return
       notebook.pages.splice(index, 1)
       notebook.updatedAt = Date.now()
       const cur = get().currentPageIndex
@@ -1687,8 +1731,45 @@ export const useAppStore = create<AppState>((set, get) => {
         .selectedPageIndices.filter((x) => x !== index)
         .map((x) => (x > index ? x - 1 : x))
         .filter((x) => x < notebook.pages.length)
-      set({ currentPageIndex: next, selectedPageIndices })
+      resetStrokeHistory()
+      set({
+        currentPageIndex: next,
+        selectedPageIndices,
+        canUndo: false,
+        canRedo: false,
+        pageDeleteUndo: { notebookId: notebook.id, pages: [{ index, page: clonePage(removed) }] },
+      })
       await updateNotebookStorage(notebook)
+    },
+
+    async undoPageDelete() {
+      const pending = get().pageDeleteUndo
+      if (!pending) return
+      const notebook = get().activeNotebook
+      if (!notebook || notebook.id !== pending.notebookId) {
+        set({ pageDeleteUndo: null })
+        return
+      }
+      // Ascending order so every page lands back on the index it was removed
+      // from, even when several pages were deleted at once.
+      const entries = [...pending.pages].sort((a, b) => a.index - b.index)
+      for (const entry of entries) {
+        const at = Math.max(0, Math.min(entry.index, notebook.pages.length))
+        notebook.pages.splice(at, 0, entry.page)
+      }
+      notebook.updatedAt = Date.now()
+      const first = entries[0]?.index ?? 0
+      set({
+        pageDeleteUndo: null,
+        currentPageIndex: Math.min(first, notebook.pages.length - 1),
+        selectedPageIndices: [],
+        lastUndoRedo: Date.now(),
+      })
+      await updateNotebookStorage(notebook)
+    },
+
+    dismissPageDeleteUndo() {
+      if (get().pageDeleteUndo) set({ pageDeleteUndo: null })
     },
 
     async movePage(from, to) {
@@ -1701,7 +1782,8 @@ export const useAppStore = create<AppState>((set, get) => {
       if (from === cur) cur = to
       else if (from < cur && to >= cur) cur -= 1
       else if (from > cur && to <= cur) cur += 1
-      set({ currentPageIndex: cur, selectedPageIndices: [] })
+      resetStrokeHistory()
+      set({ currentPageIndex: cur, selectedPageIndices: [], canUndo: false, canRedo: false })
       await updateNotebookStorage(notebook)
     },
 
@@ -2263,6 +2345,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async undo() {
+      // Ctrl+Z right after a deletion is the natural reflex: undo the page
+      // deletion (pending bar) before touching the stroke history.
+      const pendingDelete = get().pageDeleteUndo
+      if (pendingDelete && pendingDelete.notebookId === get().activeNotebook?.id) {
+        await get().undoPageDelete()
+        return
+      }
       if (get().selectedNotebookId !== null) {
         const entry = undoStack.pop()
         if (!entry) return

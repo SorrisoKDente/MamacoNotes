@@ -197,6 +197,8 @@ export const enMessages: Record<string, string> = {
   'pageList.rotateCcwSelectedTitle': 'Rotate selected pages 90° counter-clockwise',
   'pageList.deleteSelectedTitle': 'Delete selected pages',
   'pageList.deletePagesConfirm': 'Delete {{count}} selected page(s)?',
+  'pageList.pageDeleted': 'Page deleted',
+  'pageList.pagesDeleted': '{{count}} pages deleted',
 
   // ===== Sidebar (Sidebar.tsx) =====
   'sidebar.myNotebooks': 'My Notebooks',
