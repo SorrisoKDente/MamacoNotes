@@ -239,7 +239,8 @@ export interface SyncManifestNotebook {
 }
 
 export interface SyncManifest {
-  version: 2
+  /** Manifest format version this client writes (3 = PDFs as separate files). */
+  version: number
   updatedAt: number
   folders: { updatedAt: number }
   notebooks: SyncManifestNotebook[]

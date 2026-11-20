@@ -73,7 +73,16 @@ export async function withRetry<T>(
   throw lastErr
 }
 
-export async function customFetch(url: string, init?: RequestInit): Promise<Response> {
+export type CustomFetchInit = RequestInit & {
+  /**
+   * Capacitor native only: how the plugin must hand the body back.
+   * `'arraybuffer'` returns base64 (binary-safe). The default (`'json'`) decodes
+   * a non-JSON body as UTF-8 text, which irreversibly corrupts binary images.
+   */
+  responseType?: 'json' | 'text' | 'arraybuffer' | 'blob'
+}
+
+export async function customFetch(url: string, init?: CustomFetchInit): Promise<Response> {
   if (Capacitor.isNativePlatform()) {
     let data: any = init?.body
     if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
@@ -107,6 +116,7 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
         method: init?.method ?? 'GET',
         headers,
         data,
+        ...(init?.responseType ? { responseType: init.responseType } : {}),
       }),
     )
 
@@ -117,6 +127,17 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
       }
     }
 
+    // Binary bodies arrive base64 (`responseType: 'arraybuffer'`); re-encoding
+    // the raw string as UTF-8 would corrupt every non-ASCII byte, so decode with
+    // the same rules the chunked download uses.
+    const bodyBytes = () =>
+      decodeCapacitorData(res.data, isJsonContentType(res.headers as Record<string, unknown>)) ??
+      new Uint8Array()
+    const bodyArrayBuffer = () => {
+      const bytes = bodyBytes()
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    }
+
     return {
       ok: res.status >= 200 && res.status < 300,
       status: res.status,
@@ -125,8 +146,8 @@ export async function customFetch(url: string, init?: RequestInit): Promise<Resp
       headers: responseHeaders,
       text: () => Promise.resolve(typeof res.data === 'string' ? res.data : JSON.stringify(res.data)),
       json: () => Promise.resolve(res.data),
-      blob: () => Promise.resolve(new Blob([res.data])),
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(typeof res.data === 'string' ? res.data : JSON.stringify(res.data)).buffer),
+      blob: () => Promise.resolve(new Blob([bodyArrayBuffer()])),
+      arrayBuffer: () => Promise.resolve(bodyArrayBuffer()),
     } as Response
   }
 

@@ -21,6 +21,14 @@ import { isBrowserFetchError } from './http'
 export const MANIFEST_PATH = 'manifest.json'
 export const FOLDERS_PATH = `${FOLDERS_DIR}/folders.json`
 export const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * Format version written by this client. Version 3 keeps PDF backgrounds out of
+ * the notebook JSON (`pdfs/<pageId>.png`, hashes in the manifest). Version-2
+ * files are still read: the hashes a version-2 client drops from the manifest
+ * are rebuilt from the bitmaps on the next pull.
+ */
+export const MANIFEST_VERSION = 3
+export const NOTEBOOK_FORMAT_VERSION = 3
 const PNG_BASE64_HEADER = 'data:image/png;base64,'
 
 function notebookPath(basePath: string, id: string): string {
@@ -103,6 +111,56 @@ interface UploadNotebookArgs {
 }
 
 /**
+ * Reads a notebook file of any format version (2 and 3 carry the same
+ * `{ notebook }` envelope; version 3 only moved the PDF bitmaps out of it).
+ */
+function parseNotebookFile(text: string): Notebook {
+  const notebook = (JSON.parse(text) as { notebook?: Notebook } | null)?.notebook
+  if (!notebook) throw new Error(t('error.invalidNotebook'))
+  return notebook
+}
+
+/**
+ * Image hashes for a notebook as seen after a download: the previous hashes of
+ * pages that still exist, overridden by every bitmap that came down with the
+ * notebook (it is the bytes the next push would compare against). A page whose
+ * image could not be downloaded (404) keeps its previous hash, so the page is
+ * never mistaken for an orphan.
+ */
+function pdfHashesFor(
+  previous: Record<string, string> | undefined,
+  notebook: Notebook,
+): Record<string, string> {
+  const pageIds = new Set(notebook.pages.map((page) => page.id))
+  const next: Record<string, string> = {}
+  for (const [pageId, hash] of Object.entries(previous ?? {})) {
+    if (pageIds.has(pageId)) next[pageId] = hash
+  }
+  for (const page of notebook.pages) {
+    if (page.pdf?.dataUrl) next[page.id] = pdfHash(page.pdf.dataUrl)
+  }
+  return next
+}
+
+/**
+ * Rebuilds a manifest entry's image hashes from a downloaded notebook. A
+ * version-2 client rewrites the manifest without `pdfs`; without this repair the
+ * next push would re-upload every image. Returns the repaired entry, or null
+ * when nothing changed.
+ */
+function repairPdfHashes(
+  entry: SyncManifestNotebook,
+  notebook: Notebook,
+): SyncManifestNotebook | null {
+  const next = pdfHashesFor(entry.pdfs, notebook)
+  if (JSON.stringify(entry.pdfs ?? {}) === JSON.stringify(next)) return null
+  const repaired: SyncManifestNotebook = { ...entry }
+  if (Object.keys(next).length > 0) repaired.pdfs = next
+  else delete repaired.pdfs
+  return repaired
+}
+
+/**
  * Uploads a notebook with its PDF backgrounds as separate `pdfs/<pageId>.png`
  * files and returns the manifest entry to store. A bitmap is only uploaded when
  * its hash differs from the previous entry's, so the hot path (a stroke made a
@@ -131,18 +189,32 @@ async function uploadNotebook({
     }
     await transport.uploadFile(pdfFilePath(basePath, pageId), bytes, 'image/png')
   }
+  // A page that still exists locally but lost its bitmap (it was pulled by an
+  // older client that stripped `pdf.dataUrl`) keeps its previous hash: the
+  // remote image stays, instead of being deleted as a false orphan.
+  for (const [pageId, hash] of Object.entries(previous?.pdfs ?? {})) {
+    if (!hashes[pageId] && notebook.pages.some((page) => page.id === pageId)) {
+      hashes[pageId] = hash
+    }
+  }
   // The notebook file goes last: it is only visible once every bitmap it
   // references is on the server.
   await transport.uploadFile(
     notebookPath(basePath, notebook.id),
     new TextEncoder().encode(
-      JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: lightNotebook }),
+      JSON.stringify({
+        version: NOTEBOOK_FORMAT_VERSION,
+        exportedAt: Date.now(),
+        notebook: lightNotebook,
+      }),
     ),
     'application/json',
   )
-  // Backgrounds of pages removed from the notebook leave no orphan files.
+  // Backgrounds of pages removed from the notebook leave no orphan files. A page
+  // that still exists is never an orphan, even when its bitmap is missing.
+  const livePageIds = new Set(notebook.pages.map((page) => page.id))
   for (const pageId of Object.keys(previous?.pdfs ?? {})) {
-    if (hashes[pageId]) continue
+    if (livePageIds.has(pageId)) continue
     try {
       await transport.deleteRemoteFile(pdfFilePath(basePath, pageId))
     } catch {
@@ -206,10 +278,7 @@ export async function downloadNotebook(
   id: string,
 ): Promise<Notebook> {
   const text = await transport.downloadFile(notebookPath(basePath, id))
-  const data = JSON.parse(text)
-  const nb = data?.notebook as Notebook | undefined
-  if (!nb) throw new Error(t('error.invalidNotebook'))
-  return hydratePdfBackgrounds(basePath, transport, nb)
+  return hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
 }
 
 function notebookDisplayPath(
@@ -248,14 +317,16 @@ export function hashFolders(folders: Folder[]): string {
 }
 
 export function emptyManifest(): SyncManifest {
-  return { version: 2, updatedAt: 0, folders: { updatedAt: 0 }, notebooks: [] }
+  return { version: MANIFEST_VERSION, updatedAt: 0, folders: { updatedAt: 0 }, notebooks: [] }
 }
 
 export function parseManifest(text: string): SyncManifest {
   try {
     const data = JSON.parse(text) as Partial<SyncManifest>
     return {
-      version: 2,
+      // The in-memory manifest always describes the format this client writes;
+      // a version-2 file is read tolerantly and upgraded on the next write.
+      version: MANIFEST_VERSION,
       updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
       folders: {
         updatedAt:
@@ -285,7 +356,7 @@ export function parseManifest(text: string): SyncManifest {
 }
 
 export function serializeManifest(m: SyncManifest): string {
-  return JSON.stringify(m)
+  return JSON.stringify({ ...m, version: MANIFEST_VERSION })
 }
 
 function upsertManifestNotebook(
@@ -582,7 +653,7 @@ async function migrateLegacy(
       await transport.uploadFile(
         notebookPath(basePath, id),
         new TextEncoder().encode(
-          JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
+          JSON.stringify({ version: NOTEBOOK_FORMAT_VERSION, exportedAt: Date.now(), notebook: nb }),
         ),
         'application/json',
       )
@@ -831,13 +902,17 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     try {
       report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       const text = await transport.downloadFile(notebookPath(basePath, id))
-      const data = JSON.parse(text)
-      const parsed = data?.notebook as Notebook | undefined
-      if (!parsed) throw new Error(t('error.invalidNotebook'))
-      const nb = await hydratePdfBackgrounds(basePath, transport, parsed)
+      const nb = await hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
       pulledNotebooks.push(nb)
       state.notebooks[id] = nb.updatedAt
       result.pulled.push(nb.name)
+      // Heal image hashes an older client may have dropped from the manifest.
+      const entry = manifest.notebooks.find((n) => n.id === id)
+      const repaired = entry ? repairPdfHashes(entry, nb) : null
+      if (repaired) {
+        manifest = upsertManifestNotebook(manifest, repaired)
+        manifestChanged = true
+      }
     } catch (e) {
       if (e instanceof RemoteFileNotFoundError) {
         // The manifest lists a notebook whose file is missing on the server
@@ -1113,10 +1188,7 @@ export async function applyConflictChoices(
 
   const loadRemote = async (id: string): Promise<Notebook> => {
     const text = await transport.downloadFile(notebookPath(basePath, id))
-    const data = JSON.parse(text)
-    const nb = data?.notebook as Notebook | undefined
-    if (!nb) throw new Error(t('error.invalidRemoteNotebook'))
-    return hydratePdfBackgrounds(basePath, transport, nb)
+    return hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
   }
 
   for (const [index, [id, choice]] of choiceEntries.entries()) {
@@ -1170,6 +1242,13 @@ export async function applyConflictChoices(
       if (entry && !entry.deleted) {
         try {
           await transport.deleteRemoteFile(notebookPath(basePath, id))
+          for (const pageId of Object.keys(entry.pdfs ?? {})) {
+            try {
+              await transport.deleteRemoteFile(pdfFilePath(basePath, pageId))
+            } catch {
+              // Orphan image only — the notebook deletion itself succeeded.
+            }
+          }
           manifest = upsertManifestNotebook(manifest, {
             id,
             name: entry.name,
@@ -1228,11 +1307,15 @@ export async function applyConflictChoices(
         pulledNotebooks.push(remote)
         state.notebooks[id] = remote.updatedAt
         delete state.tombstones[id]
+        // Keep the image hashes: accepting the server copy must not make the
+        // next push re-upload every PDF bitmap.
+        const hashes = pdfHashesFor(entry?.pdfs, remote)
         manifest = upsertManifestNotebook(manifest, {
           id,
           name: remote.name,
           updatedAt: remote.updatedAt,
           deleted: false,
+          ...(Object.keys(hashes).length > 0 ? { pdfs: hashes } : {}),
         })
         manifestChanged = true
       } catch (e) {

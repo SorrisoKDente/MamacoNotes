@@ -223,6 +223,7 @@ async function effectiveBaseUrl(settings: CloudSettings): Promise<string> {
 async function koofrDownloadResponse(
   settings: CloudSettings,
   filePath: string,
+  binary = false,
 ): Promise<Response> {
   const { apiBase, mountId } = await koofrInfo(settings)
   const url =
@@ -234,6 +235,9 @@ async function koofrDownloadResponse(
       Accept: 'application/octet-stream',
       'Cache-Control': 'no-cache',
     },
+    // The native plugin decodes a non-JSON body as UTF-8 text by default, which
+    // destroys the PNG bytes. Ask for base64 (arraybuffer) when reading binary.
+    ...(binary ? { responseType: 'arraybuffer' as const } : {}),
   })
   if (res.status === 401 || res.status === 403) throw webdavAuthError(res.status)
   if (!res.ok) {
@@ -255,7 +259,8 @@ async function koofrDownloadBinaryFile(
   settings: CloudSettings,
   filePath: string,
 ): Promise<Uint8Array> {
-  return new Uint8Array(await (await koofrDownloadResponse(settings, filePath)).arrayBuffer())
+  const res = await koofrDownloadResponse(settings, filePath, true)
+  return new Uint8Array(await res.arrayBuffer())
 }
 
 async function verifyUploadedJson(

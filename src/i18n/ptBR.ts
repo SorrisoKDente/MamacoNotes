@@ -572,7 +572,6 @@ export const ptBRMessages: Record<string, string> = {
   'error.invalidNotebook': 'caderno inválido',
   'error.syncDownloadNotebookFailed': 'Falha ao baixar caderno {{id}}: {{message}}',
   'error.syncDeleteFailed': 'Falha ao excluir {{name}}: {{message}}',
-  'error.invalidRemoteNotebook': 'caderno remoto inválido',
   'error.syncDownloadFoldersFailed': 'Falha ao baixar pastas: {{message}}',
   'error.syncSaveManifestFailed': 'Falha ao salvar manifest: {{message}}',
 }

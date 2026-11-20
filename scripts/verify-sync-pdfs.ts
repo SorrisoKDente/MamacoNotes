@@ -15,11 +15,15 @@
  * Run: npx tsx scripts/verify-sync-pdfs.ts
  */
 import {
+  applyConflictChoices,
   encodePngDataUrl,
+  parseManifest,
   pdfHash,
   runSync,
   serializeManifest,
   MANIFEST_PATH,
+  MANIFEST_VERSION,
+  NOTEBOOK_FORMAT_VERSION,
 } from '../src/utils/sync'
 import { normalizePage } from '../src/types'
 import type {
@@ -63,6 +67,10 @@ function makePage(id: string, dataUrl?: string): Page {
 
 function makeNotebook(id: string, name: string, updatedAt: number, pages: Page[]): Notebook {
   return { id, name, folderId: null, pages, createdAt: updatedAt, updatedAt }
+}
+
+function makeLightPage(id: string): Page {
+  return { ...makePage(id), pdf: { name: 'doc.pdf', pageNumber: 1 } as Page['pdf'] }
 }
 
 function makeSummary(nb: Notebook): NotebookSummary {
@@ -206,6 +214,12 @@ const folders: Folder[] = []
     Object.keys(entry?.pdfs ?? {}).length === 2,
     'push: manifest only lists pages that have a PDF',
   )
+  assert(manifest.version === MANIFEST_VERSION, 'push: manifest is written as version 3')
+  assert(
+    json.version === NOTEBOOK_FORMAT_VERSION,
+    'push: notebook file is written as version 3',
+  )
+  assert(json.pdfs === undefined, 'push: hashes live only in the manifest')
 }
 
 console.log('== push after a stroke: no PDF re-upload ==')
@@ -386,6 +400,211 @@ console.log('== deleting a notebook deletes its remote images ==')
   assert(
     manifest.notebooks.find((n) => n.id === nb.id)?.deleted === true,
     'delete: manifest keeps the tombstone',
+  )
+}
+
+console.log('== old client (v2) rewrote the manifest and the notebook ==')
+
+{
+  const t = new FakeTransport()
+  const light = makeNotebook('nb-v3', 'V3', 2000, [makeLightPage('p1')])
+  // State written by a version-3 client: hashes in manifest and notebook body.
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: light.id,
+        name: light.name,
+        updatedAt: 2000,
+        deleted: false,
+        pdfs: { p1: pdfHash(aDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-v3.json',
+    JSON.stringify({
+      version: 3,
+      exportedAt: 1,
+      notebook: light,
+    }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+
+  // A version-2 client edits the notebook: it rewrites BOTH files, dropping
+  // `pdfs` (it does not know the field) and advancing the timestamps.
+  t.files.set(
+    'base/manifest.json',
+    JSON.stringify({
+      version: 2,
+      updatedAt: 2500,
+      folders: { updatedAt: 0 },
+      notebooks: [{ id: light.id, name: light.name, updatedAt: 2500, deleted: false }],
+    }),
+  )
+  t.files.set(
+    'base/notebooks/nb-v3.json',
+    JSON.stringify({ version: 2, exportedAt: 2, notebook: light }),
+  )
+
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+  })
+  assert(out.result.errors.length === 0, 'old-client damage: sync succeeds')
+  assert(
+    out.pulledNotebooks[0]?.pages[0]?.pdf?.dataUrl === aDataUrl,
+    'old-client damage: blank page is rehydrated from pdfs/<pageId>.png',
+  )
+  const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  assert(manifest.version === MANIFEST_VERSION, 'old-client damage: manifest upgraded to version 3')
+  assert(
+    manifest.notebooks.find((n) => n.id === light.id)?.pdfs?.['p1'] === pdfHash(aDataUrl),
+    'old-client damage: dropped PDF hash is restored (no re-upload needed)',
+  )
+  assert(
+    t.uploads.filter((u) => u.contentType === 'image/png').length === 0,
+    'old-client damage: no image re-uploaded while repairing the hash',
+  )
+}
+
+console.log('== a device that lost the bitmap locally keeps image and hash ==')
+
+{
+  const t = new FakeTransport()
+  const hashA = pdfHash(aDataUrl)
+  const hashB = pdfHash(bDataUrl)
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: 'nb-strip',
+        name: 'Strip',
+        updatedAt: 2000,
+        deleted: false,
+        pdfs: { p1: hashA, p2: hashB },
+      },
+    ],
+  })
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  t.binaries.set('base/pdfs/p2.png', PNG_B)
+  // Local copy pulled by an older client: `pdf` metadata without the bitmap.
+  const stripped = makeNotebook('nb-strip', 'Strip', 3000, [
+    makeLightPage('p1'),
+    makeLightPage('p2'),
+  ])
+  t.uploads.length = 0
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(stripped)],
+    state: makeState({ notebooks: { 'nb-strip': 2000 } }),
+    transport: t,
+    getNotebook: async () => stripped,
+  })
+  assert(out.result.errors.length === 0, 'lost bitmap push: no errors')
+  assert(
+    t.uploads.filter((u) => u.contentType === 'image/png').length === 0,
+    'lost bitmap push: no empty/invalid image uploaded',
+  )
+  assert(
+    t.binaries.has('base/pdfs/p1.png') && t.binaries.has('base/pdfs/p2.png'),
+    'lost bitmap push: remote images are NOT deleted as false orphans',
+  )
+  const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  const entry = manifest.notebooks.find((n) => n.id === 'nb-strip')
+  assert(
+    entry?.pdfs?.['p1'] === hashA && entry?.pdfs?.['p2'] === hashB,
+    'lost bitmap push: manifest keeps both hashes',
+  )
+  const body = uploadedJson(t, 'base/notebooks/nb-strip.json')
+  assert(
+    body.notebook.pages.every((page: Page) => page.pdf && page.pdf.dataUrl === undefined),
+    'lost bitmap push: notebook body stays light (no bitmap invented)',
+  )
+}
+
+console.log('== conflict resolution keeps hashes and deletes images ==')
+
+{
+  const t = new FakeTransport()
+  const nb = makeNotebook('nb-conf', 'Conf', 2000, [makeLightPage('p1')])
+  const hash = pdfHash(aDataUrl)
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [{ id: nb.id, name: nb.name, updatedAt: 2000, deleted: false, pdfs: { p1: hash } }],
+  })
+  t.files.set(
+    'base/notebooks/nb-conf.json',
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: nb }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  const state = makeState({ notebooks: { [nb.id]: 2000 } })
+  const useServer = await applyConflictChoices({
+    basePath: 'base',
+    transport: t,
+    choices: { [nb.id]: 'useServer' },
+    localNotebooks: [makeSummary(nb)],
+    folders: null,
+    state,
+    manifest: parseManifest(t.files.get('base/manifest.json')!),
+    getNotebook: async () => nb,
+  })
+  assert(
+    useServer.pulledNotebooks[0]?.pages[0]?.pdf?.dataUrl === aDataUrl,
+    'conflict useServer: bitmap rehydrated from pdfs/p1.png',
+  )
+  assert(
+    useServer.manifest.notebooks.find((n) => n.id === nb.id)?.pdfs?.['p1'] === hash,
+    'conflict useServer: image hash kept (next push re-uploads nothing)',
+  )
+
+  // A local edit right after accepting the server copy goes through the normal
+  // push path: it must rewrite the JSON and re-upload no bitmap.
+  const edited = { ...useServer.pulledNotebooks[0]!, updatedAt: 3000 }
+  t.uploads.length = 0
+  const afterAccept = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(edited)],
+    state: useServer.nextState,
+    transport: t,
+    getNotebook: async () => edited,
+  })
+  assert(afterAccept.result.errors.length === 0, 'conflict useServer: following push has no errors')
+  assert(
+    t.uploads.filter((u) => u.contentType === 'image/png').length === 0,
+    'conflict useServer: following push re-uploads no PDF image',
+  )
+  assert(
+    t.uploads.some((u) => u.path === 'base/notebooks/nb-conf.json'),
+    'conflict useServer: following push still uploads the notebook JSON',
+  )
+
+  const confirmed = await applyConflictChoices({
+    basePath: 'base',
+    transport: t,
+    choices: { [nb.id]: 'confirmDelete' },
+    localNotebooks: [],
+    folders: null,
+    state: afterAccept.nextState,
+    manifest: afterAccept.manifest,
+    getNotebook: async () => undefined,
+  })
+  assert(!t.binaries.has('base/pdfs/p1.png'), 'conflict confirmDelete: remote image removed')
+  assert(
+    confirmed.manifest.notebooks.find((n) => n.id === nb.id)?.deleted === true,
+    'conflict confirmDelete: manifest keeps the tombstone',
   )
 }
 

@@ -424,18 +424,21 @@ export function Editor() {
     const scaledMinX = minX * zoom
     const scaledMinY = minY * zoom
 
-    // Fixed extra space beyond document edges (in screen pixels)
+    // Fixed extra space beyond document edges (in screen pixels). The
+    // horizontal margin is a bit larger so the page can be dragged further to
+    // both sides.
     const MARGIN = 60
+    const MARGIN_X = 100
 
     let limitMinX, limitMaxX, limitMinY, limitMaxY
 
     if (docW < viewW - 20) {
       const center = (viewW - docW) / 2 - scaledMinX
-      limitMinX = center - MARGIN
-      limitMaxX = center + MARGIN
+      limitMinX = center - MARGIN_X
+      limitMaxX = center + MARGIN_X
     } else {
-      limitMinX = viewW - docW - scaledMinX - MARGIN
-      limitMaxX = -scaledMinX + MARGIN
+      limitMinX = viewW - docW - scaledMinX - MARGIN_X
+      limitMaxX = -scaledMinX + MARGIN_X
     }
 
     if (docH < viewH - 20) {

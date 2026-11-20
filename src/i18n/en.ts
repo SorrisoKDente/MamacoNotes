@@ -572,7 +572,6 @@ export const enMessages: Record<string, string> = {
   'error.invalidNotebook': 'invalid notebook',
   'error.syncDownloadNotebookFailed': 'Failed to download notebook {{id}}: {{message}}',
   'error.syncDeleteFailed': 'Failed to delete {{name}}: {{message}}',
-  'error.invalidRemoteNotebook': 'invalid remote notebook',
   'error.syncDownloadFoldersFailed': 'Failed to download folders: {{message}}',
   'error.syncSaveManifestFailed': 'Failed to save manifest: {{message}}',
 }
