@@ -48,9 +48,21 @@ Identificados por `dragRef.kind`:
 - **Escala da máscara de borracha**: O bitmap intermediário usado para recortar traços
   usa a mesma escala visível da página (`zoom × DPR`), evitando que todos os traços
   fiquem borrados depois da primeira borracha em zoom diferente de 100%.
-- **Prévia de traço sobre PDF**: Páginas com fundo PDF ignoram o `pageCache` composto
-  enquanto um traço está ativo. O PDF rasterizado é desenhado uma única vez diretamente
-  junto aos traços, evitando duas passadas de suavização em zoom fracionário.
+- **Blits 1:1 do tamanho da página**: todo bitmap do tamanho da página (cache composto
+  `pageCache`, raster do PDF, template de fundo, máscara de borracha) é dimensionado com
+  `ceil` (`pageBitmapSize`) e blitado em `bitmapSize / scale` (`pageBitmapSpan`/
+  `blitPageBitmap`), então um pixel do bitmap é exatamente um pixel do dispositivo.
+  Desenhá-lo em `0,0,page.width,page.height` num `zoom × DPR` fracionário o reamostrava
+  duas vezes e deslocava o texto do PDF a cada toque da caneta, o que parecia a página
+  "tremendo" durante a escrita. Por isso páginas com PDF continuam usando o cache composto
+  durante o traço, com a nitidez de um render direto.
+- **Fase subpixel** (`pageGrid`/`blitRasterBitmap`): caminhos são anti-aliased pela
+  posição subpixel, então um bitmap de fase 0 blitado numa origem fracionária
+  re-filtra todos os traços existentes ao encostar a caneta. O cache composto e a
+  máscara da borracha são rasterizados na fase do destino (`setTransform(scale,0,0,
+  scale,phaseX,phaseY)`) e blitados em `floor(origin)` com transform identidade;
+  páginas rotacionadas caem no blit por span. O bitmap é construído **recortado na
+  página** e blitado **sem recorte** — recortar as duas passadas atenuava a borda.
 - **Layout durante a escrita**: O retângulo do canvas é reutilizado entre frames e só
   é atualizado quando resize ou scroll invalida o cache, evitando leituras forçadas de
   layout no caminho crítico.

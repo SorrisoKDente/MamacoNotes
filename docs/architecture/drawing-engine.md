@@ -48,9 +48,20 @@ Identified by `dragRef.kind`:
 - **Eraser mask scale**: The intermediate bitmap used to clip strokes uses the
   page's visible scale (`zoom × DPR`), preventing all strokes from becoming soft
   after the first erase at a non-100% zoom.
-- **PDF stroke preview**: Pages with PDF backgrounds bypass the composite
-  `pageCache` while a stroke is active. The rasterized PDF is drawn once directly
-  alongside the live strokes, avoiding two successive smoothing passes at fractional zoom.
+- **1:1 page-sized blits**: every page-sized bitmap (composite `pageCache`, PDF
+  raster, background template, eraser mask) is sized with `ceil` (`pageBitmapSize`) and
+  blitted back at `bitmapSize / scale` (`pageBitmapSpan`/`blitPageBitmap`), so one bitmap
+  pixel is exactly one device pixel. Blitting it into `0,0,page.width,page.height` at a
+  fractional `zoom × DPR` resampled it twice and shifted the PDF text at every pen-down,
+  which looked like the page "trembling" while writing. PDF pages therefore keep using the
+  composite cache during strokes, with the sharpness of a direct render.
+- **Subpixel phase** (`pageGrid`/`blitRasterBitmap`): paths are anti-aliased by
+  their subpixel position, so a phase-0 bitmap blitted at a fractional origin
+  re-filters every existing stroke at pen-down. The composite cache and the eraser
+  mask are rasterized with the destination's phase (`setTransform(scale,0,0,scale,
+  phaseX,phaseY)`) and blitted at `floor(origin)` with an identity transform; rotated
+  pages fall back to the span blit. The bitmap is built **clipped to the page** and
+  blitted **unclipped** — clipping both passes double-attenuated the page edge.
 - **Layout during writing**: The canvas rect is reused between frames and refreshed
   only after resize or scroll invalidates it, avoiding forced layout in the hot path.
 - **Direct DOM**: High-frequency UI updates (like the tool cursor) bypass React using refs and direct style manipulation.

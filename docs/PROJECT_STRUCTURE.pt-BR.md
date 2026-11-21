@@ -612,8 +612,9 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     vez em um bitmap offscreen. Durante o traço, cada frame é um único blit mais o traço
     vivo, então a caneta acompanha o cursor mesmo em páginas densas com PDF no fundo. O
     bitmap pode ser reutilizado no próximo traço quando possível. **A resolução é exatamente a escala da tela**
-    (`renderScale` = `zoom × DPR`, compartilhada com os bitmaps de PDF e de fundo), então o
-    blit é 1:1 e nada é ampliado. O cache é usado apenas durante a prévia de um traço;
+    (`renderScale` = `zoom × DPR`, compartilhada com os bitmaps de PDF e de fundo), arredondada
+    para cima em pixels e blitada 1:1 (`blitPageBitmap`), então nada é ampliado ou reamostrado.
+    O cache é usado apenas durante a prévia de um traço;
     renderizações ociosas usam o modelo da página diretamente para não exibir um bitmap
     intermediário após soltar a caneta. Um orçamento de 20 megapixels limita a memória;
     quando a página o excede, `cacheSharpEnough` recusa o cache e a página é desenhada ao
@@ -633,11 +634,27 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     de traço também emitem uma checagem opt-in no frame seguinte para diagnosticar corridas
     de página obsoleta ou de ownership.
   - **Nitidez da máscara de borracha**: o bitmap intermediário usado pelas máscaras dos
-    traços usa a mesma escala `zoom × DPR` da página visível, evitando uma reconstrução em
-    baixa resolução que deixa todos os traços borrados depois de apagar.
-  - **Prévia de traço sobre PDF**: páginas com fundo PDF ignoram o `pageCache` composto
-    enquanto um traço está ativo. O PDF rasterizado é desenhado uma única vez diretamente
-    com os traços vivos, evitando duas passadas de suavização em zoom fracionário.
+    traços usa a mesma escala `zoom × DPR` da página visível e é blitado 1:1, evitando uma
+    reconstrução em baixa resolução que deixa todos os traços borrados depois de apagar.
+  - **Prévia de traço sobre PDF / blits 1:1 do tamanho da página** (`blitPageBitmap`,
+    `pageBitmapSize`, `pageBitmapSpan`): todo bitmap do tamanho da página (cache da página,
+    raster do PDF, template de fundo, máscara da borracha) é dimensionado com `ceil` e
+    blitado de volta em `bitmapSize / scale`, então um pixel do bitmap corresponde a
+    exatamente um pixel do dispositivo. Desenhá-lo em `0,0,page.width,page.height` num
+    `zoom × DPR` fracionário o reamostrava duas vezes (bitmap → composto → tela) e deslocava
+    o texto do PDF a cada toque da caneta, o que parecia a página "tremendo" durante a
+    escrita. Por isso páginas com PDF continuam usando o `pageCache` composto durante o
+    traço — mesma nitidez de um render direto, com custo de blit.
+  - **Fase subpixel** (`pageGrid`, `blitRasterBitmap`): um bitmap do tamanho da página
+    construído com transform de fase 0 rasteriza texto/traços numa posição subpixel diferente
+    da tela, então blitá-lo numa origem fracionária re-filtra todos os traços existentes — a
+    página mudava de aparência ao encostar a caneta mesmo com contagem de pixels 1:1.
+    `pageGrid` lê o transform de destino, e o cache e a máscara da borracha são reconstruídos
+    com `setTransform(scale,0,0,scale, phaseX, phaseY)` e blitados em `floor(origin)` com
+    transform identidade; páginas rotacionadas (`b`/`c` ≠ 0) caem no blit por span. O bitmap
+    do cache é rasterizado **recortado na página** e blitado **sem recorte**, porque recortar
+    as duas passadas atenuava duas vezes os pixels da borda da página (uma linha de 1px
+    piscava ao encostar a caneta).
   - **Estabilidade de layout**: o retângulo do canvas em cache é reutilizado durante a
     renderização e atualizado apenas após invalidação por resize ou scroll, evitando
     leituras forçadas a cada frame.

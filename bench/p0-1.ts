@@ -24,8 +24,11 @@
  *
  * Run: npm run dev, then open
  *   http://127.0.0.1:5173/bench/p0-1.html?dpr=0&frames=180&passes=2
- * `dpr=0` uses the window DPR; a number forces it (e.g. `dpr=1` gives an integer
- * scale, so the page bitmap blit is exactly 1:1 and pixels must match).
+ * `dpr=0` uses the window DPR; a number forces it. Every page-sized bitmap is
+ * blitted 1:1 in device pixels (`blitPageBitmap`), so the pixel mismatch between
+ * the cached and direct paths must stay near zero at **fractional** scales too —
+ * `dpr=1.25`, `dpr=1.5` and `dpr=2` are the regression check for the PDF
+ * "trembling while writing" bug (they used to differ by ~15% of the page).
  * Results are exposed as `window.__bench` / `window.__benchPromise`.
  */
 import { PageCanvas } from '../src/renderer/canvas'

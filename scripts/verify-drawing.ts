@@ -21,6 +21,9 @@ import { arrangeLayer, layerItems, makePage, makeLayer, nextLayerOrder, transfor
 import { drawStroke } from '../src/renderer/drawUtils'
 import {
   maskRenderScale,
+  pageBitmapSize,
+  pageBitmapSpan,
+  pageGrid,
   pageRenderScale,
   PAGE_BITMAP_MAX_PIXELS,
   shouldUsePageCache,
@@ -527,6 +530,81 @@ console.log('== Drawing & Stroke Regression Verification ==')
   assert(
     maskRenderScale(1600, 2200, 1, 2) >= 1.9,
     'eraser mask does not fall back to DPR-only resolution at 100% zoom',
+  )
+}
+
+{
+  // Test 7: page-sized bitmaps must be blitted 1:1 in device pixels. If the
+  // destination rect is resampled (e.g. 0,0,page.width,page.height at a
+  // fractional zoom × DPR) the PDF background shifts and softens at every
+  // pen-down, which reads as the page "trembling" while drawing.
+  const cases = [
+    [1000, 1.25],
+    [1785, 1.713],
+    [1785, 1.5],
+    [1785, 1.452],
+    [1785, 1.32],
+    [1600, 1.22],
+    [8000, 0.5],
+  ]
+  for (const [size, scale] of cases) {
+    const bmp = pageBitmapSize(size, scale)
+    const span = pageBitmapSpan(bmp, scale)
+    assert(
+      span >= size - 1e-9,
+      `bitmap covers the page (${size}px @ ${scale} -> ${bmp}px = ${span.toFixed(3)}px)`,
+    )
+    assert(
+      Math.abs(bmp / span - scale) < 1e-9,
+      `1:1 blit reconstructs the exact scale (${size}px @ ${scale})`,
+    )
+    assert(
+      Number.isInteger(bmp),
+      `bitmap size is an integer pixel count (${size}px @ ${scale})`,
+    )
+  }
+  assert(
+    pageBitmapSize(1000, 1.25) === 1250,
+    'exact products do not gain a rounding sliver (1000 × 1.25 = 1250)',
+  )
+  assert(
+    pageBitmapSize(1785, 1.713) === Math.ceil(1785 * 1.713 - 1e-6),
+    'fractional scales round up so no page row/column is cut off',
+  )
+}
+
+{
+  // Test 8: the page grid decides where the cached bitmap is rasterized and
+  // blitted. Paths (text, strokes) are anti-aliased by their subpixel phase, so
+  // the cache must be built at the destination's phase and blitted at its
+  // integer origin. Blitting a phase-0 bitmap at a fractional position
+  // re-filters every existing stroke: the "trembles while writing" bug.
+  const fake = (a: number, b: number, c: number, d: number, e: number, f: number) =>
+    ({ getTransform: () => ({ a, b, c, d, e, f }) }) as unknown as CanvasRenderingContext2D
+
+  const aligned = pageGrid(fake(1.25, 0, 0, 1.25, 12.875, 25.875), 1.25)
+  assert(
+    aligned.aligned && aligned.originX === 12 && aligned.originY === 25,
+    `grid blits at the integer device origin (got ${aligned.originX},${aligned.originY})`,
+  )
+  assert(
+    Math.abs(aligned.phaseX - 0.875) < 1e-6 && Math.abs(aligned.phaseY - 0.875) < 1e-6,
+    `grid keeps the subpixel phase (got ${aligned.phaseX},${aligned.phaseY})`,
+  )
+
+  const exact = pageGrid(fake(2, 0, 0, 2, 10, 20), 2)
+  assert(
+    exact.aligned && exact.phaseX === 0 && exact.phaseY === 0,
+    'integer origins have zero phase',
+  )
+  assert(
+    pageGrid(fake(0.866, 0, 0, 0.866, 0, 0), 1).aligned === false,
+    'a grid at another scale is not aligned',
+  )
+  const rotated = pageGrid(fake(0.866, 0.5, -0.5, 0.866, 0, 0), 1)
+  assert(
+    rotated.aligned === false && rotated.originX === 0 && rotated.phaseX === 0,
+    'rotated pages fall back to the span blit',
   )
 }
 

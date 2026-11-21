@@ -48,6 +48,57 @@ export function maskRenderScale(width: number, height: number, zoom: number, dpr
   return pageRenderScale(width, height, zoom, dpr)
 }
 
+/**
+ * Pixel size of a page-sized bitmap. Rounded **up** so the bitmap always covers
+ * the whole page, and paired with `pageBitmapSpan` so it is blitted back at
+ * exactly one bitmap pixel per device pixel — a resample at fractional
+ * zoom × DPR shifted/softened the PDF text, making the page "tremble" at every
+ * pen-down while writing.
+ */
+export function pageBitmapSize(size: number, scale: number): number {
+  // The epsilon keeps an exact value (1000 × 1.25 = 1250) from gaining a pixel.
+  return Math.max(1, Math.ceil(size * scale - 1e-6))
+}
+
+/** Page-space span of a bitmap built by `pageBitmapSize` (its 1:1 blit size). */
+export function pageBitmapSpan(bitmapSize: number, scale: number): number {
+  return bitmapSize / scale
+}
+
+/**
+ * Where a page-space context puts the page origin on the device grid.
+ *
+ * Paths (strokes, text) are anti-aliased according to their *subpixel* position,
+ * so drawing them at phase 0 into a cache bitmap and then blitting that bitmap
+ * at a fractional position re-filters them: every existing stroke changes
+ * appearance the instant a pen-down switches to the cached preview (the page
+ * "trembles"). Building the bitmap at the destination's phase and blitting it at
+ * the integer origin makes the cache pixel-identical to a direct render.
+ */
+export interface PageGrid {
+  /** Integer device pixel of the page origin (the 1:1 blit position). */
+  originX: number
+  originY: number
+  /** Subpixel part of the page origin, baked into the bitmap rasterization. */
+  phaseX: number
+  phaseY: number
+  /** False for rotated pages (no axis-aligned grid); callers then use the span blit. */
+  aligned: boolean
+}
+
+export function pageGrid(ctx: CanvasRenderingContext2D, scale: number): PageGrid {
+  const m = ctx.getTransform()
+  const aligned =
+    Math.abs(m.b) < 1e-6 &&
+    Math.abs(m.c) < 1e-6 &&
+    Math.abs(m.a - scale) < 1e-6 &&
+    Math.abs(m.d - scale) < 1e-6
+  if (!aligned) return { originX: 0, originY: 0, phaseX: 0, phaseY: 0, aligned: false }
+  const originX = Math.floor(m.e)
+  const originY = Math.floor(m.f)
+  return { originX, originY, phaseX: m.e - originX, phaseY: m.f - originY, aligned: true }
+}
+
 export function shouldUsePageCache(drawing: boolean, hasCurrentStroke: boolean): boolean {
   return drawing && hasCurrentStroke
 }
@@ -81,9 +132,17 @@ export class PageCanvas {
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
   private scratchCanvas: HTMLCanvasElement | null = null
   private scratchCtx: CanvasRenderingContext2D | null = null
+  /** Scale of `scratchCanvas` (set by `getMaskCtx`), for its 1:1 blit. */
+  private maskScale = 1
   private bgCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
   private pdfCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
-  private pageCache: { page: Page; canvas: HTMLCanvasElement; scale: number; signature: string } | null = null
+  private pageCache: {
+    page: Page
+    canvas: HTMLCanvasElement
+    scale: number
+    grid: PageGrid
+    signature: string
+  } | null = null
   /** Last render path, only to log transitions (see `trace`). */
   private lastPath = ''
 
@@ -340,20 +399,21 @@ export class PageCanvas {
     ctx.save()
     this.applyPageTransform()
 
-    ctx.save()
-    ctx.beginPath()
-    ctx.rect(0, 0, page.width, page.height)
-    ctx.clip()
-
+    // The clip lives inside only the direct pass: the cache bitmap is already
+    // built clipped to the page, and clipping the blit again would double-
+    // attenuate the page's edge pixels (a 1px line flickered at pen-down).
     if (!this.tryCachedPage(ctx, page, true)) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, page.width, page.height)
+      ctx.clip()
       this.renderBackground(ctx, page)
       if (page.pdf) {
         this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
       }
       this.renderPageContent(ctx, page, true)
+      ctx.restore()
     }
-
-    ctx.restore()
 
     ctx.strokeStyle = 'rgba(80,80,120,0.5)'
     ctx.lineWidth = 1.5 / this.zoom
@@ -409,14 +469,19 @@ export class PageCanvas {
    * Resolution matches the display exactly (zoom × DPR, see `renderScale`), so
    * the blit is 1:1 and nothing looks softer than a full render.
    */
-  private getPageCache(page: Page): HTMLCanvasElement | null {
-    const exact = this.matchingPageCache(page)
+  private getPageCache(
+    page: Page,
+    grid: PageGrid,
+  ): { canvas: HTMLCanvasElement; scale: number; grid: PageGrid } | null {
+    const exact = this.matchingPageCache(page, grid)
     if (exact) return exact
 
     const signature = this.pageSignature(page)
     const scale = this.renderScale(page)
-    const w = Math.max(1, Math.round(page.width * scale))
-    const h = Math.max(1, Math.round(page.height * scale))
+    const phaseX = grid.aligned ? grid.phaseX : 0
+    const phaseY = grid.aligned ? grid.phaseY : 0
+    const w = pageBitmapSize(page.width + phaseX / scale, scale)
+    const h = pageBitmapSize(page.height + phaseY / scale, scale)
     const cached = this.pageCache
     if (!this.pageAssetsReady(page)) return null
 
@@ -430,28 +495,53 @@ export class PageCanvas {
     const t0 = performance.now()
     cctx.setTransform(1, 0, 0, 1, 0, 0)
     cctx.clearRect(0, 0, w, h)
-    cctx.scale(scale, scale)
+    // Rasterize at the destination's subpixel phase, so strokes and text keep
+    // the exact anti-aliasing they get when drawn straight to the screen.
+    cctx.setTransform(scale, 0, 0, scale, phaseX, phaseY)
+    // Clip to the page here, exactly like the direct pass: the cache is blitted
+    // unclipped (see `tryCachedPage`) so its edge pixels must be final.
+    cctx.save()
+    cctx.beginPath()
+    cctx.rect(0, 0, page.width, page.height)
+    cctx.clip()
     this.renderBackground(cctx, page)
     if (page.pdf) this.renderPdf(cctx, page.pdf.dataUrl, page.pdf.name, page)
     this.renderPageContent(cctx, page, false)
-    this.pageCache = { page, canvas, scale, signature }
+    cctx.restore()
+    const entry = { page, canvas, scale, grid, signature }
+    this.pageCache = entry
     trace('cache.build', `page=${page.id.slice(0, 6)}`, `scale=${scale.toFixed(2)}`, `${(performance.now() - t0).toFixed(1)}ms`)
-    return canvas
+    return entry
   }
 
-  /** The cached bitmap, only if it still matches the page and the current scale. */
-  private matchingPageCache(page: Page): HTMLCanvasElement | null {
+  /** The cached bitmap, only if it still matches the page, scale and device grid. */
+  private matchingPageCache(
+    page: Page,
+    grid: PageGrid,
+  ): { canvas: HTMLCanvasElement; scale: number; grid: PageGrid } | null {
     const cached = this.pageCache
     if (!cached || cached.page !== page) return null
     if (cached.signature !== this.pageSignature(page)) return null
-    const scale = this.renderScale(page)
+    if (cached.grid.aligned !== grid.aligned) return null
     if (
-      cached.canvas.width !== Math.max(1, Math.round(page.width * scale)) ||
-      cached.canvas.height !== Math.max(1, Math.round(page.height * scale))
+      grid.aligned &&
+      (cached.grid.originX !== grid.originX ||
+        cached.grid.originY !== grid.originY ||
+        cached.grid.phaseX !== grid.phaseX ||
+        cached.grid.phaseY !== grid.phaseY)
     ) {
       return null
     }
-    return cached.canvas
+    const scale = this.renderScale(page)
+    const phaseX = grid.aligned ? grid.phaseX : 0
+    const phaseY = grid.aligned ? grid.phaseY : 0
+    if (
+      cached.canvas.width !== pageBitmapSize(page.width + phaseX / scale, scale) ||
+      cached.canvas.height !== pageBitmapSize(page.height + phaseY / scale, scale)
+    ) {
+      return null
+    }
+    return cached
   }
 
   /**
@@ -485,14 +575,26 @@ export class PageCanvas {
       this.notePath('full(too-big)')
       return false
     }
-    const cache = this.getPageCache(page)
+    const grid = pageGrid(ctx, this.renderScale(page))
+    const cache = this.getPageCache(page, grid)
     if (!cache) {
       this.notePath('full(stroke)')
       return false
     }
     this.notePath('cached(stroke)')
-    ctx.drawImage(cache, 0, 0, page.width, page.height)
-    if (this.currentStroke) this.renderStroke(ctx, this.currentStroke)
+    // Same pixel grid (and phase) as a direct render: the page does not change
+    // appearance (resample/soften/shift) when a stroke starts or ends.
+    this.blitRasterBitmap(ctx, cache.canvas, cache.scale, cache.grid)
+    if (this.currentStroke) {
+      // The blit is unclipped; keep the live stroke itself inside the page the
+      // same way the direct pass does.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, page.width, page.height)
+      ctx.clip()
+      this.renderStroke(ctx, this.currentStroke)
+      ctx.restore()
+    }
     return true
   }
 
@@ -530,9 +632,21 @@ export class PageCanvas {
       return
     }
     cctx.save()
-    // The build left the cache context scaled; `scale()` again would compound
-    // it (a 2× cache drew the stroke at 4×). Set the transform explicitly.
-    cctx.setTransform(cached.scale, 0, 0, cached.scale, 0, 0)
+    // The build left the cache context transformed; `scale()` again would
+    // compound it (a 2× cache drew the stroke at 4×). Set the transform
+    // explicitly, including the phase the bitmap was rasterized with.
+    cctx.setTransform(
+      cached.scale,
+      0,
+      0,
+      cached.scale,
+      cached.grid.aligned ? cached.grid.phaseX : 0,
+      cached.grid.aligned ? cached.grid.phaseY : 0,
+    )
+    // The blit is unclipped, so the folded stroke must not spill past the page.
+    cctx.beginPath()
+    cctx.rect(0, 0, page.width, page.height)
+    cctx.clip()
     this.renderStroke(cctx, stroke)
     cctx.restore()
     cached.signature = this.pageSignature(page)
@@ -618,7 +732,9 @@ export class PageCanvas {
       return
     }
 
-    const maskCtx = this.getMaskCtx(page.width, page.height)
+    const scale = maskRenderScale(page.width, page.height, this.zoom, this.devicePixelRatio)
+    const grid = pageGrid(ctx, scale)
+    const maskCtx = this.getMaskCtx(page.width, page.height, scale, grid)
     if (!maskCtx || !this.scratchCanvas) return
 
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
@@ -642,7 +758,7 @@ export class PageCanvas {
       }
     }
     maskCtx.restore()
-    ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
+    this.blitRasterBitmap(ctx, this.scratchCanvas, this.maskScale, grid)
   }
 
   private renderMaskedStrokeGroup(
@@ -651,7 +767,9 @@ export class PageCanvas {
     strokes: Stroke[],
     erasures: StrokeErasure[],
   ) {
-    const maskCtx = this.getMaskCtx(page.width, page.height)
+    const scale = maskRenderScale(page.width, page.height, this.zoom, this.devicePixelRatio)
+    const grid = pageGrid(ctx, scale)
+    const maskCtx = this.getMaskCtx(page.width, page.height, scale, grid)
     if (!maskCtx || !this.scratchCanvas) return
 
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
@@ -675,17 +793,19 @@ export class PageCanvas {
       }
     }
     maskCtx.restore()
-    ctx.drawImage(this.scratchCanvas, 0, 0, page.width, page.height)
+    this.blitRasterBitmap(ctx, this.scratchCanvas, this.maskScale, grid)
   }
 
-  private getMaskCtx(w: number, h: number): CanvasRenderingContext2D | null {
+  private getMaskCtx(w: number, h: number, scale: number, grid: PageGrid): CanvasRenderingContext2D | null {
     if (!this.scratchCanvas) {
       this.scratchCanvas = document.createElement('canvas')
       this.scratchCtx = this.scratchCanvas.getContext('2d')
     }
-    const scale = maskRenderScale(w, h, this.zoom, this.devicePixelRatio)
-    const tw = Math.max(1, Math.ceil(w * scale))
-    const th = Math.max(1, Math.ceil(h * scale))
+    this.maskScale = scale
+    const phaseX = grid.aligned ? grid.phaseX : 0
+    const phaseY = grid.aligned ? grid.phaseY : 0
+    const tw = pageBitmapSize(w + phaseX / scale, scale)
+    const th = pageBitmapSize(h + phaseY / scale, scale)
     if (this.scratchCanvas.width !== tw || this.scratchCanvas.height !== th) {
       this.scratchCanvas.width = tw
       this.scratchCanvas.height = th
@@ -694,7 +814,9 @@ export class PageCanvas {
     if (!sctx) return null
     sctx.setTransform(1, 0, 0, 1, 0, 0)
     sctx.clearRect(0, 0, tw, th)
-    sctx.scale(scale, scale)
+    // Same subpixel phase as the destination, so strokes in the mask keep the
+    // anti-aliasing they would get when drawn straight to it.
+    sctx.setTransform(scale, 0, 0, scale, phaseX, phaseY)
     return sctx
   }
 
@@ -735,11 +857,10 @@ export class PageCanvas {
       }
 
       ctx.save()
-      ctx.beginPath()
-      ctx.rect(0, 0, page.width, page.height)
-      ctx.clip()
-
       if (!this.tryCachedPage(ctx, page, i === this.currentPageIndex)) {
+        ctx.beginPath()
+        ctx.rect(0, 0, page.width, page.height)
+        ctx.clip()
         this.renderBackground(ctx, page)
         if (page.pdf) {
           this.renderPdf(ctx, page.pdf.dataUrl, page.pdf.name, page)
@@ -777,8 +898,40 @@ export class PageCanvas {
   }
 
   renderBackground(ctx: CanvasRenderingContext2D, page: Page = this.page) {
+    const bg = this.getBackgroundCanvas(page)
     ctx.save()
-    ctx.drawImage(this.getBackgroundCanvas(page), 0, 0, page.width, page.height)
+    this.blitPageBitmap(ctx, bg.canvas, bg.scale)
+    ctx.restore()
+  }
+
+  /**
+   * Draw a page-sized bitmap 1:1 (one bitmap pixel per device pixel). Bitmaps
+   * are built at `renderScale`, so any other destination size resamples them:
+   * twice (bitmap → composite → screen) at fractional zoom × DPR, which visibly
+   * shifts and softens the PDF text and makes the page tremble while writing.
+   */
+  private blitPageBitmap(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, scale: number) {
+    ctx.drawImage(bitmap, 0, 0, pageBitmapSpan(bitmap.width, scale), pageBitmapSpan(bitmap.height, scale))
+  }
+
+  /**
+   * Blits a bitmap that was rasterized at the destination's subpixel phase
+   * (page cache and eraser mask, see `pageGrid`) at its integer device origin:
+   * an exact 1:1 copy, so paths are not filtered a second time.
+   */
+  private blitRasterBitmap(
+    ctx: CanvasRenderingContext2D,
+    bitmap: HTMLCanvasElement,
+    scale: number,
+    grid: PageGrid,
+  ) {
+    if (!grid.aligned) {
+      this.blitPageBitmap(ctx, bitmap, scale)
+      return
+    }
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(bitmap, grid.originX, grid.originY)
     ctx.restore()
   }
 
@@ -788,27 +941,28 @@ export class PageCanvas {
    * every frame instead of re-creating thousands of paths. A tiny LRU map keeps
    * mixed templates in continuous mode from thrashing the cache.
    */
-  private getBackgroundCanvas(page: Page): HTMLCanvasElement {
+  private getBackgroundCanvas(page: Page): { canvas: HTMLCanvasElement; scale: number } {
     const needed = this.renderScale(page)
     const key = `${page.width}x${page.height}|${page.template}|${page.backgroundColor ?? ''}`
     const cached = this.bgCache.get(key)
-    if (cached && cached.scale >= needed * 0.98) return cached.canvas
+    if (cached && cached.scale >= needed * 0.98) return cached
 
     const resolution = needed
     const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(page.width * resolution))
-    canvas.height = Math.max(1, Math.round(page.height * resolution))
+    canvas.width = pageBitmapSize(page.width, resolution)
+    canvas.height = pageBitmapSize(page.height, resolution)
     const bctx = canvas.getContext('2d')
     if (bctx) {
       bctx.scale(resolution, resolution)
       drawTemplate(bctx, page, 1)
     }
-    this.bgCache.set(key, { canvas, scale: resolution })
+    const entry = { canvas, scale: resolution }
+    this.bgCache.set(key, entry)
     if (this.bgCache.size > 4) {
       const oldest = this.bgCache.keys().next().value
       if (oldest !== undefined) this.bgCache.delete(oldest)
     }
-    return canvas
+    return entry
   }
 
   private getImage(dataUrl: string): HTMLImageElement | null {
@@ -885,13 +1039,13 @@ export class PageCanvas {
 
   renderPdf(ctx: CanvasRenderingContext2D, dataUrl: string, _name: string, pageArg?: Page) {
     const pg = pageArg ?? this.page
-    const canvas = this.getPdfCanvas(pg, dataUrl)
-    if (!canvas) return
+    const raster = this.getPdfCanvas(pg, dataUrl)
+    if (!raster) return
     ctx.save()
-    // Pre-rasterized at the device scale: a 1:1 blit, no per-frame resampling.
-    // This is what keeps PDF text sharp while drawing (the old code lowered
-    // `imageSmoothingQuality` during interaction and blurred the letters).
-    ctx.drawImage(canvas, 0, 0, pg.width, pg.height)
+    // Pre-rasterized at the page scale: blit it 1:1 (no resampling). Any other
+    // size would soften the letters once per pass, and the composite cache adds
+    // a second pass — that was the "page trembles while writing on a PDF" bug.
+    this.blitPageBitmap(ctx, raster.canvas, raster.scale)
     ctx.restore()
   }
 
@@ -900,7 +1054,7 @@ export class PageCanvas {
    * both slow and blurry (quality was lowered while drawing). Rasterize once per
    * page/scale into a page-sized bitmap and blit it 1:1 from then on.
    */
-  private getPdfCanvas(page: Page, dataUrl: string): HTMLCanvasElement | null {
+  private getPdfCanvas(page: Page, dataUrl: string): { canvas: HTMLCanvasElement; scale: number } | null {
     const img = this.getImage(dataUrl)
     if (!img) return null
     const needed = this.renderScale(page)
@@ -908,12 +1062,12 @@ export class PageCanvas {
     const cached = this.pdfCache.get(key)
     // A larger raster can be downscaled for free (still sharp); only upscaling
     // blurs, so rebuild when the display got finer than the cached bitmap.
-    if (cached && cached.scale >= needed * 0.98) return cached.canvas
+    if (cached && cached.scale >= needed * 0.98) return cached
 
     const resolution = needed
     const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(page.width * resolution))
-    canvas.height = Math.max(1, Math.round(page.height * resolution))
+    canvas.width = pageBitmapSize(page.width, resolution)
+    canvas.height = pageBitmapSize(page.height, resolution)
     const pctx = canvas.getContext('2d')
     if (!pctx) return null
     pctx.scale(resolution, resolution)
@@ -935,7 +1089,7 @@ export class PageCanvas {
       const oldest = this.pdfCache.keys().next().value
       if (oldest !== undefined) this.pdfCache.delete(oldest)
     }
-    return canvas
+    return { canvas, scale: resolution }
   }
 
   renderImage(ctx: CanvasRenderingContext2D, imgEl: ImageElement) {

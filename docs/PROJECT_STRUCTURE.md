@@ -626,7 +626,8 @@ Key points:
     the page model directly to avoid displaying a transient blurred intermediate bitmap.
     The bitmap is retained for the next active stroke when possible. **Resolution is
     exactly the display scale** (`renderScale` = `zoom × DPR`, shared with the PDF and
-    background bitmaps), so the blit is 1:1 and nothing is upscaled — an upscaled cache was
+    background bitmaps), rounded up in pixels and blitted 1:1 (`blitPageBitmap`), so nothing
+    is upscaled or resampled — an upscaled cache was
     what made PDF text look washed out for a moment on every stroke. A 20-megapixel budget
     bounds memory; when a page exceeds it, `cacheSharpEnough` refuses the cache and the page
     is drawn live (sharp) instead of blurry. PDF pages use the same cache: the PDF raster is
@@ -643,11 +644,25 @@ Key points:
     `translate3d`/`will-change` to avoid unnecessary editor repaints. Stroke commits also
     emit an opt-in next-frame trace check to diagnose stale-page or ownership races.
   - **Eraser mask sharpness**: the intermediate bitmap used for stroke masks uses the
-    same `zoom × DPR` scale as the visible page, avoiding a low-resolution redraw that
-    makes every stroke look blurred after erasing.
-  - **PDF stroke preview**: pages with PDF backgrounds bypass the composite `pageCache`
-    while a stroke is active. The rasterized PDF is drawn once directly with the live
-    strokes, avoiding two smoothing passes at fractional zoom.
+    same `zoom × DPR` scale as the visible page and is blitted 1:1, avoiding a
+    low-resolution redraw that makes every stroke look blurred after erasing.
+  - **PDF stroke preview / 1:1 page-sized blits** (`blitPageBitmap`, `pageBitmapSize`,
+    `pageBitmapSpan`): every page-sized bitmap (page cache, PDF raster, background template,
+    eraser mask) is sized with `ceil` and blitted back at `bitmapSize / scale`, so one bitmap
+    pixel maps to exactly one device pixel. Drawing it into `0,0,page.width,page.height` at a
+    fractional `zoom × DPR` resampled it twice (bitmap → composite → screen) and shifted the
+    PDF text at every pen-down, which looked like the page "trembling" while writing. PDF
+    pages therefore stay on the composite `pageCache` during strokes — same sharpness as a
+    direct render, at blit cost.
+  - **Subpixel phase** (`pageGrid`, `blitRasterBitmap`): a page-sized bitmap built with a
+    phase-0 transform rasterizes text/strokes at a different subpixel position than the
+    screen, so blitting it at a fractional origin re-filters every existing stroke — the page
+    changed appearance at pen-down even with 1:1 pixel counts. `pageGrid` reads the
+    destination transform, and the cache and eraser mask are rebuilt with
+    `setTransform(scale,0,0,scale, phaseX, phaseY)` then blitted at `floor(origin)` with an
+    identity transform; rotated pages (`b`/`c` ≠ 0) fall back to the span blit. The cache
+    bitmap is rasterized **clipped to the page** and blitted **unclipped**, because clipping
+    both passes attenuated the page's edge pixels twice (a 1px line flickered at pen-down).
   - **Layout stability**: the cached canvas rect is reused during rendering and refreshed
     only after resize or scroll invalidation, avoiding forced layout reads on every frame.
   - **PDF raster cache** (`pdfCache`/`getPdfCanvas`): PDF pages are big images that used to
