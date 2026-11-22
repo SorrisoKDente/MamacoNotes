@@ -654,15 +654,26 @@ Key points:
     PDF text at every pen-down, which looked like the page "trembling" while writing. PDF
     pages therefore stay on the composite `pageCache` during strokes — same sharpness as a
     direct render, at blit cost.
-  - **Subpixel phase** (`pageGrid`, `blitRasterBitmap`): a page-sized bitmap built with a
-    phase-0 transform rasterizes text/strokes at a different subpixel position than the
-    screen, so blitting it at a fractional origin re-filters every existing stroke — the page
-    changed appearance at pen-down even with 1:1 pixel counts. `pageGrid` reads the
-    destination transform, and the cache and eraser mask are rebuilt with
-    `setTransform(scale,0,0,scale, phaseX, phaseY)` then blitted at `floor(origin)` with an
-    identity transform; rotated pages (`b`/`c` ≠ 0) fall back to the span blit. The cache
-    bitmap is rasterized **clipped to the page** and blitted **unclipped**, because clipping
-    both passes attenuated the page's edge pixels twice (a 1px line flickered at pen-down).
+  - **Subpixel phase and rotation** (`pageGrid`, `blitRasterBitmap`): a page-sized bitmap
+    built with a phase-0 transform rasterizes text/strokes at a different subpixel position
+    than the screen, so blitting it at a fractional origin re-filters every existing stroke —
+    the page changed appearance at pen-down even with 1:1 pixel counts. `pageGrid` reads the
+    destination transform, and the cache and eraser mask are rasterized with its **full linear
+    part** (rotation included) plus the same fractional translation, then blitted at the
+    integer bitmap origin with an identity transform and smoothing disabled. Only the scale
+    and the phase identify the cache: panning by whole device pixels reuses the bitmap, and a
+    rotated page gets a bitmap covering its rotated bounding box. When the destination is finer
+    than the pixel budget, the grid falls back to an axis-aligned bitmap blitted by span. The
+    cache bitmap is rasterized **clipped to the page** and blitted **unclipped**, because
+    clipping both passes attenuated the page's edge pixels twice (a 1px line flickered at
+    pen-down). Background and PDF bitmaps still go through `blitPageBitmap`, which resamples
+    whenever the destination size differs from the bitmap's own scale.
+  - **Idle cache warm** (`scheduleCacheWarm`, `pageGridFor`): when an idle render finds a still
+    valid cache whose device grid changed (pan/zoom), it rebuilds the bitmap after 120 ms of
+    stillness — only if the page is still the one on screen and no stroke is in progress. The
+    next pen-down then blits instead of paying a full-page rebuild on the first pointermove.
+    Content changes never trigger it: committed strokes are folded by
+    `commitStrokeToPageCache` or the cache is dropped.
   - **Layout stability**: the cached canvas rect is reused during rendering and refreshed
     only after resize or scroll invalidation, avoiding forced layout reads on every frame.
   - **PDF raster cache** (`pdfCache`/`getPdfCanvas`): PDF pages are big images that used to

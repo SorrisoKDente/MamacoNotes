@@ -55,13 +55,22 @@ Identified by `dragRef.kind`:
   fractional `zoom × DPR` resampled it twice and shifted the PDF text at every pen-down,
   which looked like the page "trembling" while writing. PDF pages therefore keep using the
   composite cache during strokes, with the sharpness of a direct render.
-- **Subpixel phase** (`pageGrid`/`blitRasterBitmap`): paths are anti-aliased by
-  their subpixel position, so a phase-0 bitmap blitted at a fractional origin
-  re-filters every existing stroke at pen-down. The composite cache and the eraser
-  mask are rasterized with the destination's phase (`setTransform(scale,0,0,scale,
-  phaseX,phaseY)`) and blitted at `floor(origin)` with an identity transform; rotated
-  pages fall back to the span blit. The bitmap is built **clipped to the page** and
-  blitted **unclipped** — clipping both passes double-attenuated the page edge.
+- **Subpixel phase and rotation** (`pageGrid`/`blitRasterBitmap`): paths are
+  anti-aliased by their subpixel position, so a phase-0 bitmap blitted at a
+  fractional origin re-filters every existing stroke at pen-down. The composite
+  cache and the eraser mask are rasterized with the destination's full linear
+  transform (`setTransform(a,b,c,d,tx,ty)`, rotation included) and the same
+  fractional translation, then blitted at the integer bitmap origin with an
+  identity transform and smoothing off. Scale and phase alone identify the
+  bitmap, so whole-pixel pans reuse it and rotated pages get a bitmap covering
+  their rotated bounding box; when the destination is finer than the pixel
+  budget the grid falls back to an axis-aligned span blit. The bitmap is built
+  **clipped to the page** and blitted **unclipped** — clipping both passes
+  double-attenuated the page edge.
+- **Idle cache warm** (`scheduleCacheWarm`): an idle render that finds a valid
+  bitmap for the same content but a stale device grid (pan/zoom) rebuilds it
+  after 120 ms of stillness, off the stroke path. The next pen-down then blits
+  instead of rebuilding the whole page on the first pointermove.
 - **Layout during writing**: The canvas rect is reused between frames and refreshed
   only after resize or scroll invalidates it, avoiding forced layout in the hot path.
 - **Direct DOM**: High-frequency UI updates (like the tool cursor) bypass React using refs and direct style manipulation.

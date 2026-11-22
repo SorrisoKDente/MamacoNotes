@@ -645,16 +645,28 @@ O `Editor.tsx` instancia **uma** `PageCanvas` (`src/renderer/canvas.ts`) sobre u
     o texto do PDF a cada toque da caneta, o que parecia a página "tremendo" durante a
     escrita. Por isso páginas com PDF continuam usando o `pageCache` composto durante o
     traço — mesma nitidez de um render direto, com custo de blit.
-  - **Fase subpixel** (`pageGrid`, `blitRasterBitmap`): um bitmap do tamanho da página
-    construído com transform de fase 0 rasteriza texto/traços numa posição subpixel diferente
-    da tela, então blitá-lo numa origem fracionária re-filtra todos os traços existentes — a
-    página mudava de aparência ao encostar a caneta mesmo com contagem de pixels 1:1.
-    `pageGrid` lê o transform de destino, e o cache e a máscara da borracha são reconstruídos
-    com `setTransform(scale,0,0,scale, phaseX, phaseY)` e blitados em `floor(origin)` com
-    transform identidade; páginas rotacionadas (`b`/`c` ≠ 0) caem no blit por span. O bitmap
-    do cache é rasterizado **recortado na página** e blitado **sem recorte**, porque recortar
-    as duas passadas atenuava duas vezes os pixels da borda da página (uma linha de 1px
-    piscava ao encostar a caneta).
+  - **Fase subpixel e rotação** (`pageGrid`, `blitRasterBitmap`): um bitmap do tamanho da
+    página construído com transform de fase 0 rasteriza texto/traços numa posição subpixel
+    diferente da tela, então blitá-lo numa origem fracionária re-filtra todos os traços
+    existentes — a página mudava de aparência ao encostar a caneta mesmo com contagem de
+    pixels 1:1. `pageGrid` lê o transform de destino, e o cache e a máscara da borracha são
+    rasterizados com a **parte linear completa** (rotação incluída) mais a mesma translação
+    fracionária, e blitados na origem inteira do bitmap com transform identidade e suavização
+    desligada. Apenas a escala e a fase identificam o cache: pan por pixels inteiros reutiliza
+    o bitmap, e uma página rotacionada recebe um bitmap que cobre sua bounding box rotacionada.
+    Quando o destino é mais fino que o orçamento de pixels, a grade cai no bitmap alinhado aos
+    eixos blitado por span. O bitmap do cache é rasterizado **recortado na página** e blitado
+    **sem recorte**, porque recortar as duas passadas atenuava duas vezes os pixels da borda da
+    página (uma linha de 1px piscava ao encostar a caneta). Bitmaps de fundo e de PDF ainda
+    passam por `blitPageBitmap`, que reamostra quando o tamanho do destino difere da escala do
+    próprio bitmap.
+  - **Aquecimento do cache ocioso** (`scheduleCacheWarm`, `pageGridFor`): quando um render
+    ocioso encontra um cache ainda válido cuja grade de dispositivo mudou (pan/zoom), ele
+    reconstrói o bitmap após 120 ms de inatividade — apenas se a página ainda é a que está na
+    tela e nenhum traço está em andamento. O próximo pen-down então só blita, em vez de pagar
+    a reconstrução da página inteira no primeiro pointermove. Mudanças de conteúdo nunca
+    disparam isso: traços commitados são dobrados por `commitStrokeToPageCache` ou o cache é
+    descartado.
   - **Estabilidade de layout**: o retângulo do canvas em cache é reutilizado durante a
     renderização e atualizado apenas após invalidação por resize ou scroll, evitando
     leituras forçadas a cada frame.

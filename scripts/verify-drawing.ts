@@ -575,37 +575,88 @@ console.log('== Drawing & Stroke Regression Verification ==')
 
 {
   // Test 8: the page grid decides where the cached bitmap is rasterized and
-  // blitted. Paths (text, strokes) are anti-aliased by their subpixel phase, so
-  // the cache must be built at the destination's phase and blitted at its
-  // integer origin. Blitting a phase-0 bitmap at a fractional position
-  // re-filters every existing stroke: the "trembles while writing" bug.
+  // blitted. Paths (text, strokes) are anti-aliased by their subpixel position,
+  // so the bitmap must be rasterized with the destination's own transform and
+  // blitted at an integer origin. A phase-0 bitmap blitted at a fractional
+  // position re-filters every existing stroke: the "trembles while writing" bug.
   const fake = (a: number, b: number, c: number, d: number, e: number, f: number) =>
     ({ getTransform: () => ({ a, b, c, d, e, f }) }) as unknown as CanvasRenderingContext2D
+  const W = 600
+  const H = 800
 
-  const aligned = pageGrid(fake(1.25, 0, 0, 1.25, 12.875, 25.875), 1.25)
+  const aligned = pageGrid(fake(1.25, 0, 0, 1.25, 12.875, 25.875), W, H, 1.25)
   assert(
-    aligned.aligned && aligned.originX === 12 && aligned.originY === 25,
+    aligned.exact && aligned.originX === 12 && aligned.originY === 25,
     `grid blits at the integer device origin (got ${aligned.originX},${aligned.originY})`,
   )
   assert(
     Math.abs(aligned.phaseX - 0.875) < 1e-6 && Math.abs(aligned.phaseY - 0.875) < 1e-6,
     `grid keeps the subpixel phase (got ${aligned.phaseX},${aligned.phaseY})`,
   )
-
-  const exact = pageGrid(fake(2, 0, 0, 2, 10, 20), 2)
   assert(
-    exact.aligned && exact.phaseX === 0 && exact.phaseY === 0,
+    aligned.width === Math.ceil(W * 1.25 + 0.875) && aligned.height === Math.ceil(H * 1.25 + 0.875),
+    `bitmap covers the page plus the phase margin (${aligned.width}x${aligned.height})`,
+  )
+
+  const whole = pageGrid(fake(2, 0, 0, 2, 10, 20), W, H, 2)
+  assert(
+    whole.exact && whole.phaseX === 0 && whole.phaseY === 0,
     'integer origins have zero phase',
   )
+
+  const fallback = pageGrid(fake(0.866, 0, 0, 0.866, 0, 0), W, H, 1)
   assert(
-    pageGrid(fake(0.866, 0, 0, 0.866, 0, 0), 1).aligned === false,
-    'a grid at another scale is not aligned',
+    !fallback.exact && fallback.tx === 0 && fallback.phaseX === 0,
+    'a destination finer than the bitmap budget uses the axis-aligned fallback',
   )
-  const rotated = pageGrid(fake(0.866, 0.5, -0.5, 0.866, 0, 0), 1)
   assert(
-    rotated.aligned === false && rotated.originX === 0 && rotated.phaseX === 0,
-    'rotated pages fall back to the span blit',
+    fallback.width === pageBitmapSize(W, 1),
+    'the fallback bitmap is still page-sized',
   )
+
+  // Rotation is not a reason to resample: only the fractional translation
+  // affects anti-aliasing, so the full linear part is rasterized into a bitmap
+  // that covers the rotated page's bounding box.
+  const rotated = pageGrid(fake(0, 1.25, -1.25, 0, 100, 50), W, H, 1.25)
+  assert(
+    rotated.exact && rotated.a === 0 && rotated.b === 1.25 && rotated.c === -1.25 && rotated.d === 0,
+    'rotated pages keep their full linear transform',
+  )
+  assert(
+    rotated.width === H * 1.25 && rotated.height === W * 1.25,
+    `rotated bitmap matches the bounding box (${rotated.width}x${rotated.height})`,
+  )
+  assert(
+    rotated.tx === 1000 && rotated.originX === -900,
+    `rotated bitmap is offset by its bounding box (tx=${rotated.tx}, originX=${rotated.originX})`,
+  )
+
+  // Pan × DPR can land a hair below/above an integer; that must not read as a
+  // different phase (it used to force a pointless full-page rebuild).
+  const noisy = pageGrid(fake(1.25, 0, 0, 1.25, 12.9999995, 25.0000001), W, H, 1.25)
+  assert(
+    noisy.originX === 13 &&
+      noisy.originY === 25 &&
+      noisy.phaseX === 0 &&
+      noisy.phaseY === 0 &&
+      noisy.width === aligned.width - 1,
+    'float noise around an integer does not change the grid',
+  )
+
+  // Whatever the phase, the bitmap must cover the page's device span exactly.
+  for (const phase of [0, 0.125, 0.5, 0.875, 0.999]) {
+    const scale = 1.5
+    const g = pageGrid(fake(scale, 0, 0, scale, 12 + phase, 25 + phase), 893, 1263, scale)
+    const right = 12 + phase + 893 * scale
+    const bottom = 25 + phase + 1263 * scale
+    assert(
+      g.originX <= 12 + phase &&
+        g.originY <= 25 + phase &&
+        g.originX + g.width >= right - 1e-6 &&
+        g.originY + g.height >= bottom - 1e-6,
+      `bitmap covers the page at phase ${phase}`,
+    )
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

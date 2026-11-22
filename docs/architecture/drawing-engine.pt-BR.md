@@ -56,13 +56,22 @@ Identificados por `dragRef.kind`:
   duas vezes e deslocava o texto do PDF a cada toque da caneta, o que parecia a página
   "tremendo" durante a escrita. Por isso páginas com PDF continuam usando o cache composto
   durante o traço, com a nitidez de um render direto.
-- **Fase subpixel** (`pageGrid`/`blitRasterBitmap`): caminhos são anti-aliased pela
-  posição subpixel, então um bitmap de fase 0 blitado numa origem fracionária
-  re-filtra todos os traços existentes ao encostar a caneta. O cache composto e a
-  máscara da borracha são rasterizados na fase do destino (`setTransform(scale,0,0,
-  scale,phaseX,phaseY)`) e blitados em `floor(origin)` com transform identidade;
-  páginas rotacionadas caem no blit por span. O bitmap é construído **recortado na
-  página** e blitado **sem recorte** — recortar as duas passadas atenuava a borda.
+- **Fase subpixel e rotação** (`pageGrid`/`blitRasterBitmap`): caminhos são
+  anti-aliased pela posição subpixel, então um bitmap de fase 0 blitado numa origem
+  fracionária re-filtra todos os traços existentes ao encostar a caneta. O cache
+  composto e a máscara da borracha são rasterizados com o transform linear completo
+  do destino (`setTransform(a,b,c,d,tx,ty)`, rotação incluída) e a mesma translação
+  fracionária, e blitados na origem inteira do bitmap com transform identidade e
+  suavização desligada. Apenas escala e fase identificam o bitmap, então pan por
+  pixels inteiros o reutiliza e páginas rotacionadas ganham um bitmap que cobre sua
+  bounding box rotacionada; quando o destino é mais fino que o orçamento de pixels,
+  a grade cai no blit por span alinhado aos eixos. O bitmap é construído **recortado
+  na página** e blitado **sem recorte** — recortar as duas passadas atenuava a borda.
+- **Aquecimento do cache ocioso** (`scheduleCacheWarm`): um render ocioso que encontra
+  um bitmap válido para o mesmo conteúdo mas com grade de dispositivo desatualizada
+  (pan/zoom) o reconstrói após 120 ms de inatividade, fora do caminho do traço. O
+  próximo pen-down então blita, em vez de reconstruir a página inteira no primeiro
+  pointermove.
 - **Layout durante a escrita**: O retângulo do canvas é reutilizado entre frames e só
   é atualizado quando resize ou scroll invalida o cache, evitando leituras forçadas de
   layout no caminho crítico.

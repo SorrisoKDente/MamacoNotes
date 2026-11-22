@@ -32,6 +32,7 @@
  * Results are exposed as `window.__bench` / `window.__benchPromise`.
  */
 import { PageCanvas } from '../src/renderer/canvas'
+import type { PageGrid } from '../src/renderer/canvas'
 import type { Page } from '../src/types'
 
 interface FixtureSource {
@@ -89,6 +90,8 @@ interface BenchResult {
   on: { stats: Stats; cacheBuildMs: number; passes: PassResult[] }
   speedup: number
   pixelDiffs: { on: PixelDiff[]; off: PixelDiff[] }
+  /** False when the cached preview differs from a direct render beyond budget. */
+  pixelOk: boolean
   error?: string
 }
 
@@ -101,6 +104,11 @@ const PASSES = Math.max(1, Number(params.get('passes') ?? 2))
 const DPR_OVERRIDE = Number(params.get('dpr') ?? 0)
 const ZOOM = 1
 const TOLERANCE = 2
+/** Fractional pan on purpose: phase 0 would not exercise the subpixel grid. */
+const PAN_X = 13.37
+const PAN_Y = 7.77
+/** Pixel parity budget between the cached and the direct path (see `pageGrid`). */
+const MAX_MISMATCH_RATIO = 0.001
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0
@@ -149,8 +157,8 @@ function mount(page: Page): { pc: PageCanvas; canvas: HTMLCanvasElement } {
     canvas,
     page,
     zoom: ZOOM,
-    panX: 0,
-    panY: 0,
+    panX: PAN_X,
+    panY: PAN_Y,
     callbacks: { onStrokeEnd: () => {}, onRequestRerender: () => {} },
   })
   if (DPR_OVERRIDE > 0) pc.devicePixelRatio = DPR_OVERRIDE
@@ -162,7 +170,7 @@ function mount(page: Page): { pc: PageCanvas; canvas: HTMLCanvasElement } {
 /** Internals used only to warm/drive the renderer from the benchmark. */
 type PageCanvasInternals = {
   getPdfCanvas(page: Page, dataUrl: string): HTMLCanvasElement | null
-  getPageCache(page: Page): HTMLCanvasElement | null
+  getPageCache(page: Page, grid: PageGrid): HTMLCanvasElement | null
 }
 
 async function waitPdf(pc: PageCanvas, page: Page): Promise<void> {
@@ -207,7 +215,7 @@ async function runOnce(
   const internals = pc as unknown as PageCanvasInternals
   pc.invalidatePageCache()
   const buildStart = performance.now()
-  internals.getPageCache(page)
+  internals.getPageCache(page, pc.pageGridFor(page))
   flush(pc.ctx)
   const cacheBuildMs = performance.now() - buildStart
 
@@ -276,6 +284,11 @@ async function run(): Promise<BenchResult> {
   const reference = offPasses[0].pixels
   const onDiffs = onPasses.map((pass) => comparePixels(reference, pass.pixels))
   const offDiffs = offPasses.map((pass) => comparePixels(reference, pass.pixels))
+  // Regression gate: the cached preview must be pixel-identical (up to the
+  // per-channel tolerance) to a direct render — that is the "tremble" bug.
+  // Only the mismatched *area* is gated: a tie in the rasterizer can flip a
+  // couple of isolated pixels to a high channel diff without any visual change.
+  const pixelOk = onDiffs.every((diff) => diff.mismatchRatio <= MAX_MISMATCH_RATIO)
 
   const offStats = summarize(offPasses.flatMap((pass) => pass.frameMs))
   const onStats = summarize(onPasses.flatMap((pass) => pass.frameMs))
@@ -297,6 +310,10 @@ async function run(): Promise<BenchResult> {
       'pixels at the end of the run (cache ON is the point of interest):',
       `  ON  ${formatDiffs(onDiffs)}`,
       `  OFF ${formatDiffs(offDiffs)}`,
+      '',
+      pixelOk
+        ? `PARITY OK     cached preview matches a direct render (<= ${(MAX_MISMATCH_RATIO * 100).toFixed(1)}% >${TOLERANCE}/255)`
+        : `PARITY FAIL   cached preview differs from a direct render — the "trembling" bug is back`,
     ].join('\n'),
   )
 
@@ -321,6 +338,7 @@ async function run(): Promise<BenchResult> {
     on: { stats: onStats, cacheBuildMs: mean(onPasses.map((pass) => pass.cacheBuildMs)), passes: onPasses.map(strip) },
     speedup: offStats.mean / Math.max(0.001, onStats.mean),
     pixelDiffs: { on: onDiffs, off: offDiffs },
+    pixelOk,
   }
 }
 

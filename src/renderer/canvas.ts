@@ -65,38 +65,110 @@ export function pageBitmapSpan(bitmapSize: number, scale: number): number {
   return bitmapSize / scale
 }
 
+/** True when two matrix terms are equal up to float noise at their magnitude. */
+function near(x: number, y: number): boolean {
+  return Math.abs(x - y) <= 1e-6 * Math.max(1, Math.abs(x), Math.abs(y))
+}
+
 /**
- * Where a page-space context puts the page origin on the device grid.
+ * Pan × DPR can land a hair below an integer (30.4 × 1.25 = 37.999999…), which
+ * used to look like a different phase and force a pointless cache rebuild.
+ */
+function snapNearInteger(value: number): number {
+  const rounded = Math.round(value)
+  return Math.abs(value - rounded) <= 1e-6 ? rounded : value
+}
+
+/**
+ * How a page must be rasterized into a page-sized bitmap and blitted back.
  *
  * Paths (strokes, text) are anti-aliased according to their *subpixel* position,
  * so drawing them at phase 0 into a cache bitmap and then blitting that bitmap
  * at a fractional position re-filters them: every existing stroke changes
  * appearance the instant a pen-down switches to the cached preview (the page
- * "trembles"). Building the bitmap at the destination's phase and blitting it at
- * the integer origin makes the cache pixel-identical to a direct render.
+ * "trembles"). The fix is to rasterize the bitmap with the destination's own
+ * linear transform plus a translation that differs from the destination's only
+ * by an integer, then blit it 1:1 at that integer origin. Rotation is included:
+ * only the fractional translation affects anti-aliasing.
  */
 export interface PageGrid {
-  /** Integer device pixel of the page origin (the 1:1 blit position). */
+  /** Linear part used to rasterize (page units → device pixels). */
+  a: number
+  b: number
+  c: number
+  d: number
+  /** Translation used to rasterize, relative to the bitmap's pixel (0, 0). */
+  tx: number
+  ty: number
+  /** Integer device pixel where bitmap (0, 0) is blitted. */
   originX: number
   originY: number
-  /** Subpixel part of the page origin, baked into the bitmap rasterization. */
+  /** Bitmap pixel size covering the whole page under `a`–`d`. */
+  width: number
+  height: number
+  /** Fractional translation baked into the bitmap (the cache identity). */
   phaseX: number
   phaseY: number
-  /** False for rotated pages (no axis-aligned grid); callers then use the span blit. */
-  aligned: boolean
+  /**
+   * False when the destination is finer than the bitmap budget allows: the
+   * bitmap is then rasterized axis-aligned at `scale` and span-blitted.
+   */
+  exact: boolean
 }
 
-export function pageGrid(ctx: CanvasRenderingContext2D, scale: number): PageGrid {
+export function pageGrid(
+  ctx: CanvasRenderingContext2D,
+  pageW: number,
+  pageH: number,
+  scale: number,
+): PageGrid {
   const m = ctx.getTransform()
-  const aligned =
-    Math.abs(m.b) < 1e-6 &&
-    Math.abs(m.c) < 1e-6 &&
-    Math.abs(m.a - scale) < 1e-6 &&
-    Math.abs(m.d - scale) < 1e-6
-  if (!aligned) return { originX: 0, originY: 0, phaseX: 0, phaseY: 0, aligned: false }
-  const originX = Math.floor(m.e)
-  const originY = Math.floor(m.f)
-  return { originX, originY, phaseX: m.e - originX, phaseY: m.f - originY, aligned: true }
+  const exact = near(Math.hypot(m.a, m.b), scale) && near(Math.hypot(m.c, m.d), scale)
+  if (!exact) {
+    return {
+      a: scale,
+      b: 0,
+      c: 0,
+      d: scale,
+      tx: 0,
+      ty: 0,
+      originX: 0,
+      originY: 0,
+      width: pageBitmapSize(pageW, scale),
+      height: pageBitmapSize(pageH, scale),
+      phaseX: 0,
+      phaseY: 0,
+      exact: false,
+    }
+  }
+  const { a, b, c, d } = m
+  const e = snapNearInteger(m.e)
+  const f = snapNearInteger(m.f)
+  // Bounding box of the page under the full linear part (rotation included):
+  // the bitmap starts at its top-left corner, so a rotated page still fits.
+  const xs = [e, a * pageW + e, c * pageH + e, a * pageW + c * pageH + e]
+  const ys = [f, b * pageW + f, d * pageH + f, b * pageW + d * pageH + f]
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  const originX = Math.floor(minX)
+  const originY = Math.floor(minY)
+  return {
+    a,
+    b,
+    c,
+    d,
+    tx: e - originX,
+    ty: f - originY,
+    originX,
+    originY,
+    width: Math.max(1, Math.ceil(maxX - 1e-6) - originX),
+    height: Math.max(1, Math.ceil(maxY - 1e-6) - originY),
+    phaseX: e - Math.floor(e),
+    phaseY: f - Math.floor(f),
+    exact: true,
+  }
 }
 
 export function shouldUsePageCache(drawing: boolean, hasCurrentStroke: boolean): boolean {
@@ -132,8 +204,10 @@ export class PageCanvas {
   private imageOverrides = new Map<string, { dataUrl: string; canvas: HTMLCanvasElement }>()
   private scratchCanvas: HTMLCanvasElement | null = null
   private scratchCtx: CanvasRenderingContext2D | null = null
-  /** Scale of `scratchCanvas` (set by `getMaskCtx`), for its 1:1 blit. */
-  private maskScale = 1
+  /** Scratch context used to derive a page grid outside a render pass. */
+  private gridCtx: CanvasRenderingContext2D | null = null
+  /** Timer for the idle page-cache pre-warm (see `scheduleCacheWarm`). */
+  private warmTimer: ReturnType<typeof setTimeout> | null = null
   private bgCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
   private pdfCache = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
   private pageCache: {
@@ -478,10 +552,8 @@ export class PageCanvas {
 
     const signature = this.pageSignature(page)
     const scale = this.renderScale(page)
-    const phaseX = grid.aligned ? grid.phaseX : 0
-    const phaseY = grid.aligned ? grid.phaseY : 0
-    const w = pageBitmapSize(page.width + phaseX / scale, scale)
-    const h = pageBitmapSize(page.height + phaseY / scale, scale)
+    const w = grid.width
+    const h = grid.height
     const cached = this.pageCache
     if (!this.pageAssetsReady(page)) return null
 
@@ -495,9 +567,10 @@ export class PageCanvas {
     const t0 = performance.now()
     cctx.setTransform(1, 0, 0, 1, 0, 0)
     cctx.clearRect(0, 0, w, h)
-    // Rasterize at the destination's subpixel phase, so strokes and text keep
-    // the exact anti-aliasing they get when drawn straight to the screen.
-    cctx.setTransform(scale, 0, 0, scale, phaseX, phaseY)
+    // Same linear transform and subpixel translation as the destination, so
+    // strokes and text keep the exact anti-aliasing they get when drawn
+    // straight to the screen (rotation included).
+    cctx.setTransform(grid.a, grid.b, grid.c, grid.d, grid.tx, grid.ty)
     // Clip to the page here, exactly like the direct pass: the cache is blitted
     // unclipped (see `tryCachedPage`) so its edge pixels must be final.
     cctx.save()
@@ -522,25 +595,23 @@ export class PageCanvas {
     const cached = this.pageCache
     if (!cached || cached.page !== page) return null
     if (cached.signature !== this.pageSignature(page)) return null
-    if (cached.grid.aligned !== grid.aligned) return null
+    if (cached.scale !== this.renderScale(page)) return null
+    const built = cached.grid
+    if (built.exact !== grid.exact) return null
+    // Only the linear transform and the fractional translation change the
+    // pixels; the integer blit origin may move freely (panning by whole
+    // device pixels reuses the bitmap).
     if (
-      grid.aligned &&
-      (cached.grid.originX !== grid.originX ||
-        cached.grid.originY !== grid.originY ||
-        cached.grid.phaseX !== grid.phaseX ||
-        cached.grid.phaseY !== grid.phaseY)
+      !near(built.a, grid.a) ||
+      !near(built.b, grid.b) ||
+      !near(built.c, grid.c) ||
+      !near(built.d, grid.d) ||
+      !near(built.phaseX, grid.phaseX) ||
+      !near(built.phaseY, grid.phaseY)
     ) {
       return null
     }
-    const scale = this.renderScale(page)
-    const phaseX = grid.aligned ? grid.phaseX : 0
-    const phaseY = grid.aligned ? grid.phaseY : 0
-    if (
-      cached.canvas.width !== pageBitmapSize(page.width + phaseX / scale, scale) ||
-      cached.canvas.height !== pageBitmapSize(page.height + phaseY / scale, scale)
-    ) {
-      return null
-    }
+    if (cached.canvas.width !== grid.width || cached.canvas.height !== grid.height) return null
     return cached
   }
 
@@ -569,13 +640,20 @@ export class PageCanvas {
     const drawingNow = drawCurrentStroke && !!this.currentStroke
     if (!shouldUsePageCache(this.drawing, drawingNow)) {
       this.notePath('full(idle)')
+      // The bitmap survives pan/zoom with the same content, but its device
+      // grid changes: the next pen-down would rebuild it on the first
+      // pointermove (tens of ms on big pages at high zoom). Refresh it here,
+      // off the stroke path, once the view settles.
+      if (drawCurrentStroke) {
+        this.scheduleCacheWarm(page, pageGrid(ctx, page.width, page.height, this.renderScale(page)))
+      }
       return false
     }
     if (!this.cacheSharpEnough(page)) {
       this.notePath('full(too-big)')
       return false
     }
-    const grid = pageGrid(ctx, this.renderScale(page))
+    const grid = pageGrid(ctx, page.width, page.height, this.renderScale(page))
     const cache = this.getPageCache(page, grid)
     if (!cache) {
       this.notePath('full(stroke)')
@@ -583,8 +661,9 @@ export class PageCanvas {
     }
     this.notePath('cached(stroke)')
     // Same pixel grid (and phase) as a direct render: the page does not change
-    // appearance (resample/soften/shift) when a stroke starts or ends.
-    this.blitRasterBitmap(ctx, cache.canvas, cache.scale, cache.grid)
+    // appearance (resample/soften/shift) when a stroke starts or ends. The
+    // bitmap's own origin is irrelevant — any integer origin is equivalent.
+    this.blitRasterBitmap(ctx, cache.canvas, cache.scale, grid)
     if (this.currentStroke) {
       // The blit is unclipped; keep the live stroke itself inside the page the
       // same way the direct pass does.
@@ -603,6 +682,33 @@ export class PageCanvas {
     if (this.lastPath === path) return
     this.lastPath = path
     trace('render', path)
+  }
+
+  /**
+   * Rebuilds an existing cache bitmap for the current grid while idle. Only a
+   * bitmap that is still valid for the same content is refreshed (a pan/zoom
+   * moved the grid); content changes must not trigger full-page rebuilds after
+   * every stroke — those are folded by `commitStrokeToPageCache` or dropped.
+   */
+  private scheduleCacheWarm(page: Page, grid: PageGrid) {
+    const cached = this.pageCache
+    if (!cached || cached.page !== page) return
+    if (cached.signature !== this.pageSignature(page)) return
+    if (this.matchingPageCache(page, grid)) return
+    if (!this.cacheSharpEnough(page) || !this.pageAssetsReady(page)) return
+    if (this.warmTimer) clearTimeout(this.warmTimer)
+    this.warmTimer = setTimeout(() => {
+      this.warmTimer = null
+      if (this.drawing) return
+      if (this.viewPage() !== page) return
+      if (!this.pageAssetsReady(page)) return
+      this.getPageCache(page, grid)
+    }, 120)
+  }
+
+  /** The page the user is currently looking at. */
+  private viewPage(): Page | undefined {
+    return this.viewMode === 'separate' ? this.page : this.pages[this.currentPageIndex]
   }
 
   /**
@@ -633,16 +739,10 @@ export class PageCanvas {
     }
     cctx.save()
     // The build left the cache context transformed; `scale()` again would
-    // compound it (a 2× cache drew the stroke at 4×). Set the transform
-    // explicitly, including the phase the bitmap was rasterized with.
-    cctx.setTransform(
-      cached.scale,
-      0,
-      0,
-      cached.scale,
-      cached.grid.aligned ? cached.grid.phaseX : 0,
-      cached.grid.aligned ? cached.grid.phaseY : 0,
-    )
+    // compound it (a 2× cache drew the stroke at 4×). Set the full transform
+    // the bitmap was rasterized with, rotation included.
+    const built = cached.grid
+    cctx.setTransform(built.a, built.b, built.c, built.d, built.tx, built.ty)
     // The blit is unclipped, so the folded stroke must not spill past the page.
     cctx.beginPath()
     cctx.rect(0, 0, page.width, page.height)
@@ -733,8 +833,8 @@ export class PageCanvas {
     }
 
     const scale = maskRenderScale(page.width, page.height, this.zoom, this.devicePixelRatio)
-    const grid = pageGrid(ctx, scale)
-    const maskCtx = this.getMaskCtx(page.width, page.height, scale, grid)
+    const grid = pageGrid(ctx, page.width, page.height, scale)
+    const maskCtx = this.getMaskCtx(grid)
     if (!maskCtx || !this.scratchCanvas) return
 
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
@@ -758,7 +858,7 @@ export class PageCanvas {
       }
     }
     maskCtx.restore()
-    this.blitRasterBitmap(ctx, this.scratchCanvas, this.maskScale, grid)
+    this.blitRasterBitmap(ctx, this.scratchCanvas, scale, grid)
   }
 
   private renderMaskedStrokeGroup(
@@ -768,8 +868,8 @@ export class PageCanvas {
     erasures: StrokeErasure[],
   ) {
     const scale = maskRenderScale(page.width, page.height, this.zoom, this.devicePixelRatio)
-    const grid = pageGrid(ctx, scale)
-    const maskCtx = this.getMaskCtx(page.width, page.height, scale, grid)
+    const grid = pageGrid(ctx, page.width, page.height, scale)
+    const maskCtx = this.getMaskCtx(grid)
     if (!maskCtx || !this.scratchCanvas) return
 
     for (const stroke of strokes) this.renderStroke(maskCtx, stroke)
@@ -793,19 +893,16 @@ export class PageCanvas {
       }
     }
     maskCtx.restore()
-    this.blitRasterBitmap(ctx, this.scratchCanvas, this.maskScale, grid)
+    this.blitRasterBitmap(ctx, this.scratchCanvas, scale, grid)
   }
 
-  private getMaskCtx(w: number, h: number, scale: number, grid: PageGrid): CanvasRenderingContext2D | null {
+  private getMaskCtx(grid: PageGrid): CanvasRenderingContext2D | null {
     if (!this.scratchCanvas) {
       this.scratchCanvas = document.createElement('canvas')
       this.scratchCtx = this.scratchCanvas.getContext('2d')
     }
-    this.maskScale = scale
-    const phaseX = grid.aligned ? grid.phaseX : 0
-    const phaseY = grid.aligned ? grid.phaseY : 0
-    const tw = pageBitmapSize(w + phaseX / scale, scale)
-    const th = pageBitmapSize(h + phaseY / scale, scale)
+    const tw = grid.width
+    const th = grid.height
     if (this.scratchCanvas.width !== tw || this.scratchCanvas.height !== th) {
       this.scratchCanvas.width = tw
       this.scratchCanvas.height = th
@@ -814,9 +911,9 @@ export class PageCanvas {
     if (!sctx) return null
     sctx.setTransform(1, 0, 0, 1, 0, 0)
     sctx.clearRect(0, 0, tw, th)
-    // Same subpixel phase as the destination, so strokes in the mask keep the
-    // anti-aliasing they would get when drawn straight to it.
-    sctx.setTransform(scale, 0, 0, scale, phaseX, phaseY)
+    // Same linear transform and phase as the destination, so strokes in the
+    // mask keep the anti-aliasing they would get when drawn straight to it.
+    sctx.setTransform(grid.a, grid.b, grid.c, grid.d, grid.tx, grid.ty)
     return sctx
   }
 
@@ -880,21 +977,31 @@ export class PageCanvas {
     void viewTop
   }
 
-  applyPageTransform() {
-    const { ctx } = this
+  applyPageTransform(ctx: CanvasRenderingContext2D = this.ctx, page: Page = this.page) {
     ctx.save()
     ctx.scale(this.devicePixelRatio, this.devicePixelRatio)
     ctx.translate(this.panX, this.panY)
     ctx.scale(this.zoom, this.zoom)
     const off = this.currentOffset
     ctx.translate(off.x, off.y)
-    const page = this.page
     const rot = ((page.rotation % 360) + 360) % 360
     if (rot !== 0) {
       ctx.translate(page.width / 2, page.height / 2)
       ctx.rotate((rot * Math.PI) / 180)
       ctx.translate(-page.width / 2, -page.height / 2)
     }
+  }
+
+  /** Device grid of `page` in the engine's current view (used to pre-warm the cache). */
+  pageGridFor(page: Page, scale: number = this.renderScale(page)): PageGrid {
+    if (!this.gridCtx) this.gridCtx = document.createElement('canvas').getContext('2d')
+    const ctx = this.gridCtx
+    if (!ctx) return pageGrid(this.ctx, page.width, page.height, scale)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    this.applyPageTransform(ctx, page)
+    const grid = pageGrid(ctx, page.width, page.height, scale)
+    ctx.restore()
+    return grid
   }
 
   renderBackground(ctx: CanvasRenderingContext2D, page: Page = this.page) {
@@ -915,7 +1022,7 @@ export class PageCanvas {
   }
 
   /**
-   * Blits a bitmap that was rasterized at the destination's subpixel phase
+   * Blits a bitmap that was rasterized at the destination's own transform
    * (page cache and eraser mask, see `pageGrid`) at its integer device origin:
    * an exact 1:1 copy, so paths are not filtered a second time.
    */
@@ -925,12 +1032,15 @@ export class PageCanvas {
     scale: number,
     grid: PageGrid,
   ) {
-    if (!grid.aligned) {
+    if (!grid.exact) {
       this.blitPageBitmap(ctx, bitmap, scale)
       return
     }
     ctx.save()
     ctx.setTransform(1, 0, 0, 1, 0, 0)
+    // The offset is integral, so this is a no-op for correct implementations
+    // and cheap insurance on WebViews that still filter drawImage.
+    ctx.imageSmoothingEnabled = false
     ctx.drawImage(bitmap, grid.originX, grid.originY)
     ctx.restore()
   }
