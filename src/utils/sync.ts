@@ -299,20 +299,31 @@ export function isPngImage(bytes: Uint8Array): boolean {
 }
 
 /**
- * Downloads `pdfs/<pageId>.png` while holding one slot of that budget. Returns
- * null when the server answered with something that is not a PNG (some WebDAV
- * servers reply 200 with an HTML error page): storing those bytes would leave
+ * Downloads `pdfs/<pageId>.png` while holding one slot of that budget. The
+ * bytes are returned unchecked: callers reject a non-PNG (some WebDAV servers
+ * reply 200 with an HTML error page) because storing those bytes would leave
  * the page silently blank, with no error anywhere.
  */
 async function downloadPdfBitmap(
   basePath: string,
   transport: Transport,
   pageId: string,
-): Promise<Uint8Array | null> {
-  const bytes = await withBitmapSlot(() =>
+): Promise<Uint8Array> {
+  return withBitmapSlot(() =>
     transport.downloadBinaryFile(pdfFilePath(basePath, pageId)),
   )
-  return isPngImage(bytes) ? bytes : null
+}
+
+/**
+ * A non-PNG body is diagnosed from the log alone: its size plus the first 16
+ * bytes in hex distinguish an HTML/JSON/ZIP error page from base64 text (which
+ * starts with `69 56 42 4f 52`, i.e. "iVBOR") or an empty response.
+ */
+export function describeBitmapBody(bytes: Uint8Array): string {
+  const head = Array.from(bytes.slice(0, 16))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join(' ')
+  return head ? `${bytes.length} bytes, first bytes ${head}` : '0 bytes'
 }
 
 /**
@@ -343,8 +354,10 @@ async function hydratePdfBackgrounds(
     hooks?.onStart?.(notebook.id, page.id)
     try {
       const bytes = await downloadPdfBitmap(basePath, transport, page.id)
-      if (!bytes) {
-        logger.warn(`PDF background image is not a PNG (${notebook.id}/${page.id})`)
+      if (!isPngImage(bytes)) {
+        logger.warn(
+          `PDF background image is not a PNG (${notebook.id}/${page.id}): ${describeBitmapBody(bytes)}`,
+        )
         hooks?.onFailed?.(notebook.id, page.id)
         return
       }
@@ -421,8 +434,10 @@ async function repairLocalPdfBitmaps(
     hooks?.onStart?.(notebookId, pageId)
     try {
       const bytes = await downloadPdfBitmap(basePath, transport, pageId)
-      if (!bytes) {
-        logger.warn(`PDF background image is not a PNG (${notebookId}/${pageId})`)
+      if (!isPngImage(bytes)) {
+        logger.warn(
+          `PDF background image is not a PNG (${notebookId}/${pageId}): ${describeBitmapBody(bytes)}`,
+        )
         hooks?.onFailed?.(notebookId, pageId)
         return 'failed' as const
       }

@@ -467,6 +467,16 @@ console.log('== a bitmap that is not a PNG is never stored as a background ==')
       .some((entry) => entry.message.includes('PDF background image is not a PNG (nb-junk/j1)')),
     'junk bitmap: the reason is logged instead of a blank page',
   )
+  assert(
+    logger
+      .getLogs()
+      .some((entry) =>
+        entry.message.includes(
+          'PDF background image is not a PNG (nb-junk/j1): 22 bytes, first bytes 3c 68 74 6d 6c 3e 6e 6f 74 20 66 6f 75 6e 64 3c',
+        ),
+      ),
+    'junk bitmap: the log carries the size and the leading bytes to identify the body',
+  )
 }
 
 console.log('== removing a page deletes its remote image ==')
