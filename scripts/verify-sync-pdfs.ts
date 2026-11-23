@@ -17,6 +17,7 @@
 import {
   applyConflictChoices,
   encodePngDataUrl,
+  hashFolders,
   parseManifest,
   pdfHash,
   runSync,
@@ -101,6 +102,7 @@ class FakeTransport implements Transport {
   files = new Map<string, string>()
   binaries = new Map<string, Uint8Array>()
   uploads: { path: string; contentType: string; size: number }[] = []
+  downloads: string[] = []
 
   async ensureDirectory(_dirPath: string): Promise<void> {}
 
@@ -124,12 +126,14 @@ class FakeTransport implements Transport {
   }
 
   async downloadFile(filePath: string): Promise<string> {
+    this.downloads.push(filePath)
     const content = this.files.get(filePath)
     if (content === undefined) throw new RemoteFileNotFoundError(filePath)
     return content
   }
 
   async downloadBinaryFile(filePath: string): Promise<Uint8Array> {
+    this.downloads.push(filePath)
     const bytes = this.binaries.get(filePath)
     if (bytes === undefined) throw new RemoteFileNotFoundError(filePath)
     return new Uint8Array(bytes)
@@ -529,6 +533,117 @@ console.log('== a device that lost the bitmap locally keeps image and hash ==')
   assert(
     body.notebook.pages.every((page: Page) => page.pdf && page.pdf.dataUrl === undefined),
     'lost bitmap push: notebook body stays light (no bitmap invented)',
+  )
+}
+
+console.log('== locally lost bitmap is healed from the remote image ==')
+
+{
+  const t = new FakeTransport()
+  const hash = pdfHash(aDataUrl)
+  // Local copy left by an old client: PDF metadata, no bitmap, same timestamp
+  // as the server, so the normal plan neither pushes nor pulls it.
+  const stripped = makeNotebook('nb-heal', 'Heal', 2000, [makeLightPage('p1'), makeLightPage('p2')])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: stripped.id,
+        name: stripped.name,
+        updatedAt: 2000,
+        deleted: false,
+        pdfs: { p1: hash },
+      },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-heal.json',
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: stripped }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  t.uploads.length = 0
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(stripped)],
+    state: makeState({ notebooks: { [stripped.id]: 2000 }, foldersHash: hashFolders([]) }),
+    transport: t,
+    getNotebook: async () => stripped,
+    // `pdfs/p2.png` has no remote image: the heal must not fail on it.
+    findMissingPdfBitmaps: async () => [
+      { notebookId: stripped.id, pageId: 'p1' },
+      { notebookId: stripped.id, pageId: 'p2' },
+    ],
+  })
+  assert(out.result.errors.length === 0, 'heal: no errors')
+  assert(
+    out.result.pushed.length === 0 && out.result.pulled.length === 0,
+    'heal: nothing pushed or pulled',
+  )
+  assert(out.pulledNotebooks.length === 0, 'heal: notebook is not a pull')
+  const healed = out.repairedNotebooks.find((nb) => nb.id === stripped.id)
+  assert(
+    healed?.pages.find((p) => p.id === 'p1')?.pdf?.dataUrl === aDataUrl,
+    'heal: bitmap restored from pdfs/p1.png',
+  )
+  const p2 = healed?.pages.find((p) => p.id === 'p2')
+  assert(p2?.pdf?.dataUrl === undefined, 'heal: 404 page stays without a bitmap')
+  assert(p2?.pdf?.name === 'doc.pdf', 'heal: 404 page keeps its PDF metadata')
+  assert(out.repairedNotebooks.length === 1, 'heal: notebook reported once')
+  assert(!out.pdfRepairIncomplete, 'heal: a 404 does not mark the repair as incomplete')
+  assert(t.uploads.length === 0, 'heal: nothing uploaded to the server')
+  const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  assert(
+    manifest.notebooks.find((n) => n.id === stripped.id)?.pdfs?.['p1'] === hash,
+    'heal: manifest hash kept',
+  )
+}
+
+console.log('== heal does not re-download a bitmap a pull already restored ==')
+
+{
+  const t = new FakeTransport()
+  const remote = makeNotebook('nb-heal-pull', 'HealPull', 3000, [makePage('p1', aDataUrl)])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 3000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: remote.id,
+        name: remote.name,
+        updatedAt: 3000,
+        deleted: false,
+        pdfs: { p1: pdfHash(aDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-heal-pull.json',
+    JSON.stringify({
+      version: 3,
+      exportedAt: 2,
+      notebook: { ...remote, pages: [makeLightPage('p1')] },
+    }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  const stale = makeNotebook(remote.id, remote.name, 2000, [makeLightPage('p1')])
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(stale)],
+    state: makeState({ notebooks: { [remote.id]: 2000 } }),
+    transport: t,
+    getNotebook: async () => stale,
+    findMissingPdfBitmaps: async () => [{ notebookId: remote.id, pageId: 'p1' }],
+  })
+  assert(out.result.errors.length === 0, 'heal/pull: no errors')
+  assert(out.repairedNotebooks.length === 0, 'heal/pull: pull already restored the bitmap')
+  assert(
+    t.downloads.filter((p) => p === 'base/pdfs/p1.png').length === 1,
+    'heal/pull: the image is downloaded once, not twice',
   )
 }
 

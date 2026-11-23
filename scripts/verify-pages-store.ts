@@ -174,6 +174,23 @@ async function main(): Promise<void> {
   const first = (await db.getFirstPage('nb1'))!
   assert(first?.id === 'p2', `getFirstPage returns p2 (got ${first?.id})`)
 
+  console.log('== pages that lost their PDF bitmap are detected ==')
+  assert(
+    (await db.getPagesMissingPdfBitmap()).length === 0,
+    'no missing bitmap while pdfImages still has p1',
+  )
+  await new Promise<void>((resolve, reject) => {
+    const t = idb.transaction('pdfImages', 'readwrite')
+    t.objectStore('pdfImages').delete('p1')
+    t.oncomplete = () => resolve()
+    t.onerror = () => reject(t.error)
+  })
+  const missing = await db.getPagesMissingPdfBitmap()
+  assert(
+    missing.length === 1 && missing[0].notebookId === 'nb1' && missing[0].pageId === 'p1',
+    `lost bitmap detected (got ${JSON.stringify(missing)})`,
+  )
+
   console.log('== removed pages have their record deleted ==')
   pagePuts.count = 0
   const withoutP1 = { ...reordered, pages: [editedPages[1], editedPages[2]] }

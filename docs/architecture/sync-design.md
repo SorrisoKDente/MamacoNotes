@@ -33,6 +33,7 @@ The algorithm compares the remote `manifest.json` with the local state and the l
 - **Tombstones**: Deleted items are stored in `state.tombstones` to prevent them from being re-downloaded if they still exist on the server.
 - **Self-Healing**: Missing remote files (404) are automatically reconciled by re-uploading the local copy or pruning the manifest entry.
 - **Orphan Recovery**: Notebook bodies found in the remote `notebooks` directory but missing from `manifest.json` are validated and added to the manifest before planning, so interrupted manifest writes cannot hide a notebook from synchronization.
+- **PDF Bitmap Repair**: PDF backgrounds are synced as `pdfs/<pageId>.png` (hashes in the manifest) with the notebook JSON carrying only `pdf: { name, pageNumber }`. A client older than 2.4.2 cannot read that format and stores the page without its bitmap. On the first sync of each app version, the client scans the local database for pages that kept the `pdf` metadata but have no bitmap (`db.getPagesMissingPdfBitmap`) and downloads the image back, even when the notebook's `updatedAt` matches the baseline and is never pulled. A 404 leaves the page untouched, network errors do not fail the run, and the repaired notebook is persisted and merged into the open editor without resetting undo.
 
 ## 5. Verification
 - **Regression Suite**: `scripts/verify-sync.ts` (standalone test with mocked transport).

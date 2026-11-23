@@ -26,6 +26,7 @@ import type {
 } from './types'
 import {
   DEFAULT_SETTINGS,
+  APP_VERSION,
   getActiveLayer,
   layerItems,
   makeFolder,
@@ -54,6 +55,29 @@ import { useUiStore } from './uiStore'
 import type { RenderedPdfPage } from './utils/pdf'
 import { setLanguage, t } from './i18n'
 import { detectLanguage } from './i18n/languages'
+
+/**
+ * App version that last scanned the local database for pages whose PDF bitmap
+ * was lost by a client older than 2.4.2. The scan deserializes every page
+ * record, so it runs once per version instead of on every (auto-)sync.
+ */
+const PDF_REPAIR_VERSION_KEY = 'mamaco-notes.pdf-repair-version'
+
+function needsPdfBitmapScan(): boolean {
+  try {
+    return localStorage.getItem(PDF_REPAIR_VERSION_KEY) !== APP_VERSION
+  } catch {
+    return true
+  }
+}
+
+function markPdfBitmapScan(): void {
+  try {
+    localStorage.setItem(PDF_REPAIR_VERSION_KEY, APP_VERSION)
+  } catch {
+    // Storage unavailable: the scan simply runs again next session.
+  }
+}
 
 interface UndoEntry {
   notebookId: string
@@ -2221,6 +2245,7 @@ export const useAppStore = create<AppState>((set, get) => {
         try {
           const state = await db.getCloudSyncState()
           const transport = makeTransport(cloud)
+          const scanPdfBitmaps = needsPdfBitmapScan()
           out = await runSync({
             basePath: cloud.webdavPath,
             folders: get().folders,
@@ -2228,6 +2253,9 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
             getNotebook: (id) => db.getNotebook(id),
+            findMissingPdfBitmaps: scanPdfBitmaps
+              ? () => db.getPagesMissingPdfBitmap()
+              : undefined,
             onProgress: (progress) => set({ syncProgress: progress }),
           })
           // Apply the pulled/new content BEFORE committing the advanced baseline
@@ -2241,7 +2269,28 @@ export const useAppStore = create<AppState>((set, get) => {
             removedLocalNotebookIds: out.removedLocalNotebookIds,
             pulledFolders: out.pulledFolders,
           })
+          // A healed PDF bitmap is not new content: persist it and merge the
+          // restored `pdf` into the open notebook without resetting the undo
+          // history or discarding strokes that were not persisted yet.
+          for (const nb of out.repairedNotebooks) {
+            await db.putNotebook(nb)
+            const active = get().activeNotebook
+            if (active?.id !== nb.id) continue
+            const healed = new Map(nb.pages.map((page) => [page.id, page.pdf]))
+            set((state) => ({
+              activeNotebook: {
+                ...active,
+                pages: active.pages.map((page) => {
+                  const pdf = healed.get(page.id)
+                  return pdf?.dataUrl ? { ...page, pdf } : page
+                }),
+              },
+              dataVersion: state.dataVersion + 1,
+              syncRevision: state.syncRevision + 1,
+            }))
+          }
           await db.putCloudSyncState(out.nextState)
+          if (scanPdfBitmaps && !out.pdfRepairIncomplete) markPdfBitmapScan()
           if (out.pendingConflicts.length > 0) {
             pendingResume = {
               cloud,

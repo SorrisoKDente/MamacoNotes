@@ -507,6 +507,38 @@ export const db = {
     }
     return page
   },
+  /**
+   * Pages that still reference a PDF background but whose bitmap is not in the
+   * local `pdfImages` store. This is the damage left by a client older than
+   * 2.4.2: it cannot download `pdfs/<pageId>.png`, so a version-3 notebook is
+   * stored with the `pdf` metadata only. Sync repairs these pages from the
+   * remote image. Cursor-based so memory stays O(1) regardless of page count.
+   */
+  async getPagesMissingPdfBitmap(): Promise<{ notebookId: string; pageId: string }[]> {
+    const db = await openDb()
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(['pages', 'pdfImages'], 'readonly')
+      const pdfStore = t.objectStore('pdfImages')
+      const missing: { notebookId: string; pageId: string }[] = []
+      const req = t.objectStore('pages').openCursor()
+      req.onsuccess = () => {
+        const cursor = req.result
+        if (!cursor) return
+        const record = cursor.value as PageRecord
+        const pdf = record.page.pdf
+        if (pdf && !pdf.dataUrl) {
+          const get = pdfStore.get(record.page.id)
+          get.onsuccess = () => {
+            if (!get.result) missing.push({ notebookId: record.notebookId, pageId: record.page.id })
+          }
+        }
+        cursor.continue()
+      }
+      t.oncomplete = () => resolve(missing)
+      t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
+    })
+  },
   async putNotebook(notebook: Notebook): Promise<void> {
     const summary: NotebookSummary = {
       id: notebook.id,

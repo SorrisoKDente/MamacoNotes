@@ -269,6 +269,70 @@ async function hydratePdfBackgrounds(
 }
 
 /**
+ * Restores PDF bitmaps that a local page still references but that are missing
+ * from the local database. A client older than 2.4.2 cannot download
+ * `pdfs/<pageId>.png`, so pulling a version-3 notebook leaves the page with PDF
+ * metadata but no bitmap; updating the app never heals it because the notebook's
+ * `updatedAt` matches the sync baseline and is never pulled again. Downloading
+ * the remote image on sync is what repairs those pages (once; afterwards the
+ * page has its bitmap again).
+ */
+async function repairLocalPdfBitmaps(
+  basePath: string,
+  transport: Transport,
+  pending: PendingPdfBitmap[],
+  pulled: Notebook[],
+  getNotebook: (id: string) => Promise<Notebook | undefined>,
+): Promise<{ repaired: Notebook[]; incomplete: boolean }> {
+  if (pending.length === 0) return { repaired: [], incomplete: false }
+  const pulledById = new Map(pulled.map((nb) => [nb.id, nb]))
+  const dataUrls = new Map<string, string>()
+  let incomplete = false
+  for (const { notebookId, pageId } of pending) {
+    // A pull in this same run may already have restored the page.
+    const already = pulledById
+      .get(notebookId)
+      ?.pages.find((page) => page.id === pageId)?.pdf?.dataUrl
+    if (already) continue
+    try {
+      const bytes = await transport.downloadBinaryFile(pdfFilePath(basePath, pageId))
+      dataUrls.set(pageId, encodePngDataUrl(bytes))
+    } catch (e) {
+      const notFound =
+        e instanceof RemoteFileNotFoundError ||
+        (e as { name?: string } | null)?.name === 'RemoteFileNotFoundError'
+      // A page without a remote image (404) simply stays as it is; any other
+      // failure is retried on the next sync and is reported as incomplete so
+      // the repair is not considered done.
+      if (notFound) continue
+      incomplete = true
+      logger.warn(`PDF background repair failed (${notebookId}/${pageId})`, e)
+    }
+  }
+  if (dataUrls.size === 0) return { repaired: [], incomplete }
+  const byNotebook = new Map<string, string[]>()
+  for (const { notebookId, pageId } of pending) {
+    if (!dataUrls.has(pageId)) continue
+    const ids = byNotebook.get(notebookId)
+    if (ids) ids.push(pageId)
+    else byNotebook.set(notebookId, [pageId])
+  }
+  const repaired: Notebook[] = []
+  for (const [notebookId, pageIds] of byNotebook) {
+    const notebook = pulledById.get(notebookId) ?? (await getNotebook(notebookId))
+    if (!notebook) continue
+    const ids = new Set(pageIds)
+    const pages = notebook.pages.map((page) => {
+      const dataUrl = ids.has(page.id) ? dataUrls.get(page.id) : undefined
+      return dataUrl && page.pdf ? { ...page, pdf: { ...page.pdf, dataUrl } } : page
+    })
+    if (pages.every((page, i) => page === notebook.pages[i])) continue
+    repaired.push({ ...notebook, pages })
+  }
+  return { repaired, incomplete }
+}
+
+/**
  * Downloads one notebook with its PDF backgrounds rehydrated. Used by the trash
  * "restore from cloud", which reads a remote notebook outside the sync plan.
  */
@@ -398,6 +462,12 @@ function cloneNotebookAsCopy(nb: Notebook, suffix: string): Notebook {
   }
 }
 
+/** A locally persisted page whose PDF background bitmap was lost. */
+export interface PendingPdfBitmap {
+  notebookId: string
+  pageId: string
+}
+
 export interface SyncInput {
   basePath: string
   folders: Folder[]
@@ -405,6 +475,12 @@ export interface SyncInput {
   state: CloudSyncState
   transport: Transport
   getNotebook: (id: string) => Promise<Notebook | undefined>
+  /**
+   * Locally persisted pages that keep their PDF metadata but lost the bitmap
+   * (a client older than 2.4.2 cannot read `pdfs/<pageId>.png`). Optional: sync
+   * restores them from the remote image even when the notebook is not pulled.
+   */
+  findMissingPdfBitmaps?: () => Promise<PendingPdfBitmap[]>
   onProgress?: (progress: SyncProgress) => void
 }
 
@@ -413,6 +489,10 @@ export interface SyncOutput {
   nextState: CloudSyncState
   manifest: SyncManifest
   pulledNotebooks: Notebook[]
+  /** Notebooks whose missing PDF bitmap was restored from the remote image. */
+  repairedNotebooks: Notebook[]
+  /** True when a bitmap repair attempt failed for a non-404 reason. */
+  pdfRepairIncomplete: boolean
   pulledFolders: Folder[] | null
   removedLocalNotebookIds: string[]
   pendingConflicts: SyncConflictItem[]
@@ -741,6 +821,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       nextState: state,
       manifest: emptyManifest(),
       pulledNotebooks: [],
+      repairedNotebooks: [],
+      pdfRepairIncomplete: false,
       pulledFolders: null,
       removedLocalNotebookIds: [],
       pendingConflicts: [],
@@ -779,6 +861,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         nextState: state,
         manifest: emptyManifest(),
         pulledNotebooks: [],
+        repairedNotebooks: [],
+        pdfRepairIncomplete: false,
         pulledFolders: null,
         removedLocalNotebookIds: [],
         pendingConflicts: [],
@@ -958,6 +1042,37 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     report('download', null)
   }
 
+  // Self-heal local pages whose bitmap was lost when an older client pulled a
+  // version-3 notebook. Runs even when nothing is pushed or pulled, so an app
+  // update alone is enough to bring the PDF background back.
+  const repairedNotebooks: Notebook[] = []
+  let pdfRepairIncomplete = false
+  if (input.findMissingPdfBitmaps) {
+    try {
+      const missing = await input.findMissingPdfBitmaps()
+      const repair = await repairLocalPdfBitmaps(
+        basePath,
+        transport,
+        missing,
+        pulledNotebooks,
+        input.getNotebook,
+      )
+      repairedNotebooks.push(...repair.repaired)
+      pdfRepairIncomplete = repair.incomplete
+      for (const nb of repairedNotebooks) {
+        const entry = manifest.notebooks.find((n) => n.id === nb.id)
+        const repaired = entry ? repairPdfHashes(entry, nb) : null
+        if (repaired) {
+          manifest = upsertManifestNotebook(manifest, repaired)
+          manifestChanged = true
+        }
+      }
+    } catch (e) {
+      pdfRepairIncomplete = true
+      logger.warn('PDF background repair failed', e)
+    }
+  }
+
   const initiallyDeleted = new Set(
     manifest.notebooks.filter((n) => n.deleted).map((n) => n.id),
   )
@@ -1133,6 +1248,8 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     nextState: state,
     manifest,
     pulledNotebooks,
+    repairedNotebooks,
+    pdfRepairIncomplete,
     pulledFolders,
     removedLocalNotebookIds,
     pendingConflicts: plan.conflicts,

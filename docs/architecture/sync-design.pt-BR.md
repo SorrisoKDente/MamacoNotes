@@ -33,6 +33,7 @@ O algoritmo compara o `manifest.json` remoto com o estado local e o baseline da 
 - **Tombstones**: Itens excluídos são armazenados em `state.tombstones` para evitar que sejam re-baixados se ainda existirem no servidor.
 - **Autocorreção**: Arquivos remotos ausentes (404) são reconciliados automaticamente reenviando a cópia local ou limpando a entrada no manifesto.
 - **Recuperação de Órfãos**: Cadernos encontrados na pasta remota `notebooks`, mas ausentes no `manifest.json`, são validados e adicionados ao manifesto antes do planejamento.
+- **Reparo de Bitmap de PDF**: Os fundos de PDF são sincronizados como `pdfs/<pageId>.png` (hashes no manifesto), e o JSON do caderno carrega apenas `pdf: { name, pageNumber }`. Um app anterior à 2.4.2 não lê esse formato e grava a página sem o bitmap. Na primeira sincronização de cada versão do app, o cliente varre o banco local em busca de páginas que mantiveram os metadados `pdf` mas estão sem bitmap (`db.getPagesMissingPdfBitmap`) e baixa a imagem de volta, mesmo quando o `updatedAt` do caderno é igual ao baseline e ele nunca é puxado. Um 404 deixa a página como está, erros de rede não falham a execução, e o caderno reparado é persistido e mesclado no editor aberto sem resetar o undo.
 
 ## 5. Verificação
 - **Suíte de Regressão**: `scripts/verify-sync.ts` (teste independente com transporte simulado).
