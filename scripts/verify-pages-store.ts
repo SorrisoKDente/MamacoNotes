@@ -13,7 +13,9 @@
  *  3. a single edited page writes exactly one record
  *  4. reordering pages rewrites only the moved pages and `getNotebook` returns
  *     the new order
- *  5. `getFirstPage` returns the first page (with PDF dataUrl rehydrated)
+ *  5. `getFirstPage` returns the first page (with PDF dataUrl rehydrated), and
+ *     a stored record whose PDF metadata changed is rewritten (the fingerprint
+ *     includes `pdf`, otherwise the bitmap in `pdfImages` stays unreferenced)
  *  6. removed pages have their record deleted
  *  7. `deleteNotebook` removes every page record of that notebook
  *
@@ -169,6 +171,26 @@ async function main(): Promise<void> {
     `page order preserved (got ${loaded.pages.map((p) => p.id).join(',')})`,
   )
   assert(loaded.pages[1].pdf?.dataUrl === dataUrl, 'PDF dataUrl rehydrated')
+
+  console.log('== the PDF metadata is part of the page fingerprint ==')
+  {
+    // A record that lost its `pdf` (a pull from an older client, a half-written
+    // write) must be rewritten even though every other field is identical.
+    const id = 'nb-pdf-meta'
+    const meta = { id, name: 'meta', folderId: null, createdAt: 1, updatedAt: 1, order: 0 }
+    // Same everything — including `updatedAt` — so only `pdf` differs.
+    const pageBase = { ...makePage('pp'), createdAt: 1, updatedAt: 5 }
+    const withPdf = { ...pageBase, pdf: { name: 'a.pdf', pageNumber: 1, dataUrl } }
+    // A record stored without `pdf` (what an old client left behind), then the
+    // same page arriving with its PDF: the record must be rewritten.
+    await db.putNotebook({ ...meta, pages: [{ ...pageBase }] } as never)
+    await db.putNotebook({ ...meta, pages: [{ ...withPdf }] } as never)
+    const reloaded = (await db.getNotebook(id))!
+    assert(
+      reloaded?.pages[0]?.pdf?.dataUrl === dataUrl,
+      'a page whose stored record lost its pdf is rewritten',
+    )
+  }
 
   console.log('== getFirstPage returns the first page ==')
   const first = (await db.getFirstPage('nb1'))!

@@ -13,6 +13,10 @@
  *  7. deleting a notebook removes its remote images
  *  8. two overlapping notebook pulls share one bitmap download budget (3 in
  *     flight in total, not 3 per notebook)
+ *  9. the percentage has one step per file — every downloaded `pdfs/<pageId>.png`
+ *     moves it — and each download is logged with its path and byte size
+ * 10. bytes that are not a PNG are never stored as a page background (that is
+ *     what a WebDAV 200-with-HTML turns into: a silently blank page)
  *
  * Run: npx tsx scripts/verify-sync-pdfs.ts
  */
@@ -24,6 +28,7 @@ import {
   pdfHash,
   runSync,
   serializeManifest,
+  shouldScanPdfBitmaps,
   MANIFEST_PATH,
   MANIFEST_VERSION,
   NOTEBOOK_FORMAT_VERSION,
@@ -39,6 +44,7 @@ import type {
 } from '../src/types'
 import type { Transport } from '../src/utils/webdav'
 import { RemoteFileNotFoundError } from '../src/utils/webdav'
+import { logger } from '../src/utils/logger'
 
 let passed = 0
 let failed = 0
@@ -283,9 +289,28 @@ let pushedState: CloudSyncState
   assert(entry?.pdfs?.['p1'] === pdfHash(aDataUrl), 'stroke push: PDF hashes are preserved')
 }
 
+console.log('== repair scan gate survives a rebuild with the same version ==')
+
+{
+  assert(
+    shouldScanPdfBitmaps({ version: '2.4.3', scannedAt: 1 }, '2.4.4'),
+    'scan gate: a new app version scans',
+  )
+  assert(
+    !shouldScanPdfBitmaps({ version: '2.4.4', scannedAt: Date.now() }, '2.4.4'),
+    'scan gate: an already scanned version does not scan again',
+  )
+  assert(
+    shouldScanPdfBitmaps({ version: '2.4.4', scannedAt: null }, '2.4.4'),
+    'scan gate: a state without scannedAt (rebuilt APK, same version) scans again',
+  )
+}
+
 console.log('== pull: PDFs are rehydrated ==')
 
 {
+  const progressFiles: string[] = []
+  const progressSteps: { completed: number; total: number; percent: number | null }[] = []
   const out = await runSync({
     basePath: 'base',
     folders: [],
@@ -293,8 +318,41 @@ console.log('== pull: PDFs are rehydrated ==')
     state: makeState(),
     transport,
     getNotebook: async () => undefined,
+    onProgress: (progress) => {
+      if (progress.currentFile) progressFiles.push(progress.currentFile)
+      progressSteps.push({
+        completed: progress.completed,
+        total: progress.total,
+        percent: progress.percent,
+      })
+    },
   })
   assert(out.result.errors.length === 0, 'pull: no errors')
+  assert(
+    progressFiles.includes('base/pdfs/p1.png') && progressFiles.includes('base/pdfs/p2.png'),
+    'pull: each PDF bitmap download is reported in sync progress',
+  )
+  const percents = progressSteps.map((step) => step.percent ?? 0)
+  assert(
+    percents.every((percent, i) => i === 0 || percent >= percents[i - 1]),
+    'pull: the percentage never goes backwards',
+  )
+  const pullLogs = logger.getLogs().map((entry) => entry.message)
+  assert(
+    pullLogs.includes('Sync downloaded PDF bitmap (nb-pdf/p1)') &&
+      pullLogs.includes('Sync downloaded PDF bitmap (nb-pdf/p2)'),
+    'pull: every downloaded PDF bitmap is logged with its path',
+  )
+  assert(
+    pullLogs.some(
+      (message) => message.includes('Sync downloaded notebook (base/notebooks/nb-pdf.json') && message.includes('nb-pdf'),
+    ),
+    'pull: the downloaded notebook is logged with its path',
+  )
+  assert(
+    pullLogs.includes('Sync PDF download summary'),
+    'pull: the run ends with a PDF download summary',
+  )
   const nb = out.pulledNotebooks.find((n) => n.id === 'nb-pdf')
   assert(nb !== undefined, 'pull: notebook downloaded')
   const p1 = nb?.pages.find((p) => p.id === 'p1')
@@ -306,6 +364,108 @@ console.log('== pull: PDFs are rehydrated ==')
   assert(
     nb?.pages.find((p) => p.id === 'p3')?.pdf === undefined,
     'pull: page without PDF stays without one',
+  )
+}
+
+console.log('== progress: one step per downloaded PDF page ==')
+
+{
+  const t = new FakeTransport()
+  const pageIds = ['q1', 'q2', 'q3']
+  const remote = makeNotebook(
+    'nb-progress',
+    'Progress',
+    2000,
+    pageIds.map((id) => makeLightPage(id)),
+  )
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: remote.id,
+        name: remote.name,
+        updatedAt: 2000,
+        deleted: false,
+        pdfs: Object.fromEntries(pageIds.map((id) => [id, pdfHash(aDataUrl)])),
+      },
+    ],
+  })
+  t.files.set(
+    `base/notebooks/${remote.id}.json`,
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: remote }),
+  )
+  for (const id of pageIds) t.binaries.set(`base/pdfs/${id}.png`, PNG_A)
+  const steps: { total: number; percent: number }[] = []
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+    onProgress: (progress) => {
+      if (progress.percent !== null) steps.push({ total: progress.total, percent: progress.percent })
+    },
+  })
+  assert(out.result.errors.length === 0, 'progress: no errors')
+  // The very first report happens before the plan is known (total 1).
+  assert(
+    steps.some((step) => step.total === 4) && steps[steps.length - 1]?.total === 4,
+    'progress: total counts the notebook plus each of its 3 PDF pages',
+  )
+  const percents = [...new Set(steps.map((step) => step.percent))]
+  assert(
+    percents.join(',') === '0,25,50,75,100',
+    `progress: the bar advances one PDF page at a time (${percents.join(',')})`,
+  )
+}
+
+console.log('== a bitmap that is not a PNG is never stored as a background ==')
+
+{
+  const t = new FakeTransport()
+  const remote = makeNotebook('nb-junk', 'Junk', 2000, [makeLightPage('j1')])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: remote.id,
+        name: remote.name,
+        updatedAt: 2000,
+        deleted: false,
+        pdfs: { j1: pdfHash(aDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    `base/notebooks/${remote.id}.json`,
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: remote }),
+  )
+  // A WebDAV server answering 200 with something that is not an image.
+  t.binaries.set('base/pdfs/j1.png', new TextEncoder().encode('<html>not found</html>'))
+  logger.clear()
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+  })
+  assert(out.result.errors.length === 0, 'junk bitmap: the pull still succeeds')
+  assert(
+    out.pulledNotebooks[0]?.pages[0]?.pdf?.dataUrl === undefined,
+    'junk bitmap: an undecodable image is not stored as a background',
+  )
+  assert(
+    logger
+      .getLogs()
+      .some((entry) => entry.message.includes('PDF background image is not a PNG (nb-junk/j1)')),
+    'junk bitmap: the reason is logged instead of a blank page',
   )
 }
 
@@ -586,6 +746,8 @@ console.log('== locally lost bitmap is healed from the remote image ==')
   )
   t.binaries.set('base/pdfs/p1.png', PNG_A)
   t.uploads.length = 0
+  const progressFiles: string[] = []
+  const progressTotals: number[] = []
   const out = await runSync({
     basePath: 'base',
     folders: [],
@@ -593,6 +755,10 @@ console.log('== locally lost bitmap is healed from the remote image ==')
     state: makeState({ notebooks: { [stripped.id]: 2000 }, foldersHash: hashFolders([]) }),
     transport: t,
     getNotebook: async () => stripped,
+    onProgress: (progress) => {
+      if (progress.currentFile) progressFiles.push(progress.currentFile)
+      progressTotals.push(progress.total)
+    },
     // `pdfs/p2.png` has no remote image: the heal must not fail on it.
     findMissingPdfBitmaps: async () => [
       { notebookId: stripped.id, pageId: 'p1' },
@@ -600,6 +766,14 @@ console.log('== locally lost bitmap is healed from the remote image ==')
     ],
   })
   assert(out.result.errors.length === 0, 'heal: no errors')
+  assert(
+    progressFiles.includes('base/pdfs/p1.png') && progressFiles.includes('base/pdfs/p2.png'),
+    'heal: each repaired PDF bitmap download is reported in sync progress',
+  )
+  assert(
+    progressTotals.includes(2),
+    'heal: each page of the repair list is a progress step from the start',
+  )
   assert(
     out.result.pushed.length === 0 && out.result.pulled.length === 0,
     'heal: nothing pushed or pulled',

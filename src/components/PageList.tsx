@@ -124,7 +124,10 @@ export function PageList() {
 
   const pages = notebook?.pages ?? []
 
-  const thumbTimesRef = useRef<Record<string, number>>({})
+  // `updatedAt` alone is not enough: a sync can restore a page's PDF bitmap
+  // without touching its timestamp, and the blank thumbnail would be kept.
+  const thumbStamp = (p: (typeof pages)[number]) => `${p.updatedAt}|${p.pdf?.dataUrl?.length ?? 0}`
+  const thumbTimesRef = useRef<Record<string, string>>({})
   const previousPagesRef = useRef<typeof pages | null>(null)
   /** True while a stroke is being drawn on the canvas (see the ink events below). */
   const inkActiveRef = useRef(false)
@@ -160,9 +163,9 @@ export function PageList() {
         previousPagesRef.current = pages
       }
       for (const p of pages) {
-        const lastTime = thumbTimesRef.current[p.id]
-        if (thumbs[p.id] && lastTime === p.updatedAt) continue
-        thumbTimesRef.current = { ...thumbTimesRef.current, [p.id]: p.updatedAt }
+        const stamp = thumbStamp(p)
+        if (thumbs[p.id] && thumbTimesRef.current[p.id] === stamp) continue
+        thumbTimesRef.current = { ...thumbTimesRef.current, [p.id]: stamp }
         void (async () => {
           const thumb = await renderThumbnail(p, 160, 207)
           setThumbs((prev) => ({ ...prev, [p.id]: thumb }))

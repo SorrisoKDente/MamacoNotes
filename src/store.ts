@@ -49,6 +49,7 @@ import {
   FOLDERS_PATH,
   hashFolders,
   runSync,
+  shouldScanPdfBitmaps,
   TOMBSTONE_RETENTION_MS,
 } from './utils/sync'
 import type { PendingPdfBitmap } from './utils/sync'
@@ -71,24 +72,32 @@ const PDF_REPAIR_KEY = 'mamaco-notes.pdf-repair'
 
 interface PdfRepairState {
   version: string
+  /**
+   * When the last scan completed. A state written before this field existed (or
+   * by a build that shares the same `APP_VERSION`) is scanned once more, so a
+   * rebuilt app whose version did not change still runs the repair instead of
+   * trusting a scan made by an older implementation.
+   */
+  scannedAt: number | null
   pages: PendingPdfBitmap[]
 }
 
 function readPdfRepairState(): PdfRepairState {
   try {
     const raw = localStorage.getItem(PDF_REPAIR_KEY)
-    if (!raw) return { version: '', pages: [] }
+    if (!raw) return { version: '', scannedAt: null, pages: [] }
     const parsed = JSON.parse(raw) as Partial<PdfRepairState> | null
     const pages = Array.isArray(parsed?.pages) ? parsed.pages : []
     return {
       version: typeof parsed?.version === 'string' ? parsed.version : '',
+      scannedAt: typeof parsed?.scannedAt === 'number' ? parsed.scannedAt : null,
       pages: pages.filter(
         (item): item is PendingPdfBitmap =>
           typeof item?.notebookId === 'string' && typeof item?.pageId === 'string',
       ),
     }
   } catch {
-    return { version: '', pages: [] }
+    return { version: '', scannedAt: null, pages: [] }
   }
 }
 
@@ -2270,7 +2279,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const startedAt = Date.now()
       const repairState = readPdfRepairState()
-      const scanPdfBitmaps = repairState.version !== APP_VERSION
+      const scanPdfBitmaps = shouldScanPdfBitmaps(repairState, APP_VERSION)
       const pendingPdfRepair = repairState.pages
       const repairPdfBitmaps = scanPdfBitmaps || pendingPdfRepair.length > 0
       // Why this run exists, plus the repair work already known before it starts.
@@ -2342,6 +2351,24 @@ export const useAppStore = create<AppState>((set, get) => {
               removedLocalNotebookIds: out.removedLocalNotebookIds,
               pulledFolders: out.pulledFolders,
             })
+            // Read every pulled notebook back from IndexedDB. A pull can download
+            // all the bitmaps and still leave the stored pages without them (a
+            // record the fingerprint considered unchanged), and then the notes
+            // open blank with nothing in the Logs but successful downloads.
+            for (const nb of out.pulledNotebooks) {
+              try {
+                const stored = await db.getNotebook(nb.id)
+                const pages = stored?.pages ?? []
+                logger.info(`Sync persisted notebook (${nb.name})`, {
+                  notebookId: nb.id,
+                  pages: pages.length,
+                  pagesWithPdf: pages.filter((page) => page.pdf).length,
+                  pagesWithBitmap: pages.filter((page) => page.pdf?.dataUrl).length,
+                })
+              } catch (e) {
+                logger.warn(`Sync persisted notebook check failed (${nb.id})`, e)
+              }
+            }
             // A healed PDF bitmap is not new content: persist it and merge the
             // restored `pdf` into the open notebook without resetting the undo
             // history or discarding strokes that were not persisted yet.
@@ -2381,6 +2408,7 @@ export const useAppStore = create<AppState>((set, get) => {
             // scan keeps the old version so the next sync scans again.
             savePdfRepairState({
               version: pdfScanFailed ? repairState.version : APP_VERSION,
+              scannedAt: pdfScanFailed ? repairState.scannedAt : Date.now(),
               pages: out.unrepairedPdfBitmaps,
             })
           }

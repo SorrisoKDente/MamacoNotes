@@ -43,7 +43,12 @@ function pageKey(notebookId: string, pageId: string): string {
  * without serializing the page.
  */
 function pageStamp(page: Page): string {
-  let sig = `${page.updatedAt}|${page.rotation}|${page.width}x${page.height}|${page.backgroundColor}|${page.template}|${page.activeLayerId ?? ''}`
+  // The PDF *metadata* is part of the fingerprint (but not its dataUrl, which is
+  // always stripped from the record): a stored page that lost its `pdf` would
+  // otherwise look unchanged and never be rewritten, leaving the bitmap in
+  // `pdfImages` unreferenced and the page blank forever.
+  const pdf = page.pdf ? `${page.pdf.name}|${page.pdf.pageNumber}` : '-'
+  let sig = `${page.updatedAt}|${page.rotation}|${page.width}x${page.height}|${page.backgroundColor}|${page.template}|${page.activeLayerId ?? ''}|pdf:${pdf}`
   for (const layer of page.layers ?? []) {
     let points = 0
     for (const stroke of layer.strokes) points += stroke.points.length

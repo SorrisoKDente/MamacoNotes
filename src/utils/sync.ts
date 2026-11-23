@@ -290,9 +290,29 @@ async function withBitmapSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Downloads `pdfs/<pageId>.png` while holding one slot of that budget. */
-function downloadPdfBitmap(basePath: string, transport: Transport, pageId: string) {
-  return withBitmapSlot(() => transport.downloadBinaryFile(pdfFilePath(basePath, pageId)))
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+/** PNG magic bytes; a bitmap that fails this would render as a blank page. */
+export function isPngImage(bytes: Uint8Array): boolean {
+  if (bytes.length < PNG_SIGNATURE.length) return false
+  return PNG_SIGNATURE.every((byte, i) => bytes[i] === byte)
+}
+
+/**
+ * Downloads `pdfs/<pageId>.png` while holding one slot of that budget. Returns
+ * null when the server answered with something that is not a PNG (some WebDAV
+ * servers reply 200 with an HTML error page): storing those bytes would leave
+ * the page silently blank, with no error anywhere.
+ */
+async function downloadPdfBitmap(
+  basePath: string,
+  transport: Transport,
+  pageId: string,
+): Promise<Uint8Array | null> {
+  const bytes = await withBitmapSlot(() =>
+    transport.downloadBinaryFile(pdfFilePath(basePath, pageId)),
+  )
+  return isPngImage(bytes) ? bytes : null
 }
 
 /**
@@ -314,19 +334,31 @@ async function hydratePdfBackgrounds(
   basePath: string,
   transport: Transport,
   notebook: Notebook,
+  hooks?: PdfBitmapHooks,
 ): Promise<Notebook> {
   const pending = notebook.pages.filter((page) => page.pdf && !page.pdf.dataUrl)
   if (pending.length === 0) return notebook
   const dataUrls = new Map<string, string>()
   await mapLimit(pending, PDF_BITMAP_DOWNLOADS, async (page) => {
+    hooks?.onStart?.(notebook.id, page.id)
     try {
       const bytes = await downloadPdfBitmap(basePath, transport, page.id)
+      if (!bytes) {
+        logger.warn(`PDF background image is not a PNG (${notebook.id}/${page.id})`)
+        return
+      }
       dataUrls.set(page.id, encodePngDataUrl(bytes))
+      hooks?.onDone?.(notebook.id, page.id, bytes.length)
     } catch (e) {
       const notFound =
         e instanceof RemoteFileNotFoundError ||
         (e as { name?: string } | null)?.name === 'RemoteFileNotFoundError'
-      if (notFound) return
+      if (notFound) {
+        // The notebook references a PDF page but its image is not on the server:
+        // the pull succeeds without a background, so say why in the Logs tab.
+        logger.warn(`PDF background image missing on the server (${notebook.id}/${page.id})`)
+        return
+      }
       throw e
     }
   })
@@ -338,6 +370,22 @@ async function hydratePdfBackgrounds(
       return dataUrl && page.pdf ? { ...page, pdf: { ...page.pdf, dataUrl } } : page
     }),
   }
+}
+
+/**
+ * Whether the local database must be scanned for pages that lost their PDF
+ * bitmap. The scan deserializes every page record, so it runs once per app
+ * version — plus once for a state that has no `scannedAt`, which is what a
+ * state written by an older repair implementation (or by a build sharing the
+ * same version number) looks like. Without that second condition, rebuilding
+ * the app without bumping the version keeps trusting a scan made by code that
+ * could not download the bitmaps.
+ */
+export function shouldScanPdfBitmaps(
+  state: { version: string; scannedAt: number | null },
+  appVersion: string,
+): boolean {
+  return state.version !== appVersion || state.scannedAt === null
 }
 
 /**
@@ -355,6 +403,7 @@ async function repairLocalPdfBitmaps(
   pending: PendingPdfBitmap[],
   pulled: Notebook[],
   getNotebook: (id: string) => Promise<Notebook | undefined>,
+  hooks?: PdfBitmapHooks,
 ): Promise<{ repaired: Notebook[]; unresolved: PendingPdfBitmap[] }> {
   if (pending.length === 0) return { repaired: [], unresolved: [] }
   const pulledById = new Map(pulled.map((nb) => [nb.id, nb]))
@@ -367,9 +416,15 @@ async function repairLocalPdfBitmaps(
       .get(notebookId)
       ?.pages.find((page) => page.id === pageId)?.pdf?.dataUrl
     if (already) return 'skipped' as const
+    hooks?.onStart?.(notebookId, pageId)
     try {
       const bytes = await downloadPdfBitmap(basePath, transport, pageId)
+      if (!bytes) {
+        logger.warn(`PDF background image is not a PNG (${notebookId}/${pageId})`)
+        return 'failed' as const
+      }
       dataUrls.set(pageId, encodePngDataUrl(bytes))
+      hooks?.onDone?.(notebookId, pageId, bytes.length)
       return 'restored' as const
     } catch (e) {
       const notFound =
@@ -544,6 +599,16 @@ function cloneNotebookAsCopy(nb: Notebook, suffix: string): Notebook {
 export interface PendingPdfBitmap {
   notebookId: string
   pageId: string
+}
+
+/**
+ * Hooks for a run of PDF bitmap downloads. `onStart` fires when a page download
+ * begins (it drives the "current file" line), `onDone` when the bytes are in
+ * memory (it drives the percentage and the Logs entry).
+ */
+export interface PdfBitmapHooks {
+  onStart?: (notebookId: string, pageId: string) => void
+  onDone?: (notebookId: string, pageId: string, bytes: number) => void
 }
 
 export interface SyncInput {
@@ -1006,13 +1071,54 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   }
 
   const plan = buildPlan(notebooks, folders, state, manifest)
+  // Scanned up front, before the work total is computed: a repair is slow (one
+  // image per missing page) and its pages must be progress steps from the start,
+  // otherwise the percentage would have to go backwards when they are found.
+  let missingPdfBitmaps: PendingPdfBitmap[] = []
+  if (input.findMissingPdfBitmaps) {
+    try {
+      missingPdfBitmaps = await input.findMissingPdfBitmaps()
+    } catch (e) {
+      logger.warn('PDF bitmap scan failed', e)
+    }
+  }
+  let downloadedPdfBytes = 0
+  let downloadedPdfBitmaps = 0
+  const pdfByNotebook = new Map<string, { pages: number; bytes: number }>()
+  // Both PDF paths (pull hydration and local repair) report through these: one
+  // progress step and one Logs line per `pdfs/<pageId>.png`. Counting per page is
+  // what makes a 100-page notebook move 1% at a time instead of 0 → 50 → 100.
+  const pdfHooks: PdfBitmapHooks = {
+    onStart: (_notebookId, pageId) => report('download', pdfFilePath(basePath, pageId)),
+    onDone: (notebookId, pageId, bytes) => {
+      const stats = pdfByNotebook.get(notebookId) ?? { pages: 0, bytes: 0 }
+      pdfByNotebook.set(notebookId, {
+        pages: stats.pages + 1,
+        bytes: stats.bytes + bytes,
+      })
+      downloadedPdfBitmaps++
+      downloadedPdfBytes += bytes
+      logger.info(`Sync downloaded PDF bitmap (${notebookId}/${pageId})`, { bytes })
+      completed++
+      report('download', pdfFilePath(basePath, pageId))
+    },
+  }
+  const plannedPdfPages = (ids: string[]) =>
+    ids.reduce(
+      (sum, id) =>
+        sum +
+        Object.keys(manifest.notebooks.find((entry) => entry.id === id)?.pdfs ?? {}).length,
+      0,
+    )
   total = Math.max(
     1,
     plan.pushIds.length +
       plan.pullIds.length +
       plan.deleteRemoteIds.length +
       plan.deleteLocalIds.length +
-      plan.conflicts.length,
+      plan.conflicts.length +
+      plannedPdfPages(plan.pullIds) +
+      missingPdfBitmaps.length,
   )
   report('preparing', null)
   manifestChanged = manifestChanged || migrated
@@ -1074,7 +1180,12 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       try {
         const text = await transport.downloadFile(notebookPath(basePath, id))
-        const nb = await hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
+        const nb = await hydratePdfBackgrounds(
+          basePath,
+          transport,
+          parseNotebookFile(text),
+          pdfHooks,
+        )
         return { kind: 'pulled' as const, notebook: nb }
       } catch (e) {
         if (e instanceof RemoteFileNotFoundError) {
@@ -1116,6 +1227,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     switch (outcome.kind) {
       case 'pulled': {
         const nb = outcome.notebook
+        const pdfStats = pdfByNotebook.get(id)
+        logger.info(`Sync downloaded notebook (${displayFile(id, nb.name)})`, {
+          notebookId: id,
+          pages: nb.pages.length,
+          pdfBitmaps: pdfStats?.pages ?? 0,
+          pdfBytes: pdfStats?.bytes ?? 0,
+        })
         pulledNotebooks.push(nb)
         state.notebooks[id] = nb.updatedAt
         result.pulled.push(nb.name)
@@ -1163,15 +1281,15 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   // update alone is enough to bring the PDF background back.
   const repairedNotebooks: Notebook[] = []
   let unrepairedPdfBitmaps: PendingPdfBitmap[] = []
-  if (input.findMissingPdfBitmaps) {
+  if (missingPdfBitmaps.length > 0) {
     try {
-      const missing = await input.findMissingPdfBitmaps()
       const repair = await repairLocalPdfBitmaps(
         basePath,
         transport,
-        missing,
+        missingPdfBitmaps,
         pulledNotebooks,
         input.getNotebook,
+        pdfHooks,
       )
       repairedNotebooks.push(...repair.repaired)
       unrepairedPdfBitmaps = repair.unresolved
@@ -1350,6 +1468,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   } else {
     completed = total
     report(result.errors.length > 0 ? 'error' : 'complete', null)
+  }
+
+  if (downloadedPdfBitmaps > 0) {
+    logger.info('Sync PDF download summary', {
+      bitmaps: downloadedPdfBitmaps,
+      bytes: downloadedPdfBytes,
+    })
   }
 
   return {
