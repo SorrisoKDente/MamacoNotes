@@ -9,6 +9,8 @@
  *  4. The next run (transport healthy) re-runs the same plan (idempotent)
  *  5. An authentication failure (401) surfaces a clear message and leaves the
  *     sync state untouched
+ *  6. Notebook pulls run in a bounded pool (2 in flight) while their outcomes are
+ *     still applied in plan order, including the 404 self-heal
  *
  * Run: npx tsx scripts/verify-sync.ts
  */
@@ -87,6 +89,10 @@ class FakeTransport implements Transport {
   failEnsureDirectory = false
   failManifestDownloadWithConnectionError = false
   ensureDirCalls: string[] = []
+  downloadDelays = new Map<string, number>()
+  downloads: string[] = []
+  downloadInFlight = 0
+  maxDownloadInFlight = 0
 
   async ensureDirectory(dirPath: string): Promise<void> {
     this.ensureDirCalls.push(dirPath)
@@ -117,9 +123,18 @@ class FakeTransport implements Transport {
     if (filePath.endsWith(`/${MANIFEST_PATH}`) && this.failManifestDownloadWithConnectionError) {
       throw new Error('TypeError: Failed to fetch')
     }
-    const content = this.files.get(filePath)
-    if (content === undefined) throw new RemoteFileNotFoundError(filePath)
-    return content
+    this.downloads.push(filePath)
+    this.downloadInFlight++
+    this.maxDownloadInFlight = Math.max(this.maxDownloadInFlight, this.downloadInFlight)
+    try {
+      const delay = this.downloadDelays.get(filePath)
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+      const content = this.files.get(filePath)
+      if (content === undefined) throw new RemoteFileNotFoundError(filePath)
+      return content
+    } finally {
+      this.downloadInFlight--
+    }
   }
 
   async downloadBinaryFile(filePath: string): Promise<Uint8Array> {
@@ -612,6 +627,113 @@ console.log('== runSync ==')
   assert(
     !prunedManifest.notebooks.some((n) => n.id === 'nb-ghost-remote'),
     '404 pull without local copy: phantom manifest entry pruned',
+  )
+}
+
+{
+  // Regression: notebook pulls run in a bounded pool (2 at a time) but every
+  // outcome is applied in plan order. The first download is the slowest, so a
+  // completion-order implementation would list "b, c, a" instead of "a, b, c".
+  const ids = ['nb-pull-a', 'nb-pull-b', 'nb-pull-c']
+  const remotes = ids.map((id, index) => makeNotebook(id, `Remote ${index}`, 2000 + index))
+  const t = new FakeTransport()
+  seedManifest(t, 'base', {
+    version: 2,
+    updatedAt: 3000,
+    folders: { updatedAt: 0 },
+    notebooks: remotes.map((nb) => ({
+      id: nb.id,
+      name: nb.name,
+      updatedAt: nb.updatedAt,
+      deleted: false,
+    })),
+  })
+  for (const nb of remotes) {
+    t.files.set(
+      `base/notebooks/${nb.id}.json`,
+      JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: nb }),
+    )
+  }
+  t.downloadDelays.set('base/notebooks/nb-pull-a.json', 60)
+  t.downloadDelays.set('base/notebooks/nb-pull-b.json', 10)
+  t.downloadDelays.set('base/notebooks/nb-pull-c.json', 30)
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+  })
+  const notebookDownloads = t.downloads.filter((p) => p.includes('/notebooks/'))
+  assert(out.result.errors.length === 0, 'parallel pulls: no errors')
+  assert(
+    t.maxDownloadInFlight === 2,
+    `parallel pulls: at most 2 downloads in flight (got ${t.maxDownloadInFlight})`,
+  )
+  assert(
+    notebookDownloads[0] === 'base/notebooks/nb-pull-a.json',
+    'parallel pulls: the pool starts in plan order',
+  )
+  assert(
+    out.pulledNotebooks.map((nb) => nb.id).join(',') === ids.join(','),
+    'parallel pulls: pulled notebooks keep the plan order, not the completion order',
+  )
+  assert(
+    out.result.pulled.join(',') === 'Remote 0,Remote 1,Remote 2',
+    'parallel pulls: reported names keep the plan order',
+  )
+  assert(
+    ids.every((id) => out.nextState.notebooks[id] !== undefined),
+    'parallel pulls: every pulled notebook advanced its baseline',
+  )
+}
+
+{
+  // Regression: the 404 self-heal still runs inside the pool. Two manifest
+  // entries whose remote file is missing are restored (pushed) in plan order
+  // while a third notebook is downloaded in the same run.
+  const localA = makeNotebook('nb-heal-a', 'Heal A', 2000)
+  const localB = makeNotebook('nb-heal-b', 'Heal B', 2000)
+  const remoteC = makeNotebook('nb-heal-c', 'Remote C', 4000)
+  const t = new FakeTransport()
+  seedManifest(t, 'base', {
+    version: 2,
+    updatedAt: 3000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      { id: localA.id, name: localA.name, updatedAt: 3000, deleted: false },
+      { id: localB.id, name: localB.name, updatedAt: 3000, deleted: false },
+      { id: remoteC.id, name: remoteC.name, updatedAt: remoteC.updatedAt, deleted: false },
+    ],
+  })
+  t.files.set(
+    `base/notebooks/${remoteC.id}.json`,
+    JSON.stringify({ version: 2, exportedAt: Date.now(), notebook: remoteC }),
+  )
+  const locals = [localA, localB]
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: locals.map(makeSummary),
+    state: makeState({ notebooks: { [localA.id]: 2000, [localB.id]: 2000 } }),
+    transport: t,
+    getNotebook: async (id) => locals.find((nb) => nb.id === id),
+  })
+  assert(out.result.errors.length === 0, 'parallel 404 heal: no errors')
+  assert(
+    out.result.pushed.join(',') === 'Heal A,Heal B',
+    'parallel 404 heal: both local copies restored in plan order',
+  )
+  assert(
+    out.result.pulled.join(',') === 'Remote C',
+    'parallel 404 heal: the healthy notebook is still pulled',
+  )
+  const healedManifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  assert(
+    healedManifest.notebooks.find((n) => n.id === localA.id)?.updatedAt === 2000 &&
+      healedManifest.notebooks.find((n) => n.id === localB.id)?.updatedAt === 2000,
+    'parallel 404 heal: manifest entries point at the restored files',
   )
 }
 

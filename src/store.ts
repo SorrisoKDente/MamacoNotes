@@ -51,31 +51,53 @@ import {
   runSync,
   TOMBSTONE_RETENTION_MS,
 } from './utils/sync'
+import type { PendingPdfBitmap } from './utils/sync'
+import { logger } from './utils/logger'
 import { useUiStore } from './uiStore'
 import type { RenderedPdfPage } from './utils/pdf'
 import { setLanguage, t } from './i18n'
 import { detectLanguage } from './i18n/languages'
 
 /**
- * App version that last scanned the local database for pages whose PDF bitmap
- * was lost by a client older than 2.4.2. The scan deserializes every page
- * record, so it runs once per version instead of on every (auto-)sync.
+ * Local PDF-bitmap repair state, kept in a single key.
+ *
+ * `version` is the app version that last scanned the local database: the scan
+ * deserializes every page record, so it runs once per version instead of on
+ * every (auto-)sync. `pages` holds the pages whose remote bitmap could not be
+ * downloaded (network error) on that run, so the next sync retries only those
+ * pages instead of rescanning the whole database — and never forgets them.
  */
-const PDF_REPAIR_VERSION_KEY = 'mamaco-notes.pdf-repair-version'
+const PDF_REPAIR_KEY = 'mamaco-notes.pdf-repair'
 
-function needsPdfBitmapScan(): boolean {
+interface PdfRepairState {
+  version: string
+  pages: PendingPdfBitmap[]
+}
+
+function readPdfRepairState(): PdfRepairState {
   try {
-    return localStorage.getItem(PDF_REPAIR_VERSION_KEY) !== APP_VERSION
+    const raw = localStorage.getItem(PDF_REPAIR_KEY)
+    if (!raw) return { version: '', pages: [] }
+    const parsed = JSON.parse(raw) as Partial<PdfRepairState> | null
+    const pages = Array.isArray(parsed?.pages) ? parsed.pages : []
+    return {
+      version: typeof parsed?.version === 'string' ? parsed.version : '',
+      pages: pages.filter(
+        (item): item is PendingPdfBitmap =>
+          typeof item?.notebookId === 'string' && typeof item?.pageId === 'string',
+      ),
+    }
   } catch {
-    return true
+    return { version: '', pages: [] }
   }
 }
 
-function markPdfBitmapScan(): void {
+function savePdfRepairState(state: PdfRepairState): void {
   try {
-    localStorage.setItem(PDF_REPAIR_VERSION_KEY, APP_VERSION)
+    if (state.version === '' && state.pages.length === 0) localStorage.removeItem(PDF_REPAIR_KEY)
+    else localStorage.setItem(PDF_REPAIR_KEY, JSON.stringify(state))
   } catch {
-    // Storage unavailable: the scan simply runs again next session.
+    // Storage unavailable: the next version scan covers it again.
   }
 }
 
@@ -359,7 +381,22 @@ function saveLastPage(notebookId: string, pageId: string | null): void {
 
 let syncRunning = false
 let syncQueued = false
+/** True while the sync applies remote content to the store (never a local edit). */
+let applyingRemoteChanges = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined
+/** Coalesces local edits into one automatic sync instead of a burst of runs. */
+const AUTO_SYNC_DELAY_MS = 20_000
+
+function scheduleAutoSync(): void {
+  if (syncDebounceTimer !== undefined) clearTimeout(syncDebounceTimer)
+  syncDebounceTimer = setTimeout(() => {
+    syncDebounceTimer = undefined
+    void useAppStore.getState().syncNow('auto')
+  }, AUTO_SYNC_DELAY_MS)
+}
+
+/** Why a sync run started; surfaced in the Logs tab to diagnose repeat runs. */
+export type SyncTrigger = 'manual' | 'auto' | 'startup' | 'delete' | 'restore'
 let pendingResume: PendingResume | null = null
 
 type LastClickedTarget =
@@ -489,7 +526,7 @@ interface AppState {
   setShortcut: (action: keyof AppSettings['shortcuts'], value: string) => Promise<void>
   setCloud: (patch: Partial<AppSettings['cloud']>) => Promise<void>
 
-  syncNow: () => Promise<SyncResult | null>
+  syncNow: (trigger?: SyncTrigger) => Promise<SyncResult | null>
   resolveConflicts: (choices: Record<string, ConflictChoice>) => Promise<void>
 
   persistNotebook: (notebook: Notebook) => Promise<void>
@@ -1315,7 +1352,7 @@ export const useAppStore = create<AppState>((set, get) => {
         await db.deleteNotebook(nb.id)
       }
       if (configured && scope === 'remote') {
-        void get().syncNow()
+        void get().syncNow('delete')
       }
     },
 
@@ -1592,7 +1629,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       await db.deleteNotebook(id)
       if (configured && scope === 'remote') {
-        void get().syncNow()
+        void get().syncNow('delete')
       }
     },
 
@@ -2223,13 +2260,27 @@ export const useAppStore = create<AppState>((set, get) => {
       await saveSettings({ ...get().settings, cloud })
     },
 
-    async syncNow() {
+    async syncNow(trigger = 'manual') {
       const cloud = get().settings.cloud
       if (!cloud.webdavUrl || !cloud.enabled) return null
       if (syncRunning) {
         syncQueued = true
+        logger.info(`Sync requested while one is running: queued (${trigger})`)
         return null
       }
+      const startedAt = Date.now()
+      const repairState = readPdfRepairState()
+      const scanPdfBitmaps = repairState.version !== APP_VERSION
+      const pendingPdfRepair = repairState.pages
+      const repairPdfBitmaps = scanPdfBitmaps || pendingPdfRepair.length > 0
+      // Why this run exists, plus the repair work already known before it starts.
+      // The Logs tab is the only evidence a device gives us for a sync loop.
+      const summary: Record<string, unknown> = {
+        trigger,
+        pdfScan: scanPdfBitmaps,
+        retriedPdfPages: pendingPdfRepair.length,
+      }
+      logger.info(`Sync started (${trigger})`, summary)
       syncRunning = true
       set({
         syncProgress: {
@@ -2245,7 +2296,7 @@ export const useAppStore = create<AppState>((set, get) => {
         try {
           const state = await db.getCloudSyncState()
           const transport = makeTransport(cloud)
-          const scanPdfBitmaps = needsPdfBitmapScan()
+          let pdfScanFailed = false
           out = await runSync({
             basePath: cloud.webdavPath,
             folders: get().folders,
@@ -2253,8 +2304,24 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
             getNotebook: (id) => db.getNotebook(id),
-            findMissingPdfBitmaps: scanPdfBitmaps
-              ? () => db.getPagesMissingPdfBitmap()
+            findMissingPdfBitmaps: repairPdfBitmaps
+              ? async () => {
+                  let scanned: PendingPdfBitmap[] = []
+                  if (scanPdfBitmaps) {
+                    try {
+                      scanned = await db.getPagesMissingPdfBitmap()
+                    } catch (e) {
+                      pdfScanFailed = true
+                      logger.warn('PDF bitmap scan failed', e)
+                      return pendingPdfRepair
+                    }
+                  }
+                  const merged = new Map<string, PendingPdfBitmap>()
+                  for (const item of [...scanned, ...pendingPdfRepair]) {
+                    merged.set(`${item.notebookId}/${item.pageId}`, item)
+                  }
+                  return [...merged.values()]
+                }
               : undefined,
             onProgress: (progress) => set({ syncProgress: progress }),
           })
@@ -2263,34 +2330,60 @@ export const useAppStore = create<AppState>((set, get) => {
           // IndexedDB error), the baseline is left untouched, so the next sync
           // re-pulls the same notebooks (idempotent) instead of silently marking
           // them as synced — which would make remote changes never appear.
-          await applySyncChanges({
-            pulledNotebooks: out.pulledNotebooks,
-            newNotebooks: [],
-            removedLocalNotebookIds: out.removedLocalNotebookIds,
-            pulledFolders: out.pulledFolders,
-          })
-          // A healed PDF bitmap is not new content: persist it and merge the
-          // restored `pdf` into the open notebook without resetting the undo
-          // history or discarding strokes that were not persisted yet.
-          for (const nb of out.repairedNotebooks) {
-            await db.putNotebook(nb)
-            const active = get().activeNotebook
-            if (active?.id !== nb.id) continue
-            const healed = new Map(nb.pages.map((page) => [page.id, page.pdf]))
-            set((state) => ({
-              activeNotebook: {
-                ...active,
-                pages: active.pages.map((page) => {
-                  const pdf = healed.get(page.id)
-                  return pdf?.dataUrl ? { ...page, pdf } : page
-                }),
-              },
-              dataVersion: state.dataVersion + 1,
-              syncRevision: state.syncRevision + 1,
-            }))
+          // Content applied by the sync is not a local change: it must not wake
+          // the auto-sync subscriber below, otherwise a sync that repairs or
+          // pulls something schedules another sync from inside itself (the
+          // "finishes and immediately starts again" loop).
+          applyingRemoteChanges = true
+          try {
+            await applySyncChanges({
+              pulledNotebooks: out.pulledNotebooks,
+              newNotebooks: [],
+              removedLocalNotebookIds: out.removedLocalNotebookIds,
+              pulledFolders: out.pulledFolders,
+            })
+            // A healed PDF bitmap is not new content: persist it and merge the
+            // restored `pdf` into the open notebook without resetting the undo
+            // history or discarding strokes that were not persisted yet.
+            for (const nb of out.repairedNotebooks) {
+              await db.putNotebook(nb)
+              const active = get().activeNotebook
+              if (active?.id !== nb.id) continue
+              const healed = new Map(nb.pages.map((page) => [page.id, page.pdf]))
+              set((state) => ({
+                activeNotebook: {
+                  ...active,
+                  pages: active.pages.map((page) => {
+                    const pdf = healed.get(page.id)
+                    return pdf?.dataUrl ? { ...page, pdf } : page
+                  }),
+                },
+                dataVersion: state.dataVersion + 1,
+                syncRevision: state.syncRevision + 1,
+              }))
+            }
+          } finally {
+            applyingRemoteChanges = false
           }
           await db.putCloudSyncState(out.nextState)
-          if (scanPdfBitmaps && !out.pdfRepairIncomplete) markPdfBitmapScan()
+          summary.pushed = out.result.pushed.length
+          summary.pulled = out.result.pulled.length
+          summary.deleted = out.result.deleted.length
+          summary.conflicts = out.result.conflicts.length
+          summary.errors = out.result.errors.length
+          summary.repairedPdfPages = out.repairedNotebooks.reduce(
+            (count, nb) => count + nb.pages.filter((page) => page.pdf?.dataUrl).length,
+            0,
+          )
+          summary.pendingPdfPages = out.unrepairedPdfBitmaps.length
+          if (repairPdfBitmaps) {
+            // Only network failures are retried; a 404 is gone for good. A failed
+            // scan keeps the old version so the next sync scans again.
+            savePdfRepairState({
+              version: pdfScanFailed ? repairState.version : APP_VERSION,
+              pages: out.unrepairedPdfBitmaps,
+            })
+          }
           if (out.pendingConflicts.length > 0) {
             pendingResume = {
               cloud,
@@ -2303,12 +2396,15 @@ export const useAppStore = create<AppState>((set, get) => {
             })
           }
         } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          summary.error = message
+          logger.error(`Sync failed (${trigger})`, e)
           return {
             pushed: [],
             pulled: [],
             deleted: [],
             conflicts: [],
-            errors: [e instanceof Error ? e.message : String(e)],
+            errors: [message],
           }
         }
         if (out.result.errors.length === 0) {
@@ -2324,10 +2420,18 @@ export const useAppStore = create<AppState>((set, get) => {
         return out.result
       } finally {
         syncRunning = false
-        if (syncQueued) {
-          syncQueued = false
-          void get().syncNow()
-        }
+        const queuedDuringRun = syncQueued
+        syncQueued = false
+        // A change that arrived during the run is pushed by the next debounced
+        // sync. Restarting from here would chain full runs back to back when the
+        // sync itself keeps touching the notebook list.
+        if (queuedDuringRun) scheduleAutoSync()
+        logger.info(`Sync finished (${trigger})`, {
+          ...summary,
+          durationMs: Date.now() - startedAt,
+          localChangesQueuedDuringRun: queuedDuringRun,
+          nextSyncScheduled: queuedDuringRun,
+        })
       }
     },
 
@@ -2596,7 +2700,7 @@ export const useAppStore = create<AppState>((set, get) => {
         delete state.localOnlyDeleted[id]
         delete state.notebooks[id]
         await db.putCloudSyncState(state)
-        void get().syncNow()
+        void get().syncNow('restore')
       }
     },
 
@@ -2738,17 +2842,16 @@ useAppStore.subscribe((state, prev) => {
   if (state.dataVersion === prev.dataVersion) return
   const cloud = state.settings.cloud
   if (!cloud.enabled || !cloud.autoSync || !cloud.webdavUrl) return
+  // Remote content applied by the sync itself is not a local edit: it must not
+  // schedule another sync from inside the running one.
+  if (applyingRemoteChanges) return
   if (syncRunning) {
-    // A change arrived while a sync is in flight: queue a follow-up so it is
-    // not silently lost (the in-flight run captured the previous snapshot).
+    // A local change arrived while a sync is in flight: queue a follow-up so it
+    // is not silently lost (the in-flight run captured the previous snapshot).
     syncQueued = true
     return
   }
-  if (syncDebounceTimer !== undefined) clearTimeout(syncDebounceTimer)
-  syncDebounceTimer = setTimeout(() => {
-    syncDebounceTimer = undefined
-    void useAppStore.getState().syncNow()
-  }, 20000)
+  scheduleAutoSync()
 })
 
 useAppStore.subscribe((state, prev) => {

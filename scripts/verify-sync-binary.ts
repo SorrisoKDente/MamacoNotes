@@ -334,6 +334,13 @@ files.set('base/pdfs/p1.png', { bytes: PNG, ranges: true })
   assert(bytes.every((byte, i) => byte === PNG[i]), 'generic: chunked PNG bytes are byte-identical')
   const ranged = requests.filter((r) => r.headers['range'])
   assert(ranged.length > 1, 'generic: download really used multiple Range requests')
+  // The chunk grows after each successful request (128 KiB → 1 MiB), so a big
+  // file needs fewer bridge round trips than one fixed 128 KiB chunk would.
+  const fixedChunkRequests = Math.ceil(PNG.length / (128 * 1024))
+  assert(
+    ranged.length < fixedChunkRequests,
+    `generic: adaptive chunks cut round trips (${ranged.length} < ${fixedChunkRequests})`,
+  )
 }
 
 {

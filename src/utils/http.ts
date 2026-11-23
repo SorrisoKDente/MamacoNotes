@@ -156,6 +156,19 @@ export async function customFetch(url: string, init?: CustomFetchInit): Promise<
 
 const DOWNLOAD_CHUNK = 128 * 1024
 const MIN_DOWNLOAD_CHUNK = 16 * 1024
+/**
+ * Upper bound for one Range request. The chunk is grown after every successful
+ * request so a large notebook/image needs a handful of bridge calls instead of
+ * dozens, while a single chunk stays far below the whole-body response that
+ * used to OOM the Android bridge: 1 MiB of bytes crosses the bridge as ~1.4 MiB
+ * of base64 and is decoded back to 1 MiB, so one request peaks at a few MB in
+ * the WebView — the notebook/image itself (which the download has to hold
+ * anyway) is what dominates, not the chunk. Bitmap downloads share one budget of
+ * 3 in flight across overlapping notebook pulls (`PDF_BITMAP_DOWNLOADS` in
+ * `sync.ts`), so the transient overhead stays around 10 MB, under the ~32 MB
+ * bridge limit.
+ */
+const MAX_DOWNLOAD_CHUNK = 1024 * 1024
 
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64)
@@ -274,8 +287,9 @@ async function readResource(
       let res: Awaited<ReturnType<typeof CapacitorHttp.request>>
       let bytes: Uint8Array | null = null
       let rangeError: Error | null = null
+      let requested = chunkSize
       for (;;) {
-        const end = offset + chunkSize - 1
+        const end = offset + requested - 1
         res = await withRetry(() =>
           CapacitorHttp.request({
             url,
@@ -312,8 +326,9 @@ async function readResource(
           rangeError = error instanceof Error ? error : new Error(String(error))
         }
         if (!rangeError) break
-        if (chunkSize <= MIN_DOWNLOAD_CHUNK) throw rangeError
-        chunkSize = Math.max(MIN_DOWNLOAD_CHUNK, Math.floor(chunkSize / 2))
+        if (requested <= MIN_DOWNLOAD_CHUNK) throw rangeError
+        requested = Math.max(MIN_DOWNLOAD_CHUNK, Math.floor(requested / 2))
+        chunkSize = requested
       }
 
       if (!bytes || bytes.length === 0) break
@@ -321,11 +336,12 @@ async function readResource(
 
       offset += bytes.length
       if (total !== null && offset >= total) break
-      if (bytes.length < chunkSize) {
+      if (bytes.length < requested) {
         throw new Error(
           `Invalid ranged download: response ended at byte ${offset}, expected ${total ?? 'more data'}`,
         )
       }
+      chunkSize = Math.min(MAX_DOWNLOAD_CHUNK, requested * 2)
     }
 
     return { ok: true, status: 206 }

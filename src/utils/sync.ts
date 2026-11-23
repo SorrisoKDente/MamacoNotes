@@ -232,6 +232,78 @@ async function uploadNotebook({
 }
 
 /**
+ * Runs `worker` over `items` with at most `limit` in flight, preserving the
+ * result order. Sync is network-bound and the Android bridge serializes badly,
+ * so a small pool is what makes a notebook with many PDF pages practical.
+ */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const run = async () => {
+    for (;;) {
+      const index = next++
+      if (index >= items.length) return
+      results[index] = await worker(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run))
+  return results
+}
+
+/**
+ * PDF bitmaps are large and independent, so a few downloads run at once. Kept
+ * small on purpose: each in-flight page holds a PNG plus its base64 dataUrl, and
+ * a bigger pool is what the old chunk limit was protecting the phone from. This
+ * is the number the MAX_DOWNLOAD_CHUNK comment in `http.ts` and the ~10 MB
+ * transient bound in `sync-design.md` are based on, so it is a budget for the
+ * whole run: two notebooks pulled at once must not double it. The `mapLimit`
+ * calls below reuse it only to bound what one pull keeps waiting, never as a
+ * second budget.
+ */
+const PDF_BITMAP_DOWNLOADS = 3
+
+/**
+ * Every bitmap download passes through this module-wide semaphore, so the
+ * 3-in-flight bound holds even while two notebook pulls hydrate their pages at
+ * the same time. A per-notebook pool cannot enforce it: each pull has its own
+ * workers, so the total would reach NOTEBOOK_PULL_CONCURRENCY x 3 = 6.
+ */
+let bitmapDownloadsInFlight = 0
+const bitmapDownloadWaiters: (() => void)[] = []
+
+async function withBitmapSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (bitmapDownloadsInFlight < PDF_BITMAP_DOWNLOADS) {
+    bitmapDownloadsInFlight++
+  } else {
+    await new Promise<void>((resolve) => bitmapDownloadWaiters.push(resolve))
+  }
+  try {
+    return await fn()
+  } finally {
+    const next = bitmapDownloadWaiters.shift()
+    if (next) next()
+    else bitmapDownloadsInFlight--
+  }
+}
+
+/** Downloads `pdfs/<pageId>.png` while holding one slot of that budget. */
+function downloadPdfBitmap(basePath: string, transport: Transport, pageId: string) {
+  return withBitmapSlot(() => transport.downloadBinaryFile(pdfFilePath(basePath, pageId)))
+}
+
+/**
+ * Notebook bodies are independent downloads, so a small pool overlaps the
+ * network round trips (a long list of notebooks was the slow part of sync).
+ * Kept at 2 on purpose: the bitmap downloads those pulls issue share one budget
+ * of 3, and the Android bridge is the shared bottleneck.
+ */
+const NOTEBOOK_PULL_CONCURRENCY = 2
+
+/**
  * Rehydrates the PDF backgrounds of a downloaded notebook from
  * `pdfs/<pageId>.png`. Only "light" pages are fetched (a page whose JSON still
  * carries the dataUrl, or has no PDF, is left alone). A missing file (404)
@@ -246,18 +318,18 @@ async function hydratePdfBackgrounds(
   const pending = notebook.pages.filter((page) => page.pdf && !page.pdf.dataUrl)
   if (pending.length === 0) return notebook
   const dataUrls = new Map<string, string>()
-  for (const page of pending) {
+  await mapLimit(pending, PDF_BITMAP_DOWNLOADS, async (page) => {
     try {
-      const bytes = await transport.downloadBinaryFile(pdfFilePath(basePath, page.id))
+      const bytes = await downloadPdfBitmap(basePath, transport, page.id)
       dataUrls.set(page.id, encodePngDataUrl(bytes))
     } catch (e) {
       const notFound =
         e instanceof RemoteFileNotFoundError ||
         (e as { name?: string } | null)?.name === 'RemoteFileNotFoundError'
-      if (notFound) continue
+      if (notFound) return
       throw e
     }
-  }
+  })
   if (dataUrls.size === 0) return notebook
   return {
     ...notebook,
@@ -283,33 +355,39 @@ async function repairLocalPdfBitmaps(
   pending: PendingPdfBitmap[],
   pulled: Notebook[],
   getNotebook: (id: string) => Promise<Notebook | undefined>,
-): Promise<{ repaired: Notebook[]; incomplete: boolean }> {
-  if (pending.length === 0) return { repaired: [], incomplete: false }
+): Promise<{ repaired: Notebook[]; unresolved: PendingPdfBitmap[] }> {
+  if (pending.length === 0) return { repaired: [], unresolved: [] }
   const pulledById = new Map(pulled.map((nb) => [nb.id, nb]))
   const dataUrls = new Map<string, string>()
-  let incomplete = false
-  for (const { notebookId, pageId } of pending) {
+  // Outcomes are collected in `pending` order (mapLimit keeps the result order),
+  // not in completion order: the persisted retry list must be stable across runs.
+  const outcomes = await mapLimit(pending, PDF_BITMAP_DOWNLOADS, async ({ notebookId, pageId }) => {
     // A pull in this same run may already have restored the page.
     const already = pulledById
       .get(notebookId)
       ?.pages.find((page) => page.id === pageId)?.pdf?.dataUrl
-    if (already) continue
+    if (already) return 'skipped' as const
     try {
-      const bytes = await transport.downloadBinaryFile(pdfFilePath(basePath, pageId))
+      const bytes = await downloadPdfBitmap(basePath, transport, pageId)
       dataUrls.set(pageId, encodePngDataUrl(bytes))
+      return 'restored' as const
     } catch (e) {
       const notFound =
         e instanceof RemoteFileNotFoundError ||
         (e as { name?: string } | null)?.name === 'RemoteFileNotFoundError'
-      // A page without a remote image (404) simply stays as it is; any other
-      // failure is retried on the next sync and is reported as incomplete so
-      // the repair is not considered done.
-      if (notFound) continue
-      incomplete = true
+      // A page without a remote image (404) cannot be repaired by this path and
+      // is dropped instead of being retried forever. Any other failure (network)
+      // is returned so the caller retries only those pages on the next sync.
+      if (notFound) {
+        logger.warn(`PDF background image missing on the server (${notebookId}/${pageId})`)
+        return 'gone' as const
+      }
       logger.warn(`PDF background repair failed (${notebookId}/${pageId})`, e)
+      return 'failed' as const
     }
-  }
-  if (dataUrls.size === 0) return { repaired: [], incomplete }
+  })
+  const unresolved = pending.filter((_, index) => outcomes[index] === 'failed')
+  if (dataUrls.size === 0) return { repaired: [], unresolved }
   const byNotebook = new Map<string, string[]>()
   for (const { notebookId, pageId } of pending) {
     if (!dataUrls.has(pageId)) continue
@@ -329,7 +407,7 @@ async function repairLocalPdfBitmaps(
     if (pages.every((page, i) => page === notebook.pages[i])) continue
     repaired.push({ ...notebook, pages })
   }
-  return { repaired, incomplete }
+  return { repaired, unresolved }
 }
 
 /**
@@ -491,8 +569,12 @@ export interface SyncOutput {
   pulledNotebooks: Notebook[]
   /** Notebooks whose missing PDF bitmap was restored from the remote image. */
   repairedNotebooks: Notebook[]
-  /** True when a bitmap repair attempt failed for a non-404 reason. */
-  pdfRepairIncomplete: boolean
+  /**
+   * Pages whose bitmap could not be downloaded for a non-404 reason (network).
+   * The caller persists them so the next sync retries only these pages instead
+   * of rescanning the whole database.
+   */
+  unrepairedPdfBitmaps: PendingPdfBitmap[]
   pulledFolders: Folder[] | null
   removedLocalNotebookIds: string[]
   pendingConflicts: SyncConflictItem[]
@@ -822,7 +904,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       manifest: emptyManifest(),
       pulledNotebooks: [],
       repairedNotebooks: [],
-      pdfRepairIncomplete: false,
+      unrepairedPdfBitmaps: [],
       pulledFolders: null,
       removedLocalNotebookIds: [],
       pendingConflicts: [],
@@ -862,7 +944,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         manifest: emptyManifest(),
         pulledNotebooks: [],
         repairedNotebooks: [],
-        pdfRepairIncomplete: false,
+        unrepairedPdfBitmaps: [],
         pulledFolders: null,
         removedLocalNotebookIds: [],
         pendingConflicts: [],
@@ -982,61 +1064,95 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     report('upload', null)
   }
 
-  for (const id of plan.pullIds) {
-    try {
+  // Phase 1: download (and self-heal 404s) with a bounded pool. Workers only do
+  // network/parse work and read `manifest`, which stays untouched until phase 2,
+  // so there is no shared mutable state to race on.
+  const pullOutcomes = await mapLimit(
+    plan.pullIds,
+    NOTEBOOK_PULL_CONCURRENCY,
+    async (id) => {
       report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
-      const text = await transport.downloadFile(notebookPath(basePath, id))
-      const nb = await hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
-      pulledNotebooks.push(nb)
-      state.notebooks[id] = nb.updatedAt
-      result.pulled.push(nb.name)
-      // Heal image hashes an older client may have dropped from the manifest.
-      const entry = manifest.notebooks.find((n) => n.id === id)
-      const repaired = entry ? repairPdfHashes(entry, nb) : null
-      if (repaired) {
-        manifest = upsertManifestNotebook(manifest, repaired)
-        manifestChanged = true
-      }
-    } catch (e) {
-      if (e instanceof RemoteFileNotFoundError) {
-        // The manifest lists a notebook whose file is missing on the server
-        // (e.g. an interrupted upload or a stale manifest). Self-heal instead of
-        // erroring forever: restore the local copy if it exists, otherwise prune
-        // the phantom manifest entry.
-        const summary = localById.get(id)
-        if (summary) {
+      try {
+        const text = await transport.downloadFile(notebookPath(basePath, id))
+        const nb = await hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
+        return { kind: 'pulled' as const, notebook: nb }
+      } catch (e) {
+        if (e instanceof RemoteFileNotFoundError) {
+          // The manifest lists a notebook whose file is missing on the server
+          // (e.g. an interrupted upload or a stale manifest). Self-heal instead
+          // of erroring forever: restore the local copy if it exists, otherwise
+          // prune the phantom manifest entry.
+          const summary = localById.get(id)
+          if (!summary) return { kind: 'pruned' as const }
           try {
             const nb = await input.getNotebook(id)
             if (!nb) throw new Error(t('error.invalidNotebook'))
-            manifest = upsertManifestNotebook(
-              manifest,
-              await uploadNotebook({
-                basePath,
-                transport,
-                notebook: nb,
-                previous: manifest.notebooks.find((entry) => entry.id === id),
-              }),
-            )
-            state.notebooks[id] = nb.updatedAt
-            manifestChanged = true
-            result.pushed.push(nb.name)
+            const entry = await uploadNotebook({
+              basePath,
+              transport,
+              notebook: nb,
+              previous: manifest.notebooks.find((entry) => entry.id === id),
+            })
+            return { kind: 'restored' as const, notebook: nb, entry }
           } catch (e2) {
-            result.errors.push(
-              t('error.syncUploadNotebookFailed', {
-                name: summary.name,
-                message: e2 instanceof Error ? e2.message : String(e2),
-              }),
-            )
+            return {
+              kind: 'restoreFailed' as const,
+              name: summary.name,
+              message: e2 instanceof Error ? e2.message : String(e2),
+            }
           }
-        } else {
-          manifest = removeManifestNotebook(manifest, id)
+        }
+        return { kind: 'downloadFailed' as const, error: e }
+      }
+    },
+  )
+
+  // Phase 2: apply the outcomes in plan order (never completion order), so the
+  // manifest, the baselines, the pulled list and the reported errors are the same
+  // as a sequential run regardless of which download finished first.
+  for (let index = 0; index < plan.pullIds.length; index++) {
+    const id = plan.pullIds[index]
+    const outcome = pullOutcomes[index]
+    switch (outcome.kind) {
+      case 'pulled': {
+        const nb = outcome.notebook
+        pulledNotebooks.push(nb)
+        state.notebooks[id] = nb.updatedAt
+        result.pulled.push(nb.name)
+        // Heal image hashes an older client may have dropped from the manifest.
+        const entry = manifest.notebooks.find((n) => n.id === id)
+        const repaired = entry ? repairPdfHashes(entry, nb) : null
+        if (repaired) {
+          manifest = upsertManifestNotebook(manifest, repaired)
           manifestChanged = true
         }
-        continue
+        break
       }
-      const msg = e instanceof Error ? e.message : String(e)
-      logger.error(`Sync notebook download failed: ${id}`, e)
-      result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: msg }))
+      case 'restored':
+        manifest = upsertManifestNotebook(manifest, outcome.entry)
+        state.notebooks[id] = outcome.notebook.updatedAt
+        manifestChanged = true
+        result.pushed.push(outcome.notebook.name)
+        break
+      case 'pruned':
+        manifest = removeManifestNotebook(manifest, id)
+        manifestChanged = true
+        break
+      case 'restoreFailed':
+        result.errors.push(
+          t('error.syncUploadNotebookFailed', {
+            name: outcome.name,
+            message: outcome.message,
+          }),
+        )
+        break
+      case 'downloadFailed': {
+        const msg =
+          outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+        logger.error(`Sync notebook download failed: ${id}`, outcome.error)
+        result.errors.push(t('error.syncDownloadNotebookFailed', { id, message: msg }))
+        break
+      }
     }
     completed++
     report('download', null)
@@ -1046,7 +1162,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   // version-3 notebook. Runs even when nothing is pushed or pulled, so an app
   // update alone is enough to bring the PDF background back.
   const repairedNotebooks: Notebook[] = []
-  let pdfRepairIncomplete = false
+  let unrepairedPdfBitmaps: PendingPdfBitmap[] = []
   if (input.findMissingPdfBitmaps) {
     try {
       const missing = await input.findMissingPdfBitmaps()
@@ -1058,7 +1174,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         input.getNotebook,
       )
       repairedNotebooks.push(...repair.repaired)
-      pdfRepairIncomplete = repair.incomplete
+      unrepairedPdfBitmaps = repair.unresolved
       for (const nb of repairedNotebooks) {
         const entry = manifest.notebooks.find((n) => n.id === nb.id)
         const repaired = entry ? repairPdfHashes(entry, nb) : null
@@ -1068,7 +1184,6 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         }
       }
     } catch (e) {
-      pdfRepairIncomplete = true
       logger.warn('PDF background repair failed', e)
     }
   }
@@ -1249,7 +1364,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     manifest,
     pulledNotebooks,
     repairedNotebooks,
-    pdfRepairIncomplete,
+    unrepairedPdfBitmaps,
     pulledFolders,
     removedLocalNotebookIds,
     pendingConflicts: plan.conflicts,

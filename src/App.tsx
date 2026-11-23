@@ -93,7 +93,7 @@ export default function App() {
         const s = useAppStore.getState()
         const cloud = s.settings.cloud
         if (cloud.enabled && cloud.autoSync && cloud.webdavUrl) {
-          void s.syncNow()
+          void s.syncNow('startup')
         }
 
         // Check for updates

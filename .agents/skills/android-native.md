@@ -28,3 +28,6 @@ This skill defines the technical constraints for working with the Android platfo
 2. Run `npx cap sync android` to sync assets and plugins.
 3. Verify the build with `npm run build:android`.
 4. Use `read_logcat` to debug native crashes (look for `OutOfMemoryError` or `NullPointerException`).
+
+### Never build the APK from stale assets
+`android/app/src/main/assets/public` is gitignored and is **not** rebuilt by Gradle. Building the APK straight from Android Studio after a DB migration (`DB_VERSION` in `src/db.ts`) packages web code that opens the **old** IndexedDB version, and the app fails on start against a database already migrated by a newer build. Always run `npm run build:android` (or `npx cap sync android` at minimum) before `gradlew assembleDebug`/`assembleRelease`, and bump the version when the DB version changes.

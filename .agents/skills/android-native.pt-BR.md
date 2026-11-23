@@ -28,3 +28,6 @@ Esta habilidade define as restrições técnicas para trabalhar com a plataforma
 2. Rode `npx cap sync android` para sincronizar assets e plugins.
 3. Valide o build com `npm run build:android`.
 4. Use `read_logcat` para debugar crashes nativos (procure por `OutOfMemoryError` ou `NullPointerException`).
+
+### Nunca gere o APK com assets defasados
+`android/app/src/main/assets/public` é ignorado pelo Git e **não** é regerado pelo Gradle. Gerar o APK direto pelo Android Studio depois de uma migração de banco (`DB_VERSION` em `src/db.ts`) empacota o código web que abre a versão **antiga** do IndexedDB, e o app falha ao iniciar contra um banco já migrado por uma build mais nova. Sempre rode `npm run build:android` (ou no mínimo `npx cap sync android`) antes de `gradlew assembleDebug`/`assembleRelease`, e suba a versão quando a versão do banco mudar.

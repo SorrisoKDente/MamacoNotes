@@ -11,6 +11,8 @@
  *  5. a non-PNG dataUrl stays inline instead of being lost
  *  6. old-format remote notebooks (inline dataUrl, no hashes) still pull fine
  *  7. deleting a notebook removes its remote images
+ *  8. two overlapping notebook pulls share one bitmap download budget (3 in
+ *     flight in total, not 3 per notebook)
  *
  * Run: npx tsx scripts/verify-sync-pdfs.ts
  */
@@ -103,6 +105,14 @@ class FakeTransport implements Transport {
   binaries = new Map<string, Uint8Array>()
   uploads: { path: string; contentType: string; size: number }[] = []
   downloads: string[] = []
+  /** Simulated latency per text path (notebook bodies), so two pulls overlap. */
+  fileDelays = new Map<string, number>()
+  /** Simulated latency per binary path, to measure download concurrency. */
+  binaryDelays = new Map<string, number>()
+  /** Simulated non-404 failure per binary path (a network error). */
+  binaryFailures = new Map<string, Error>()
+  binaryInFlight = 0
+  maxBinaryInFlight = 0
 
   async ensureDirectory(_dirPath: string): Promise<void> {}
 
@@ -127,6 +137,8 @@ class FakeTransport implements Transport {
 
   async downloadFile(filePath: string): Promise<string> {
     this.downloads.push(filePath)
+    const delay = this.fileDelays.get(filePath)
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
     const content = this.files.get(filePath)
     if (content === undefined) throw new RemoteFileNotFoundError(filePath)
     return content
@@ -134,9 +146,19 @@ class FakeTransport implements Transport {
 
   async downloadBinaryFile(filePath: string): Promise<Uint8Array> {
     this.downloads.push(filePath)
-    const bytes = this.binaries.get(filePath)
-    if (bytes === undefined) throw new RemoteFileNotFoundError(filePath)
-    return new Uint8Array(bytes)
+    this.binaryInFlight++
+    this.maxBinaryInFlight = Math.max(this.maxBinaryInFlight, this.binaryInFlight)
+    try {
+      const delay = this.binaryDelays.get(filePath)
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+      const failure = this.binaryFailures.get(filePath)
+      if (failure) throw failure
+      const bytes = this.binaries.get(filePath)
+      if (bytes === undefined) throw new RemoteFileNotFoundError(filePath)
+      return new Uint8Array(bytes)
+    } finally {
+      this.binaryInFlight--
+    }
   }
 
   async deleteRemoteFile(filePath: string): Promise<void> {
@@ -592,7 +614,7 @@ console.log('== locally lost bitmap is healed from the remote image ==')
   assert(p2?.pdf?.dataUrl === undefined, 'heal: 404 page stays without a bitmap')
   assert(p2?.pdf?.name === 'doc.pdf', 'heal: 404 page keeps its PDF metadata')
   assert(out.repairedNotebooks.length === 1, 'heal: notebook reported once')
-  assert(!out.pdfRepairIncomplete, 'heal: a 404 does not mark the repair as incomplete')
+  assert(out.unrepairedPdfBitmaps.length === 0, 'heal: a 404 is not queued for retry')
   assert(t.uploads.length === 0, 'heal: nothing uploaded to the server')
   const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
   assert(
@@ -644,6 +666,181 @@ console.log('== heal does not re-download a bitmap a pull already restored ==')
   assert(
     t.downloads.filter((p) => p === 'base/pdfs/p1.png').length === 1,
     'heal/pull: the image is downloaded once, not twice',
+  )
+}
+
+console.log('== heal: parallel downloads and retry only the failures ==')
+
+{
+  const t = new FakeTransport()
+  const pageIds = ['p1', 'p2', 'p3', 'p4', 'p5']
+  const stripped = makeNotebook(
+    'nb-heal-many',
+    'HealMany',
+    4000,
+    pageIds.map((id) => makeLightPage(id)),
+  )
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 4000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: stripped.id,
+        name: stripped.name,
+        updatedAt: 4000,
+        deleted: false,
+        pdfs: Object.fromEntries(pageIds.map((id) => [id, pdfHash(aDataUrl)])),
+      },
+    ],
+  })
+  t.files.set(
+    `base/notebooks/${stripped.id}.json`,
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: stripped }),
+  )
+  for (const id of ['p1', 'p2', 'p3']) {
+    t.binaries.set(`base/pdfs/${id}.png`, PNG_A)
+    t.binaryDelays.set(`base/pdfs/${id}.png`, 30)
+  }
+  t.binaryFailures.set('base/pdfs/p4.png', new Error('network down'))
+  // p5 has no remote image at all (404).
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(stripped)],
+    state: makeState({ notebooks: { [stripped.id]: 4000 } }),
+    transport: t,
+    getNotebook: async () => stripped,
+    findMissingPdfBitmaps: async () =>
+      pageIds.map((pageId) => ({ notebookId: stripped.id, pageId })),
+  })
+  assert(out.result.errors.length === 0, 'heal/many: a failed image does not fail the sync')
+  const healed = out.repairedNotebooks.find((nb) => nb.id === stripped.id)
+  const healedIds = healed?.pages.filter((page) => page.pdf?.dataUrl).map((page) => page.id)
+  assert(
+    healedIds?.join(',') === 'p1,p2,p3',
+    'heal/many: every available image is restored in one run',
+  )
+  assert(
+    out.unrepairedPdfBitmaps.length === 1 && out.unrepairedPdfBitmaps[0]?.pageId === 'p4',
+    'heal/many: only the network failure is queued for retry',
+  )
+  assert(
+    t.maxBinaryInFlight > 1,
+    `heal/many: images download in parallel (${t.maxBinaryInFlight} at once)`,
+  )
+  assert(t.maxBinaryInFlight <= 3, 'heal/many: the parallel pool stays bounded')
+  assert(
+    !t.uploads.some((upload) => upload.contentType === 'image/png'),
+    'heal/many: no image is re-uploaded while healing',
+  )
+}
+
+console.log('== parallel pulls share one bitmap download budget ==')
+
+{
+  const t = new FakeTransport()
+  const pageIds = (prefix: string) => [`${prefix}1`, `${prefix}2`, `${prefix}3`]
+  const remote = [
+    makeNotebook('nb-budget-a', 'BudgetA', 2000, pageIds('a').map((id) => makeLightPage(id))),
+    makeNotebook('nb-budget-b', 'BudgetB', 2000, pageIds('b').map((id) => makeLightPage(id))),
+  ]
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2000,
+    folders: { updatedAt: 0 },
+    notebooks: remote.map((nb) => ({
+      id: nb.id,
+      name: nb.name,
+      updatedAt: 2000,
+      deleted: false,
+      pdfs: Object.fromEntries(nb.pages.map((page) => [page.id, pdfHash(aDataUrl)])),
+    })),
+  })
+  for (const nb of remote) {
+    t.files.set(
+      `base/notebooks/${nb.id}.json`,
+      JSON.stringify({ version: 3, exportedAt: 2, notebook: nb }),
+    )
+    // Both bodies land together, so both pulls hydrate their pages at once:
+    // without a shared budget that is 2 pools x 3 = 6 bitmaps in flight.
+    t.fileDelays.set(`base/notebooks/${nb.id}.json`, 20)
+    for (const pageId of nb.pages.map((page) => page.id)) {
+      t.binaries.set(`base/pdfs/${pageId}.png`, PNG_A)
+      t.binaryDelays.set(`base/pdfs/${pageId}.png`, 20)
+    }
+  }
+  const stale = remote.map((nb) => makeNotebook(nb.id, nb.name, 1000, [makeLightPage(nb.pages[0].id)]))
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: stale.map(makeSummary),
+    state: makeState({ notebooks: { [remote[0].id]: 1000, [remote[1].id]: 1000 } }),
+    transport: t,
+    getNotebook: async (id) => stale.find((nb) => nb.id === id),
+  })
+  assert(out.result.errors.length === 0, 'bitmap budget: no errors')
+  assert(
+    out.pulledNotebooks.map((nb) => nb.id).join(',') === remote.map((nb) => nb.id).join(','),
+    'bitmap budget: both notebooks pulled in plan order',
+  )
+  assert(
+    out.pulledNotebooks.every((nb) => nb.pages.every((page) => page.pdf?.dataUrl === aDataUrl)),
+    'bitmap budget: every bitmap restored',
+  )
+  assert(
+    t.maxBinaryInFlight === 3,
+    `bitmap budget: two pulls share the 3-download budget (got ${t.maxBinaryInFlight})`,
+  )
+}
+
+console.log('== heal: the retry list keeps the plan order, not the completion order ==')
+
+{
+  const t = new FakeTransport()
+  const stripped = makeNotebook('nb-heal-order', 'HealOrder', 5000, [
+    makeLightPage('pa'),
+    makeLightPage('pb'),
+  ])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 5000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: stripped.id,
+        name: stripped.name,
+        updatedAt: 5000,
+        deleted: false,
+        pdfs: { pa: pdfHash(aDataUrl), pb: pdfHash(aDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    `base/notebooks/${stripped.id}.json`,
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: stripped }),
+  )
+  // `pa` fails last (slow network), `pb` fails first (fast error): a pooled
+  // repair must still persist them in plan order so the retry list is stable.
+  t.binaryDelays.set('base/pdfs/pa.png', 40)
+  t.binaryFailures.set('base/pdfs/pa.png', new Error('network down'))
+  t.binaryFailures.set('base/pdfs/pb.png', new Error('network down'))
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(stripped)],
+    state: makeState({ notebooks: { [stripped.id]: 5000 } }),
+    transport: t,
+    getNotebook: async () => stripped,
+    findMissingPdfBitmaps: async () => [
+      { notebookId: stripped.id, pageId: 'pa' },
+      { notebookId: stripped.id, pageId: 'pb' },
+    ],
+  })
+  assert(out.result.errors.length === 0, 'heal/order: a failed image does not fail the sync')
+  assert(
+    out.unrepairedPdfBitmaps.map((item) => item.pageId).join(',') === 'pa,pb',
+    'heal/order: the retry list keeps the plan order',
   )
 }
 
