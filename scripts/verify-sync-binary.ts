@@ -51,8 +51,17 @@ function makePng(size: number, seed: number): Uint8Array {
   return bytes
 }
 
+/**
+ * What Android's CapacitorHttp returns for `responseType: 'arraybuffer'`:
+ * `Base64.encodeToString(..., Base64.DEFAULT)`, which wraps the payload every
+ * 76 characters and appends a line feed. Reproducing the wrapping is what keeps
+ * this fixture honest — an unwrapped base64 hid the bug that made every
+ * `pdfs/<pageId>.png` download arrive as text instead of image bytes.
+ */
 function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64')
+  const raw = Buffer.from(bytes).toString('base64')
+  const lines = raw.match(/.{1,76}/g) ?? []
+  return lines.map((line) => line + '\n').join('')
 }
 
 function fromBase64(data: string): Uint8Array {
@@ -323,6 +332,10 @@ function seedNotebook(id: string, pageId: string): void {
 console.log('== platform ==')
 
 assert(Capacitor.isNativePlatform(), 'test runs as the Android (native) platform')
+assert(
+  toBase64(makePng(200, 1)).includes('\n'),
+  'fixture: binary bodies arrive as Android-wrapped base64 (76-char lines)',
+)
 
 console.log('== generic WebDAV: binary download ==')
 

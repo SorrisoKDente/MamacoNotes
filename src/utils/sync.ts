@@ -345,6 +345,7 @@ async function hydratePdfBackgrounds(
       const bytes = await downloadPdfBitmap(basePath, transport, page.id)
       if (!bytes) {
         logger.warn(`PDF background image is not a PNG (${notebook.id}/${page.id})`)
+        hooks?.onFailed?.(notebook.id, page.id)
         return
       }
       dataUrls.set(page.id, encodePngDataUrl(bytes))
@@ -357,6 +358,7 @@ async function hydratePdfBackgrounds(
         // The notebook references a PDF page but its image is not on the server:
         // the pull succeeds without a background, so say why in the Logs tab.
         logger.warn(`PDF background image missing on the server (${notebook.id}/${page.id})`)
+        hooks?.onFailed?.(notebook.id, page.id)
         return
       }
       throw e
@@ -421,6 +423,7 @@ async function repairLocalPdfBitmaps(
       const bytes = await downloadPdfBitmap(basePath, transport, pageId)
       if (!bytes) {
         logger.warn(`PDF background image is not a PNG (${notebookId}/${pageId})`)
+        hooks?.onFailed?.(notebookId, pageId)
         return 'failed' as const
       }
       dataUrls.set(pageId, encodePngDataUrl(bytes))
@@ -435,9 +438,11 @@ async function repairLocalPdfBitmaps(
       // is returned so the caller retries only those pages on the next sync.
       if (notFound) {
         logger.warn(`PDF background image missing on the server (${notebookId}/${pageId})`)
+        hooks?.onFailed?.(notebookId, pageId)
         return 'gone' as const
       }
       logger.warn(`PDF background repair failed (${notebookId}/${pageId})`, e)
+      hooks?.onFailed?.(notebookId, pageId)
       return 'failed' as const
     }
   })
@@ -604,11 +609,15 @@ export interface PendingPdfBitmap {
 /**
  * Hooks for a run of PDF bitmap downloads. `onStart` fires when a page download
  * begins (it drives the "current file" line), `onDone` when the bytes are in
- * memory (it drives the percentage and the Logs entry).
+ * memory (it drives the percentage and the Logs entry), and `onFailed` when the
+ * page ends without an image (non-PNG body or 404) — that attempt is finished
+ * work too, so the percentage must advance instead of freezing on a notebook
+ * whose images the server cannot hand back.
  */
 export interface PdfBitmapHooks {
   onStart?: (notebookId: string, pageId: string) => void
   onDone?: (notebookId: string, pageId: string, bytes: number) => void
+  onFailed?: (notebookId: string, pageId: string) => void
 }
 
 export interface SyncInput {
@@ -1085,11 +1094,26 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   let downloadedPdfBytes = 0
   let downloadedPdfBitmaps = 0
   const pdfByNotebook = new Map<string, { pages: number; bytes: number }>()
+  const plannedPdfPages = (ids: string[]) =>
+    ids.reduce(
+      (sum, id) =>
+        sum +
+        Object.keys(manifest.notebooks.find((entry) => entry.id === id)?.pdfs ?? {}).length,
+      0,
+    )
+  const plannedPdfSteps = plannedPdfPages(plan.pullIds) + missingPdfBitmaps.length
+  let startedPdfSteps = 0
   // Both PDF paths (pull hydration and local repair) report through these: one
   // progress step and one Logs line per `pdfs/<pageId>.png`. Counting per page is
   // what makes a 100-page notebook move 1% at a time instead of 0 → 50 → 100.
   const pdfHooks: PdfBitmapHooks = {
-    onStart: (_notebookId, pageId) => report('download', pdfFilePath(basePath, pageId)),
+    onStart: (_notebookId, pageId) => {
+      // The manifest can list fewer images than the pull actually downloads (a
+      // version-2 client rewrote it without the hashes). Growing the total keeps
+      // the percentage honest instead of pinning it at 100% while pages arrive.
+      if (startedPdfSteps++ >= plannedPdfSteps) total++
+      report('download', pdfFilePath(basePath, pageId))
+    },
     onDone: (notebookId, pageId, bytes) => {
       const stats = pdfByNotebook.get(notebookId) ?? { pages: 0, bytes: 0 }
       pdfByNotebook.set(notebookId, {
@@ -1102,14 +1126,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       completed++
       report('download', pdfFilePath(basePath, pageId))
     },
+    // An image the server could not hand back still finishes its progress step,
+    // so a notebook whose PDFs fail does not leave the bar stuck at 0%.
+    onFailed: (_notebookId, pageId) => {
+      completed++
+      report('download', pdfFilePath(basePath, pageId))
+    },
   }
-  const plannedPdfPages = (ids: string[]) =>
-    ids.reduce(
-      (sum, id) =>
-        sum +
-        Object.keys(manifest.notebooks.find((entry) => entry.id === id)?.pdfs ?? {}).length,
-      0,
-    )
   total = Math.max(
     1,
     plan.pushIds.length +
@@ -1117,8 +1140,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       plan.deleteRemoteIds.length +
       plan.deleteLocalIds.length +
       plan.conflicts.length +
-      plannedPdfPages(plan.pullIds) +
-      missingPdfBitmaps.length,
+      plannedPdfSteps,
   )
   report('preparing', null)
   manifestChanged = manifestChanged || migrated

@@ -183,6 +183,17 @@ function isBase64Text(s: string): boolean {
   return /^[A-Za-z0-9+/]*={0,2}$/.test(s) && s.length % 4 === 0
 }
 
+/**
+ * Android's CapacitorHttp encodes binary bodies with `Base64.DEFAULT`, which
+ * inserts a line feed every 76 characters (iOS does not wrap). Whitespace is
+ * not part of the base64 alphabet, so it must be removed before the payload can
+ * be recognized as base64; otherwise every binary download was treated as raw
+ * text and its base64 characters became the "bytes" of the image.
+ */
+function unwrapBase64(s: string): string {
+  return s.replace(/\s+/g, '')
+}
+
 function isJsonContentType(headers: Record<string, unknown> | undefined): boolean {
   if (!headers) return false
   const ct = headers['Content-Type'] ?? headers['content-type']
@@ -216,9 +227,10 @@ function decodeCapacitorData(data: unknown, isJson = false): Uint8Array | null {
     if (isJson) {
       return new TextEncoder().encode(data)
     }
-    if (isBase64Text(data)) {
+    const compact = unwrapBase64(data)
+    if (isBase64Text(compact)) {
       try {
-        return base64ToBytes(data)
+        return base64ToBytes(compact)
       } catch {
         // Not base64 in practice — fall through to raw text.
       }
