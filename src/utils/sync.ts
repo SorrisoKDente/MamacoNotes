@@ -143,10 +143,13 @@ function pdfHashesFor(
 }
 
 /**
- * Rebuilds a manifest entry's image hashes from a downloaded notebook. A
- * version-2 client rewrites the manifest without `pdfs`; without this repair the
- * next push would re-upload every image. Returns the repaired entry, or null
- * when nothing changed.
+ * Rebuilds a manifest entry's image hashes from a downloaded (or locally
+ * repaired) notebook. A version-2 client rewrites the manifest without `pdfs`;
+ * without this repair the next push would re-upload every image. It never
+ * touches `updatedAt`/`name`: a local notebook that was not uploaded must keep
+ * describing the remote body, otherwise a sync would report it as in sync while
+ * the server still holds the old copy. Returns the repaired entry, or null when
+ * nothing changed.
  */
 function repairPdfHashes(
   entry: SyncManifestNotebook,
@@ -158,6 +161,21 @@ function repairPdfHashes(
   if (Object.keys(next).length > 0) repaired.pdfs = next
   else delete repaired.pdfs
   return repaired
+}
+
+/**
+ * Makes a manifest entry describe the notebook body that was just downloaded.
+ * A stale `updatedAt` here never equals the local baseline again, so `buildPlan`
+ * would pull the same notebook (and re-download every PDF page) on every single
+ * sync. Only the pull path may use this: it is the only one that knows the entry
+ * and the body are the same remote content.
+ */
+function entryForBody(
+  entry: SyncManifestNotebook,
+  notebook: Notebook,
+): SyncManifestNotebook {
+  if (entry.updatedAt === notebook.updatedAt && entry.name === notebook.name) return entry
+  return { ...entry, name: notebook.name, updatedAt: notebook.updatedAt }
 }
 
 /**
@@ -335,22 +353,59 @@ export function describeBitmapBody(bytes: Uint8Array): string {
 const NOTEBOOK_PULL_CONCURRENCY = 2
 
 /**
+ * Resolves the bitmap already stored on this device for a page, but only when
+ * it is byte-identical to the remote file: the manifest hash is the same
+ * fingerprint a push compares, so a matching hash means the local PNG is exactly
+ * what `pdfs/<pageId>.png` holds. The bitmap is read page by page (never the
+ * whole notebook), so a PDF-heavy pull keeps the same bounded memory as before.
+ */
+type PdfBitmapReuse = (pageId: string) => Promise<string | undefined>
+
+function pdfBitmapReuse(
+  hashes: Record<string, string> | undefined,
+  getPagePdfDataUrl: ((pageId: string) => Promise<string | undefined>) | undefined,
+): PdfBitmapReuse | undefined {
+  if (!hashes || !getPagePdfDataUrl) return undefined
+  return async (pageId) => {
+    const hash = hashes[pageId]
+    if (!hash) return undefined
+    try {
+      const dataUrl = await getPagePdfDataUrl(pageId)
+      return dataUrl && pdfHash(dataUrl) === hash ? dataUrl : undefined
+    } catch {
+      // The reuse is an optimization only: an unreadable local bitmap must never
+      // fail the pull, it just means the page is downloaded as before.
+      return undefined
+    }
+  }
+}
+
+/**
  * Rehydrates the PDF backgrounds of a downloaded notebook from
  * `pdfs/<pageId>.png`. Only "light" pages are fetched (a page whose JSON still
- * carries the dataUrl, or has no PDF, is left alone). A missing file (404)
- * leaves that page without a background instead of failing the pull; a network
- * failure aborts the pull so it is retried on the next sync.
+ * carries the dataUrl, or has no PDF, is left alone). A page whose local bitmap
+ * has the same hash as the remote file is reused (`reuse`), so an unchanged PDF
+ * page is never transferred again. A missing file (404) leaves that page
+ * without a background instead of failing the pull; a network failure aborts
+ * the pull so it is retried on the next sync.
  */
 async function hydratePdfBackgrounds(
   basePath: string,
   transport: Transport,
   notebook: Notebook,
   hooks?: PdfBitmapHooks,
+  reuse?: PdfBitmapReuse,
 ): Promise<Notebook> {
   const pending = notebook.pages.filter((page) => page.pdf && !page.pdf.dataUrl)
   if (pending.length === 0) return notebook
   const dataUrls = new Map<string, string>()
   await mapLimit(pending, PDF_BITMAP_DOWNLOADS, async (page) => {
+    const localDataUrl = reuse ? await reuse(page.id) : undefined
+    if (localDataUrl) {
+      dataUrls.set(page.id, localDataUrl)
+      hooks?.onReused?.(notebook.id, page.id)
+      return
+    }
     hooks?.onStart?.(notebook.id, page.id)
     try {
       const bytes = await downloadPdfBitmap(basePath, transport, page.id)
@@ -485,6 +540,16 @@ async function repairLocalPdfBitmaps(
   return { repaired, unresolved }
 }
 
+interface DownloadNotebookOptions {
+  /**
+   * The manifest entry's image hashes. With `getPagePdfDataUrl` they let the
+   * download reuse a bitmap this device already holds instead of transferring
+   * `pdfs/<pageId>.png` again (same fingerprint a push and a pull compare).
+   */
+  pdfHashes?: Record<string, string>
+  getPagePdfDataUrl?: (pageId: string) => Promise<string | undefined>
+}
+
 /**
  * Downloads one notebook with its PDF backgrounds rehydrated. Used by the trash
  * "restore from cloud", which reads a remote notebook outside the sync plan.
@@ -493,9 +558,11 @@ export async function downloadNotebook(
   basePath: string,
   transport: Transport,
   id: string,
+  options: DownloadNotebookOptions = {},
 ): Promise<Notebook> {
   const text = await transport.downloadFile(notebookPath(basePath, id))
-  return hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
+  const reuse = pdfBitmapReuse(options.pdfHashes, options.getPagePdfDataUrl)
+  return hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text), undefined, reuse)
 }
 
 function notebookDisplayPath(
@@ -633,6 +700,11 @@ export interface PdfBitmapHooks {
   onStart?: (notebookId: string, pageId: string) => void
   onDone?: (notebookId: string, pageId: string, bytes: number) => void
   onFailed?: (notebookId: string, pageId: string) => void
+  /**
+   * The page was not downloaded because the local bitmap already matches the
+   * remote hash. It is finished work, so it still advances the percentage.
+   */
+  onReused?: (notebookId: string, pageId: string) => void
 }
 
 export interface SyncInput {
@@ -648,6 +720,12 @@ export interface SyncInput {
    * restores them from the remote image even when the notebook is not pulled.
    */
   findMissingPdfBitmaps?: () => Promise<PendingPdfBitmap[]>
+  /**
+   * Bitmap already stored on this device for a page, if any. A pull uses it to
+   * skip re-downloading a page whose local image still matches the manifest
+   * hash. Read per page so a PDF-heavy notebook is never loaded all at once.
+   */
+  getPagePdfDataUrl?: (pageId: string) => Promise<string | undefined>
   onProgress?: (progress: SyncProgress) => void
 }
 
@@ -1108,6 +1186,7 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
   }
   let downloadedPdfBytes = 0
   let downloadedPdfBitmaps = 0
+  let reusedPdfBitmaps = 0
   const pdfByNotebook = new Map<string, { pages: number; bytes: number }>()
   const plannedPdfPages = (ids: string[]) =>
     ids.reduce(
@@ -1146,6 +1225,13 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     onFailed: (_notebookId, pageId) => {
       completed++
       report('download', pdfFilePath(basePath, pageId))
+    },
+    // A page whose local bitmap already matches the remote hash is not
+    // transferred; it is still one finished step, so the bar stays honest.
+    onReused: (_notebookId, _pageId) => {
+      reusedPdfBitmaps++
+      completed++
+      report('download', null)
     },
   }
   total = Math.max(
@@ -1217,11 +1303,18 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
       report('download', displayFile(id, manifest.notebooks.find((entry) => entry.id === id)?.name))
       try {
         const text = await transport.downloadFile(notebookPath(basePath, id))
+        const body = parseNotebookFile(text)
+        // Only the PDF pages that really changed cost a download.
+        const reuse = pdfBitmapReuse(
+          manifest.notebooks.find((entry) => entry.id === id)?.pdfs,
+          input.getPagePdfDataUrl,
+        )
         const nb = await hydratePdfBackgrounds(
           basePath,
           transport,
-          parseNotebookFile(text),
+          body,
           pdfHooks,
+          reuse,
         )
         return { kind: 'pulled' as const, notebook: nb }
       } catch (e) {
@@ -1274,12 +1367,16 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
         pulledNotebooks.push(nb)
         state.notebooks[id] = nb.updatedAt
         result.pulled.push(nb.name)
-        // Heal image hashes an older client may have dropped from the manifest.
+        // Heal an entry that does not describe the body just read: image hashes
+        // an older client dropped, and a stale timestamp that would otherwise
+        // pull this notebook again on every sync.
         const entry = manifest.notebooks.find((n) => n.id === id)
-        const repaired = entry ? repairPdfHashes(entry, nb) : null
-        if (repaired) {
-          manifest = upsertManifestNotebook(manifest, repaired)
-          manifestChanged = true
+        if (entry) {
+          const healed = entryForBody(repairPdfHashes(entry, nb) ?? entry, nb)
+          if (healed !== entry) {
+            manifest = upsertManifestNotebook(manifest, healed)
+            manifestChanged = true
+          }
         }
         break
       }
@@ -1507,10 +1604,11 @@ export async function runSync(input: SyncInput): Promise<SyncOutput> {
     report(result.errors.length > 0 ? 'error' : 'complete', null)
   }
 
-  if (downloadedPdfBitmaps > 0) {
+  if (downloadedPdfBitmaps > 0 || reusedPdfBitmaps > 0) {
     logger.info('Sync PDF download summary', {
       bitmaps: downloadedPdfBitmaps,
       bytes: downloadedPdfBytes,
+      reused: reusedPdfBitmaps,
     })
   }
 
@@ -1542,6 +1640,8 @@ export interface ConflictResolutionInput {
   state: CloudSyncState
   manifest: SyncManifest
   getNotebook: (id: string) => Promise<Notebook | undefined>
+  /** Same local-bitmap reuse as a normal pull, for `useServer`/`restoreFromServer`. */
+  getPagePdfDataUrl?: (pageId: string) => Promise<string | undefined>
   onProgress?: (progress: SyncProgress) => void
 }
 
@@ -1582,7 +1682,15 @@ export async function applyConflictChoices(
 
   const loadRemote = async (id: string): Promise<Notebook> => {
     const text = await transport.downloadFile(notebookPath(basePath, id))
-    return hydratePdfBackgrounds(basePath, transport, parseNotebookFile(text))
+    const body = parseNotebookFile(text)
+    // Accepting the server copy must not re-download the PDF pages this device
+    // already holds: a bitmap whose hash matches the manifest is the remote
+    // file, so the local bytes are reused.
+    const reuse = pdfBitmapReuse(
+      manifest.notebooks.find((entry) => entry.id === id)?.pdfs,
+      input.getPagePdfDataUrl,
+    )
+    return hydratePdfBackgrounds(basePath, transport, body, undefined, reuse)
   }
 
   for (const [index, [id, choice]] of choiceEntries.entries()) {

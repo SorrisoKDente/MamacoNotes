@@ -48,6 +48,8 @@ import {
   downloadNotebook,
   FOLDERS_PATH,
   hashFolders,
+  MANIFEST_PATH,
+  parseManifest,
   runSync,
   shouldScanPdfBitmaps,
   TOMBSTONE_RETENTION_MS,
@@ -1358,7 +1360,9 @@ export const useAppStore = create<AppState>((set, get) => {
         await db.deleteFolder(fid)
       }
       for (const nb of childNotebooks) {
-        await db.deleteNotebook(nb.id)
+        // Same rule as `deleteNotebook`: a trash entry with no body keeps the
+        // bitmaps so "restore from cloud" can reuse them.
+        await db.deleteNotebook(nb.id, { keepPdfImages: cloudKeepsCopy })
       }
       if (configured && scope === 'remote') {
         void get().syncNow('delete')
@@ -1636,7 +1640,9 @@ export const useAppStore = create<AppState>((set, get) => {
         await db.putTrashItem(item)
         set({ trash: sortTrash([item, ...get().trash]) })
       }
-      await db.deleteNotebook(id)
+      // The cloud keeps the body, so keep the bitmaps too: "restore from cloud"
+      // reuses them instead of downloading every PDF page again.
+      await db.deleteNotebook(id, { keepPdfImages: cloudKeepsCopy })
       if (configured && scope === 'remote') {
         void get().syncNow('delete')
       }
@@ -2313,6 +2319,7 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
             getNotebook: (id) => db.getNotebook(id),
+            getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
             findMissingPdfBitmaps: repairPdfBitmaps
               ? async () => {
                   let scanned: PendingPdfBitmap[] = []
@@ -2477,6 +2484,7 @@ export const useAppStore = create<AppState>((set, get) => {
           state: resume.state,
           manifest: resume.manifest,
           getNotebook: (id) => db.getNotebook(id),
+          getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
           onProgress: (progress) => set({ syncProgress: progress }),
         })
         await applySyncChanges({
@@ -2754,8 +2762,23 @@ export const useAppStore = create<AppState>((set, get) => {
       } else {
         // `downloadNotebook` rehydrates the PDF backgrounds from their separate
         // `pdfs/<pageId>.png` files, so a notebook restored from the cloud does
-        // not come back with blank PDF pages.
-        const nb = await downloadNotebook(cloud.webdavPath, transport, id)
+        // not come back with blank PDF pages. The manifest hashes let it reuse
+        // the bitmaps this device kept while the notebook sat in the trash,
+        // instead of downloading every page again. An unreadable manifest only
+        // costs those downloads, never the restore itself.
+        let pdfHashes: Record<string, string> | undefined
+        try {
+          const manifest = parseManifest(
+            await transport.downloadFile(`${cloud.webdavPath}/${MANIFEST_PATH}`),
+          )
+          pdfHashes = manifest.notebooks.find((entry) => entry.id === id)?.pdfs
+        } catch (e) {
+          logger.warn('Trash restore: cloud index unreadable, PDF pages will be downloaded', e)
+        }
+        const nb = await downloadNotebook(cloud.webdavPath, transport, id, {
+          pdfHashes,
+          getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
+        })
         const norm = normalizeRestoredNotebook(nb)
         const summary: NotebookSummary = {
           id: norm.id,
@@ -2772,6 +2795,12 @@ export const useAppStore = create<AppState>((set, get) => {
         else notebooks.push(summary)
         set({ notebooks: sortNotebooksByOrder(notebooks), dataVersion: get().dataVersion + 1 })
         await db.putNotebook(norm)
+        // Drop the kept bitmaps of pages the remote body no longer has, so the
+        // retention never outlives the notebook it was kept for.
+        await db.deletePdfImagesForNotebook(
+          id,
+          new Set(norm.pages.map((page) => page.id)),
+        )
         restored = true
       }
       if (!restored) {
@@ -2791,6 +2820,10 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async purgeTrashItem(id) {
+      const item = get().trash.find((x) => x.id === id)
+      // A trashed notebook keeps its bitmaps in `pdfImages` for a cheap cloud
+      // restore; purging the entry is what releases that storage.
+      if (item?.kind === 'notebook') await db.deletePdfImagesForNotebook(id)
       await removeTrashEntry(id)
     },
 

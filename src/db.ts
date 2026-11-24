@@ -460,6 +460,25 @@ async function readPageRecords(notebookId: string): Promise<PageRecord[]> {
   })
 }
 
+/** Deletes the `pdfImages` records of one notebook, sparing `keepPageIds`. */
+function clearPdfImages(
+  store: IDBObjectStore,
+  notebookId: string,
+  keepPageIds?: ReadonlySet<string>,
+): void {
+  const cursor = store.index('byNotebook').openCursor(IDBKeyRange.only(notebookId))
+  cursor.onsuccess = () => {
+    const cur = cursor.result
+    if (!cur) return
+    const { pageId } = cur.value as PdfImageRecord
+    if (!keepPageIds?.has(pageId)) {
+      knownPdfLength.delete(pageId)
+      cur.delete()
+    }
+    cur.continue()
+  }
+}
+
 export const db = {
   async getFolders(): Promise<Folder[]> {
     const all = await tx('folders', 'readonly', (s) => s.getAll())
@@ -511,6 +530,13 @@ export const db = {
       }
     }
     return page
+  },
+  /** Bitmap already stored for a page (one record, never the whole notebook). */
+  async getPagePdfDataUrl(pageId: string): Promise<string | undefined> {
+    const record = await tx<PdfImageRecord | undefined>('pdfImages', 'readonly', (s) =>
+      s.get(pageId),
+    )
+    return record?.dataUrl
   },
   /**
    * Pages that still reference a PDF background but whose bitmap is not in the
@@ -622,7 +648,14 @@ export const db = {
       t.onabort = () => reject(t.error)
     })
   },
-  async deleteNotebook(id: string): Promise<void> {
+  /**
+   * Removes a notebook and its pages. `keepPdfImages` leaves the PDF bitmaps in
+   * `pdfImages`: a notebook trashed while the cloud keeps the copy stores no body
+   * in the trash entry, so those bitmaps are what let "restore from cloud" reuse
+   * them instead of downloading every page again. `deletePdfImagesForNotebook`
+   * releases them when that trash entry is purged.
+   */
+  async deleteNotebook(id: string, options: { keepPdfImages?: boolean } = {}): Promise<void> {
     const db = await openDb()
     return new Promise((resolve, reject) => {
       const t = db.transaction(['notebooks', 'pages', 'pdfImages'], 'readwrite')
@@ -638,19 +671,29 @@ export const db = {
         cur.delete()
         cur.continue()
       }
-      const pdfStore = t.objectStore('pdfImages')
-      const pdfCursor = pdfStore.index('byNotebook').openCursor(IDBKeyRange.only(id))
-      pdfCursor.onsuccess = () => {
-        const cur = pdfCursor.result
-        if (!cur) return
-        knownPdfLength.delete(cur.value.pageId)
-        cur.delete()
-        cur.continue()
-      }
+      if (!options.keepPdfImages) clearPdfImages(t.objectStore('pdfImages'), id)
       t.oncomplete = () => {
         for (const pageId of droppedPageIds) knownPageState.delete(pageId)
         resolve()
       }
+      t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
+    })
+  },
+  /**
+   * Drops the PDF bitmaps of a notebook. `keepPageIds` spares the pages the
+   * notebook still has: a cloud restore may no longer carry a page whose bitmap
+   * was retained for it, and that bitmap would otherwise stay orphaned forever.
+   */
+  async deletePdfImagesForNotebook(
+    id: string,
+    keepPageIds?: ReadonlySet<string>,
+  ): Promise<void> {
+    const db = await openDb()
+    return new Promise((resolve, reject) => {
+      const t = db.transaction('pdfImages', 'readwrite')
+      clearPdfImages(t.objectStore('pdfImages'), id, keepPageIds)
+      t.oncomplete = () => resolve()
       t.onerror = () => reject(t.error)
       t.onabort = () => reject(t.error)
     })

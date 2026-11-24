@@ -210,6 +210,7 @@ interface Stub {
   url: string
   requests: string[]
   put(path: string, bytes: Uint8Array | string): void
+  get(path: string): Uint8Array | undefined
   stop(): void
 }
 
@@ -220,6 +221,9 @@ async function startWebdavStub(): Promise<Stub> {
     requests: [],
     put(path, bytes) {
       files.set(path, typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes)
+    },
+    get(path) {
+      return files.get(path)
     },
     stop() {
       server.closeAllConnections()
@@ -524,6 +528,402 @@ async function main(): Promise<void> {
   assert(
     progress2.some((p) => p.completed === p.total && p.total >= 3),
     'junk run: the last step equals the total work (nothing is left pending in the bar)',
+  )
+
+  console.log('== a stroke-only remote edit reuses the local PDF bitmaps ==')
+
+  // Same pages and the same image hashes, only `updatedAt` moved: this is what
+  // a stroke on another device looks like. The bitmaps are already on this
+  // device, so not one `pdfs/<pageId>.png` may be transferred again.
+  const edited = { ...nb, updatedAt: 3000 }
+  stub.put(`${BASE}/notebooks/${nb.id}.json`, notebookFile(edited))
+  stub.put(
+    `${BASE}/${MANIFEST_PATH}`,
+    serializeManifest({
+      version: 3,
+      updatedAt: 3000,
+      folders: { updatedAt: 0 },
+      notebooks: [
+        { id: nb.id, name: nb.name, updatedAt: 3000, deleted: false, pdfs },
+        manifestEntry,
+      ],
+    }),
+  )
+
+  const beforeReuse = stub.requests.length
+  const nativeBeforeReuse = nativeCalls.length
+  const reuseRun = await useAppStore.getState().syncNow('manual')
+  const reuseRequests = stub.requests.slice(beforeReuse)
+
+  assert(reuseRun !== null && reuseRun.errors.length === 0, 'reuse run: finished without errors')
+  assert(
+    reuseRun?.pulled.length === 1 && reuseRun.pulled[0] === nb.name,
+    'reuse run: the edited notebook was pulled',
+  )
+  assert(
+    reuseRequests.some((r) => r === `GET ${BASE}/notebooks/${nb.id}.json`),
+    'reuse run: the notebook body was downloaded',
+  )
+  assert(
+    reuseRequests.every((r) => !r.includes('/pdfs/')),
+    `reuse run: no PDF bitmap was downloaded again (${reuseRequests.filter((r) => r.includes('/pdfs/')).join(', ')})`,
+  )
+  assert(
+    nativeCalls.slice(nativeBeforeReuse).filter((call) => call.url.includes('.png')).length === 0,
+    'reuse run: the Android bridge issued no bitmap request',
+  )
+  const afterReuse = await db.getNotebook(nb.id)
+  for (const [pageId, bytes] of images) {
+    assert(
+      afterReuse?.pages.find((p) => p.id === pageId)?.pdf?.dataUrl === encodePngDataUrl(bytes),
+      `reuse run: ${pageId} kept its byte-identical bitmap`,
+    )
+  }
+
+  console.log('== only the PDF page whose image changed is downloaded ==')
+
+  const changedBytes = makePng(320_000, 4)
+  const pdfs2 = { ...pdfs, p2: pdfHash(encodePngDataUrl(changedBytes)) }
+  stub.put(`${BASE}/pdfs/p2.png`, changedBytes)
+  stub.put(`${BASE}/notebooks/${nb.id}.json`, notebookFile({ ...nb, updatedAt: 4000 }))
+  stub.put(
+    `${BASE}/${MANIFEST_PATH}`,
+    serializeManifest({
+      version: 3,
+      updatedAt: 4000,
+      folders: { updatedAt: 0 },
+      notebooks: [
+        { id: nb.id, name: nb.name, updatedAt: 4000, deleted: false, pdfs: pdfs2 },
+        manifestEntry,
+      ],
+    }),
+  )
+
+  const beforeChange = stub.requests.length
+  const changeRun = await useAppStore.getState().syncNow('manual')
+  const changeRequests = stub.requests.slice(beforeChange)
+  const changedPdfRequests = changeRequests.filter((r) => r.includes('/pdfs/'))
+
+  assert(changeRun !== null && changeRun.errors.length === 0, 'changed page run: finished without errors')
+  assert(
+    changedPdfRequests.length > 0 && changedPdfRequests.every((r) => r.endsWith('/pdfs/p2.png')),
+    `changed page run: only p2 was transferred (${changedPdfRequests.join(', ')})`,
+  )
+  const afterChange = await db.getNotebook(nb.id)
+  assert(
+    afterChange?.pages.find((p) => p.id === 'p1')?.pdf?.dataUrl === encodePngDataUrl(images.get('p1')!),
+    'changed page run: the unchanged pages kept their local bitmaps',
+  )
+  assert(
+    afterChange?.pages.find((p) => p.id === 'p2')?.pdf?.dataUrl === encodePngDataUrl(changedBytes),
+    'changed page run: the changed page got the new bitmap',
+  )
+
+  console.log('== a local edit is pushed without re-uploading the PDFs ==')
+
+  // The push path must keep working with the reuse added to pulls: a local edit
+  // uploads the notebook JSON only (the manifest hashes match the remote
+  // images), keeps the pages' PDF metadata and never uploads a PNG again.
+  const localCopy = await db.getNotebook(nb.id)
+  assert(localCopy !== undefined, 'push run: the local notebook is available')
+  const localEdit: Notebook = {
+    ...localCopy!,
+    pages: localCopy!.pages.map((page, index) =>
+      index === 0 ? { ...page, rotation: 90, updatedAt: Date.now() } : page,
+    ),
+  }
+  await useAppStore.getState().persistNotebook(localEdit)
+
+  const beforePush = stub.requests.length
+  const nativeBeforePush = nativeCalls.length
+  const pushRun = await useAppStore.getState().syncNow('manual')
+  const pushRequests = stub.requests.slice(beforePush)
+
+  assert(pushRun !== null && pushRun.errors.length === 0, 'push run: finished without errors')
+  assert(
+    pushRun?.pushed.length === 1 && pushRun.pushed[0] === nb.name,
+    `push run: the local edit was pushed (${pushRun?.pushed.join(', ') || 'none'})`,
+  )
+  assert(pushRun?.pulled.length === 0, 'push run: the edit was not pulled over')
+  assert(
+    pushRequests.every((r) => !r.includes('/pdfs/')),
+    `push run: no PDF image was re-uploaded (${pushRequests.filter((r) => r.includes('/pdfs/')).join(', ')})`,
+  )
+  assert(
+    nativeCalls.slice(nativeBeforePush).filter((call) => call.url.includes('.png')).length === 0,
+    'push run: the Android bridge issued no bitmap upload',
+  )
+
+  const manifestFile = stub.get(`${BASE}/${MANIFEST_PATH}`)
+  const pushedBody = JSON.parse(
+    new TextDecoder().decode(stub.get(`${BASE}/notebooks/${nb.id}.json`)!),
+  ) as { notebook: Notebook }
+  assert(
+    pushedBody.notebook.pages.every((page) => !page.pdf?.dataUrl),
+    'push run: the remote notebook JSON carries no inline bitmap',
+  )
+  assert(pushedBody.notebook.updatedAt === localEdit.updatedAt, 'push run: the remote body has the local edit')
+  assert(pushedBody.notebook.pages[0]?.rotation === 90, 'push run: the edit itself reached the server')
+
+  type StoredManifest = {
+    updatedAt: number
+    folders: { updatedAt: number }
+    notebooks: { id: string; name: string; updatedAt: number; deleted: boolean; pdfs?: Record<string, string> }[]
+  }
+  const pushedManifest = JSON.parse(new TextDecoder().decode(manifestFile!)) as StoredManifest
+  const pushedEntry = pushedManifest.notebooks.find((entry) => entry.id === nb.id)
+  assert(
+    pushedEntry?.updatedAt === localEdit.updatedAt,
+    'push run: the manifest entry follows the pushed body',
+  )
+  assert(
+    JSON.stringify(pushedEntry?.pdfs) === JSON.stringify(pdfs2),
+    'push run: the PDF hashes survive the push',
+  )
+
+  console.log('== an unchanged second run syncs nothing ==')
+
+  // Everything above is already on both sides: the next run must be a no-op.
+  // Re-downloading the notebooks or their PDF bitmaps here is the "syncs every
+  // page again" regression, which costs a full transfer per stroke on mobile.
+  const requestsBeforeIdleRun = stub.requests.length
+  const nativeBeforeIdleRun = nativeCalls.length
+  const idle = await useAppStore.getState().syncNow('manual')
+  const idleRequests = stub.requests.slice(requestsBeforeIdleRun)
+  const idleNative = nativeCalls.slice(nativeBeforeIdleRun)
+
+  assert(idle !== null && idle.errors.length === 0, 'idle run: finished without errors')
+  assert(
+    idle?.pulled.length === 0 && idle?.pushed.length === 0,
+    `idle run: nothing was pushed or pulled (${idle?.pushed.length ?? -1} pushed, ${idle?.pulled.length ?? -1} pulled)`,
+  )
+  assert(
+    idleRequests.every((r) => !r.includes('/pdfs/')),
+    `idle run: no PDF bitmap was downloaded again (${idleRequests.filter((r) => r.includes('/pdfs/')).join(', ')})`,
+  )
+  assert(
+    idleRequests.every((r) => !r.includes('/notebooks/')),
+    `idle run: no notebook body was downloaded or uploaded again (${idleRequests.filter((r) => r.includes('/notebooks/')).join(', ')})`,
+  )
+  assert(
+    idleNative.filter((call) => call.url.includes('.png')).length === 0,
+    'idle run: the Android bridge issued no bitmap request',
+  )
+
+  console.log('== accepting the server copy reuses the local PDF bitmaps ==')
+
+  // A real conflict (local and remote both newer than the baseline). Choosing
+  // "use server" must apply the remote body without re-downloading the PDF
+  // pages this device already has.
+  const conflictLocal = await db.getNotebook(nb.id)
+  const conflictingEdit: Notebook = {
+    ...conflictLocal!,
+    pages: conflictLocal!.pages.map((page, index) =>
+      index === 0 ? { ...page, rotation: 180, updatedAt: Date.now() } : page,
+    ),
+  }
+  await useAppStore.getState().persistNotebook(conflictingEdit)
+  const remoteConflict = { ...pushedBody.notebook, updatedAt: localEdit.updatedAt + 1000 }
+  stub.put(`${BASE}/notebooks/${nb.id}.json`, notebookFile(remoteConflict))
+  stub.put(
+    `${BASE}/${MANIFEST_PATH}`,
+    JSON.stringify({
+      ...pushedManifest,
+      updatedAt: remoteConflict.updatedAt,
+      notebooks: pushedManifest.notebooks.map((entry) =>
+        entry.id === nb.id ? { ...entry, updatedAt: remoteConflict.updatedAt } : entry,
+      ),
+    }),
+  )
+
+  const conflictRun = await useAppStore.getState().syncNow('manual')
+  assert(
+    conflictRun?.conflicts.length === 1,
+    `conflict run: both edits are reported as a conflict (${conflictRun?.conflicts.length ?? -1})`,
+  )
+
+  const beforeResolve = stub.requests.length
+  const nativeBeforeResolve = nativeCalls.length
+  await useAppStore.getState().resolveConflicts({ [nb.id]: 'useServer' })
+  const resolveRequests = stub.requests.slice(beforeResolve)
+
+  assert(
+    resolveRequests.every((r) => !r.includes('/pdfs/')),
+    `conflict resolve: no PDF bitmap was downloaded (${resolveRequests.filter((r) => r.includes('/pdfs/')).join(', ')})`,
+  )
+  assert(
+    nativeCalls.slice(nativeBeforeResolve).filter((call) => call.url.includes('.png')).length === 0,
+    'conflict resolve: the Android bridge issued no bitmap request',
+  )
+  const resolved = await db.getNotebook(nb.id)
+  assert(
+    resolved?.updatedAt === remoteConflict.updatedAt,
+    'conflict resolve: the server copy replaced the local edit',
+  )
+  assert(resolved?.pages[0]?.rotation !== 180, 'conflict resolve: the local rotation was discarded')
+  for (const [pageId, bytes] of [['p1', images.get('p1')!], ['p3', images.get('p3')!]] as const) {
+    assert(
+      resolved?.pages.find((p) => p.id === pageId)?.pdf?.dataUrl === encodePngDataUrl(bytes),
+      `conflict resolve: ${pageId} kept its local bitmap`,
+    )
+  }
+
+  console.log('== restoring from the cloud reuses the local PDF bitmaps ==')
+
+  // "Restore from cloud" (trash) reads a notebook outside the sync plan. A
+  // notebook trashed while the cloud keeps the copy stores no body in the trash
+  // entry, so it must keep its bitmaps locally: restoring it downloads the
+  // notebook JSON and no `pdfs/<pageId>.png`.
+  await useAppStore.getState().deleteNotebook(nb.id, 'local')
+  const trashed = useAppStore.getState().trash.find((item) => item.id === nb.id)
+  assert(trashed?.cloudKeepsCopy === true, 'trash restore: the notebook waits for a cloud restore')
+  assert(
+    (await db.getNotebook(nb.id)) === undefined,
+    'trash restore: the local notebook body was removed',
+  )
+
+  // The remote body lost p3 while the notebook sat in the trash: the restore
+  // must reuse p1/p2 and must not keep the bitmap of a page that is gone.
+  stub.put(
+    `${BASE}/notebooks/${nb.id}.json`,
+    notebookFile({
+      ...remoteConflict,
+      pages: remoteConflict.pages.filter((page) => page.id !== 'p3'),
+    }),
+  )
+
+  const beforeRestore = stub.requests.length
+  const nativeBeforeRestore = nativeCalls.length
+  await useAppStore.getState().restoreFromCloud(nb.id)
+  const restoreRequests = stub.requests.slice(beforeRestore)
+
+  assert(
+    restoreRequests.some((r) => r === `GET ${BASE}/notebooks/${nb.id}.json`),
+    'trash restore: the notebook body was downloaded',
+  )
+  assert(
+    restoreRequests.every((r) => !r.includes('/pdfs/')),
+    `trash restore: no PDF bitmap was downloaded (${restoreRequests.filter((r) => r.includes('/pdfs/')).join(', ')})`,
+  )
+  assert(
+    nativeCalls.slice(nativeBeforeRestore).filter((call) => call.url.includes('.png')).length === 0,
+    'trash restore: the Android bridge issued no bitmap request',
+  )
+  assert(
+    useAppStore.getState().notebooks.some((n) => n.id === nb.id),
+    'trash restore: the notebook is back in the list',
+  )
+  assert(
+    !useAppStore.getState().trash.some((item) => item.id === nb.id),
+    'trash restore: the trash entry is gone',
+  )
+  const restoredFromCloud = await db.getNotebook(nb.id)
+  assert(restoredFromCloud !== undefined, 'trash restore: the notebook is back in IndexedDB')
+  for (const [pageId, bytes] of [
+    ['p1', images.get('p1')!],
+    ['p2', changedBytes],
+  ] as const) {
+    assert(
+      restoredFromCloud?.pages.find((p) => p.id === pageId)?.pdf?.dataUrl === encodePngDataUrl(bytes),
+      `trash restore: ${pageId} kept its byte-identical bitmap`,
+    )
+  }
+  assert(
+    restoredFromCloud?.pages.some((page) => page.id === 'p3') === false,
+    'trash restore: the page removed remotely is gone',
+  )
+  assert(
+    (await db.getPagePdfDataUrl('p3')) === undefined,
+    'trash restore: the bitmap of the removed page is pruned',
+  )
+
+  console.log('== a stale manifest timestamp is healed instead of pulling forever ==')
+
+  // A manifest entry that does not match the body it describes (written by an
+  // older client) never equals the baseline again, so without healing the same
+  // notebook would be pulled, with all its pages, on every sync. The body is
+  // left untouched: only the entry timestamp is ahead of it.
+  const currentManifest = JSON.parse(
+    new TextDecoder().decode(stub.get(`${BASE}/${MANIFEST_PATH}`)!),
+  ) as StoredManifest
+  const currentEntry = currentManifest.notebooks.find((entry) => entry.id === nb.id)
+  const staleUpdatedAt = (currentEntry?.updatedAt ?? 0) + 1000
+  stub.put(
+    `${BASE}/${MANIFEST_PATH}`,
+    JSON.stringify({
+      ...currentManifest,
+      updatedAt: staleUpdatedAt,
+      notebooks: currentManifest.notebooks.map((entry) =>
+        entry.id === nb.id ? { ...entry, updatedAt: staleUpdatedAt } : entry,
+      ),
+    }),
+  )
+
+  const beforeStale = stub.requests.length
+  const staleRun = await useAppStore.getState().syncNow('manual')
+  assert(staleRun?.pulled.length === 1, 'stale entry: the body is read once')
+  assert(
+    stub.requests.slice(beforeStale).every((r) => !r.includes('/pdfs/')),
+    'stale entry: the pull reuses the local bitmaps',
+  )
+
+  const requestsBeforeHealed = stub.requests.length
+  const healedRun = await useAppStore.getState().syncNow('manual')
+  const healedRequests = stub.requests.slice(requestsBeforeHealed)
+  assert(
+    healedRun?.pulled.length === 0 && healedRun?.pushed.length === 0,
+    `stale entry: the healed manifest leaves nothing to sync (${healedRun?.pulled.length ?? -1} pulled)`,
+  )
+  assert(
+    healedRequests.every((r) => !r.includes('/notebooks/') && !r.includes('/pdfs/')),
+    `stale entry: no body or bitmap is transferred again (${healedRequests.filter((r) => r.includes('/notebooks/') || r.includes('/pdfs/')).join(', ')})`,
+  )
+
+  console.log('== purging a trashed notebook releases its kept bitmaps ==')
+
+  // The bitmaps kept for a cloud restore must not outlive the trash entry, so a
+  // purge drops them from `pdfImages`.
+  const keptPageId = restoredFromCloud!.pages[0]!.id
+  assert(
+    (await db.getPagePdfDataUrl(keptPageId)) !== undefined,
+    'trash purge: the notebook still owns its bitmap',
+  )
+  await useAppStore.getState().deleteNotebook(nb.id, 'local')
+  assert(
+    (await db.getPagePdfDataUrl(keptPageId)) !== undefined,
+    'trash purge: the trash keeps the bitmap for the restore',
+  )
+  await useAppStore.getState().purgeTrashItem(nb.id)
+  assert(
+    (await db.getPagePdfDataUrl(keptPageId)) === undefined,
+    'trash purge: purging the entry drops the kept bitmap',
+  )
+
+  console.log('== deleting a folder keeps the bitmaps of its notebooks ==')
+
+  // Deleting a folder with "cloud keeps the copy" trashes its notebooks without
+  // a body, so their bitmaps must survive just like a direct notebook delete.
+  const folder = await useAppStore.getState().addFolder('Folder with PDF')
+  await useAppStore.getState().moveNotebook(junk.id, folder.id)
+  await useAppStore.getState().deleteFolder(folder.id, 'local')
+  assert(
+    useAppStore.getState().trash.find((item) => item.id === junk.id)?.cloudKeepsCopy === true,
+    'folder delete: the child notebook waits for a cloud restore',
+  )
+  assert(
+    (await db.getPagePdfDataUrl('good')) !== undefined,
+    'folder delete: the child notebook keeps its PDF bitmap',
+  )
+  const beforeFolderRestore = stub.requests.length
+  await useAppStore.getState().restoreFromCloud(junk.id)
+  assert(
+    !stub.requests.slice(beforeFolderRestore).includes(`GET ${BASE}/pdfs/good.png`),
+    'folder delete: restoring the child notebook reuses its bitmap',
+  )
+  assert(
+    (await db.getNotebook(junk.id))?.pages.find((p) => p.id === 'good')?.pdf?.dataUrl ===
+      encodePngDataUrl(images.get('p1')!),
+    'folder delete: the restored notebook has its bitmap back',
   )
 
   stub.stop()

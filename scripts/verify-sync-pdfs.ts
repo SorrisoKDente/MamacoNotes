@@ -801,9 +801,53 @@ console.log('== locally lost bitmap is healed from the remote image ==')
   assert(out.unrepairedPdfBitmaps.length === 0, 'heal: a 404 is not queued for retry')
   assert(t.uploads.length === 0, 'heal: nothing uploaded to the server')
   const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
+  const healedEntry = manifest.notebooks.find((n) => n.id === stripped.id)
+  assert(healedEntry?.pdfs?.['p1'] === hash, 'heal: manifest hash kept')
+  // The heal restored a local image; it did not upload the notebook, so the
+  // entry must keep describing the remote body (a rewritten timestamp would
+  // make the next run report the notebook as in sync or raise a conflict).
+  assert(healedEntry?.updatedAt === 2000, 'heal: manifest timestamp is left alone')
+}
+
+console.log('== heal never claims a local edit is synced ==')
+
+{
+  const t = new FakeTransport()
+  // Both sides changed (local 3000, remote entry 2500): a conflict, no push.
+  const local = makeNotebook('nb-heal-conflict', 'Edit', 3000, [makeLightPage('p1')])
+  const hash = pdfHash(aDataUrl)
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 2500,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      { id: local.id, name: local.name, updatedAt: 2500, deleted: false, pdfs: { p1: hash } },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-heal-conflict.json',
+    JSON.stringify({
+      version: 3,
+      exportedAt: 1,
+      notebook: { ...local, updatedAt: 2500 },
+    }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(local)],
+    state: makeState({ notebooks: { [local.id]: 2000 }, foldersHash: hashFolders([]) }),
+    transport: t,
+    getNotebook: async () => local,
+    findMissingPdfBitmaps: async () => [{ notebookId: local.id, pageId: 'p1' }],
+  })
+  assert(out.result.conflicts.length === 1, 'heal/conflict: both edits are still a conflict')
+  assert(out.repairedNotebooks.length === 1, 'heal/conflict: the bitmap is restored locally')
+  const manifest = JSON.parse(t.files.get('base/manifest.json')!) as SyncManifest
   assert(
-    manifest.notebooks.find((n) => n.id === stripped.id)?.pdfs?.['p1'] === hash,
-    'heal: manifest hash kept',
+    manifest.notebooks.find((n) => n.id === local.id)?.updatedAt === 2500,
+    'heal/conflict: the entry timestamp is not replaced by the unsynced local one',
   )
 }
 
@@ -1101,6 +1145,72 @@ console.log('== conflict resolution keeps hashes and deletes images ==')
   assert(
     confirmed.manifest.notebooks.find((n) => n.id === nb.id)?.deleted === true,
     'conflict confirmDelete: manifest keeps the tombstone',
+  )
+}
+
+console.log('== useServer reuses the local PDF bitmaps that did not change ==')
+
+{
+  const t = new FakeTransport()
+  const remote = makeNotebook('nb-conf-reuse', 'ConfReuse', 4000, [
+    makeLightPage('p1'),
+    makeLightPage('p2'),
+  ])
+  // A local bitmap for p2 that no longer matches the server (the page image was
+  // replaced on the other device), so only that page may be downloaded.
+  const staleLocal = encodePngDataUrl(new Uint8Array([...PNG_A, 9]))
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 4000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: remote.id,
+        name: remote.name,
+        updatedAt: 4000,
+        deleted: false,
+        pdfs: { p1: pdfHash(aDataUrl), p2: pdfHash(bDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-conf-reuse.json',
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: remote }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  t.binaries.set('base/pdfs/p2.png', PNG_B)
+  const localBitmaps = new Map([
+    ['p1', aDataUrl],
+    ['p2', staleLocal],
+  ])
+  const out = await applyConflictChoices({
+    basePath: 'base',
+    transport: t,
+    choices: { [remote.id]: 'useServer' },
+    localNotebooks: [makeSummary(remote)],
+    folders: null,
+    state: makeState({ notebooks: { [remote.id]: 3000 } }),
+    manifest: parseManifest(t.files.get('base/manifest.json')!),
+    getNotebook: async () => undefined,
+    getPagePdfDataUrl: async (pageId) => localBitmaps.get(pageId),
+  })
+  assert(out.pulledNotebooks.length === 1, 'conflict reuse: the server copy is applied')
+  const pages = out.pulledNotebooks[0]?.pages ?? []
+  assert(
+    pages.find((p) => p.id === 'p1')?.pdf?.dataUrl === aDataUrl,
+    'conflict reuse: an unchanged page keeps its local bitmap',
+  )
+  assert(
+    pages.find((p) => p.id === 'p2')?.pdf?.dataUrl === bDataUrl,
+    'conflict reuse: a changed page gets the server bitmap',
+  )
+  assert(
+    t.downloads.filter((p) => p === 'base/pdfs/p1.png').length === 0,
+    'conflict reuse: the unchanged bitmap is not downloaded',
+  )
+  assert(
+    t.downloads.filter((p) => p === 'base/pdfs/p2.png').length === 1,
+    'conflict reuse: only the changed bitmap is downloaded',
   )
 }
 
