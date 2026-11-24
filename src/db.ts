@@ -1,9 +1,9 @@
 import type { Folder, Notebook, AppSettings, CloudSyncState, PageTemplate, TrashItem, NotebookSummary, Page, PdfBackground } from './types'
 import { DEFAULT_SETTINGS, normalizePage } from './types'
-import { hashFolders } from './utils/sync'
+import { hashFolders, pdfHash } from './utils/sync'
 
 const DB_NAME = 'mamaco-notes'
-const DB_VERSION = 10
+const DB_VERSION = 11
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -11,6 +11,16 @@ interface PdfImageRecord {
   pageId: string
   notebookId: string
   dataUrl: string
+}
+
+/**
+ * Fingerprint of a stored bitmap (v11), kept apart from `pdfImages` on purpose:
+ * reading it must not deserialize a multi-megabyte dataUrl. Sync compares it
+ * with the manifest hash to decide a page is already on this device.
+ */
+interface PdfHashRecord {
+  pageId: string
+  hash: string
 }
 
 /**
@@ -333,6 +343,9 @@ function openDb(): Promise<IDBDatabase> {
         const pdfStore = db.createObjectStore('pdfImages', { keyPath: 'pageId' })
         pdfStore.createIndex('byNotebook', 'notebookId')
       }
+      if (!db.objectStoreNames.contains('pdfHashes')) {
+        db.createObjectStore('pdfHashes', { keyPath: 'pageId' })
+      }
 
       if (oldVersion > 0) {
         if (oldVersion < 4) needsOrderMigration = true
@@ -460,9 +473,10 @@ async function readPageRecords(notebookId: string): Promise<PageRecord[]> {
   })
 }
 
-/** Deletes the `pdfImages` records of one notebook, sparing `keepPageIds`. */
+/** Deletes the `pdfImages` (and fingerprint) records of one notebook, sparing `keepPageIds`. */
 function clearPdfImages(
   store: IDBObjectStore,
+  hashStore: IDBObjectStore,
   notebookId: string,
   keepPageIds?: ReadonlySet<string>,
 ): void {
@@ -473,6 +487,7 @@ function clearPdfImages(
     const { pageId } = cur.value as PdfImageRecord
     if (!keepPageIds?.has(pageId)) {
       knownPdfLength.delete(pageId)
+      hashStore.delete(pageId)
       cur.delete()
     }
     cur.continue()
@@ -539,6 +554,58 @@ export const db = {
     return record?.dataUrl
   },
   /**
+   * Fingerprint of the bitmap this device holds for a page, read without loading
+   * the bitmap itself (the dataUrl would cost megabytes per page). A record
+   * written before v11 has no fingerprint: it is computed once and kept. The
+   * bitmap is confirmed to exist, so a fingerprint always means "the image is
+   * here", never "the image was here once".
+   */
+  async getPagePdfHash(pageId: string): Promise<string | undefined> {
+    const found = await new Promise<{ hash?: string; dataUrl?: string }>((resolve, reject) => {
+      openDb().then((db) => {
+        const t = db.transaction(['pdfHashes', 'pdfImages'], 'readonly')
+        const hashReq = t.objectStore('pdfHashes').get(pageId)
+        const imageReq = t.objectStore('pdfImages').get(pageId)
+        t.oncomplete = () => {
+          const hash = (hashReq.result as PdfHashRecord | undefined)?.hash
+          const dataUrl = (imageReq.result as PdfImageRecord | undefined)?.dataUrl
+          resolve({ hash, dataUrl })
+        }
+        t.onerror = () => reject(t.error)
+        t.onabort = () => reject(t.error)
+      }, reject)
+    })
+    // No bitmap, no fingerprint: the page must be downloaded.
+    if (found.dataUrl === undefined) return undefined
+    if (found.hash) return found.hash
+    const hash = pdfHash(found.dataUrl)
+    await txAll('pdfHashes', 'readwrite', (s) => s.put({ pageId, hash }))
+    return hash
+  },
+  /**
+   * How many of these pages still have a bitmap in `pdfImages`. Key lookups in a
+   * single transaction, so the post-pull log stays cheap for a PDF-heavy
+   * notebook (loading the records would read every dataUrl again).
+   */
+  async countPdfBitmaps(pageIds: string[]): Promise<number> {
+    if (pageIds.length === 0) return 0
+    const db = await openDb()
+    return new Promise((resolve, reject) => {
+      const t = db.transaction('pdfImages', 'readonly')
+      const store = t.objectStore('pdfImages')
+      let present = 0
+      for (const pageId of pageIds) {
+        const req = store.getKey(pageId)
+        req.onsuccess = () => {
+          if (req.result !== undefined) present++
+        }
+      }
+      t.oncomplete = () => resolve(present)
+      t.onerror = () => reject(t.error)
+      t.onabort = () => reject(t.error)
+    })
+  },
+  /**
    * Pages that still reference a PDF background but whose bitmap is not in the
    * local `pdfImages` store. This is the damage left by a client older than
    * 2.4.2: it cannot download `pdfs/<pageId>.png`, so a version-3 notebook is
@@ -570,7 +637,16 @@ export const db = {
       t.onabort = () => reject(t.error)
     })
   },
-  async putNotebook(notebook: Notebook): Promise<void> {
+  /**
+   * Persists a notebook. `options.pdfHashes` is the manifest fingerprint of the
+   * bitmaps just applied: it is stored next to them (never derived from the
+   * local dataUrl) so the next push recognizes a page it does not have to
+   * upload again, even when the base64 text differs by a re-encoding.
+   */
+  async putNotebook(
+    notebook: Notebook,
+    options: { pdfHashes?: Record<string, string> } = {},
+  ): Promise<void> {
     const summary: NotebookSummary = {
       id: notebook.id,
       name: notebook.name,
@@ -590,10 +666,11 @@ export const db = {
     })
     const db = await openDb()
     return new Promise((resolve, reject) => {
-      const t = db.transaction(['notebooks', 'pages', 'pdfImages'], 'readwrite')
+      const t = db.transaction(['notebooks', 'pages', 'pdfImages', 'pdfHashes'], 'readwrite')
       t.objectStore('notebooks').put(summary)
       const pageStore = t.objectStore('pages')
       const pdfStore = t.objectStore('pdfImages')
+      const hashStore = t.objectStore('pdfHashes')
       // Detect new/deleted pages and which pages actually changed from the
       // persisted records. Only those are rewritten, so committing a stroke on
       // a 100-page notebook costs one page write instead of a whole-notebook
@@ -622,14 +699,24 @@ export const db = {
           pageStore.delete(key)
           droppedPageIds.push(key.slice(notebook.id.length + 1))
         }
-        for (const id of droppedPageIds) pdfStore.delete(id)
+        for (const id of droppedPageIds) {
+          pdfStore.delete(id)
+          hashStore.delete(id)
+        }
         const pdfWrites: { id: string; length: number }[] = []
         for (const p of notebook.pages) {
           if (!p.pdf || !p.pdf.dataUrl) continue
           const length = p.pdf.dataUrl.length
           if (knownPdfLength.get(p.id) === length) continue
           pdfStore.put({ pageId: p.id, notebookId: notebook.id, dataUrl: p.pdf.dataUrl })
+          hashStore.put({ pageId: p.id, hash: options.pdfHashes?.[p.id] ?? pdfHash(p.pdf.dataUrl) })
           pdfWrites.push({ id: p.id, length })
+        }
+        // Pages whose bitmap was already correct keep their record untouched, but
+        // the manifest fingerprint the pull reported is still worth keeping.
+        const pdfPageIds = new Set(notebook.pages.filter((p) => p.pdf).map((p) => p.id))
+        for (const [pageId, hash] of Object.entries(options.pdfHashes ?? {})) {
+          if (pdfPageIds.has(pageId)) hashStore.put({ pageId, hash })
         }
         // The caches only claim what the transaction actually committed.
         t.oncomplete = () => {
@@ -658,7 +745,7 @@ export const db = {
   async deleteNotebook(id: string, options: { keepPdfImages?: boolean } = {}): Promise<void> {
     const db = await openDb()
     return new Promise((resolve, reject) => {
-      const t = db.transaction(['notebooks', 'pages', 'pdfImages'], 'readwrite')
+      const t = db.transaction(['notebooks', 'pages', 'pdfImages', 'pdfHashes'], 'readwrite')
       t.objectStore('notebooks').delete(id)
       const range = IDBKeyRange.bound([id, -Infinity], [id, Infinity])
       const pageStore = t.objectStore('pages')
@@ -671,7 +758,9 @@ export const db = {
         cur.delete()
         cur.continue()
       }
-      if (!options.keepPdfImages) clearPdfImages(t.objectStore('pdfImages'), id)
+      if (!options.keepPdfImages) {
+        clearPdfImages(t.objectStore('pdfImages'), t.objectStore('pdfHashes'), id)
+      }
       t.oncomplete = () => {
         for (const pageId of droppedPageIds) knownPageState.delete(pageId)
         resolve()
@@ -691,8 +780,8 @@ export const db = {
   ): Promise<void> {
     const db = await openDb()
     return new Promise((resolve, reject) => {
-      const t = db.transaction('pdfImages', 'readwrite')
-      clearPdfImages(t.objectStore('pdfImages'), id, keepPageIds)
+      const t = db.transaction(['pdfImages', 'pdfHashes'], 'readwrite')
+      clearPdfImages(t.objectStore('pdfImages'), t.objectStore('pdfHashes'), id, keepPageIds)
       t.oncomplete = () => resolve()
       t.onerror = () => reject(t.error)
       t.onabort = () => reject(t.error)

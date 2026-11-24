@@ -926,6 +926,33 @@ async function main(): Promise<void> {
     'folder delete: the restored notebook has its bitmap back',
   )
 
+  console.log('== the last opened page survives a restart ==')
+
+  // Root cause it guards against: `init` set the notebook id before its pages
+  // were loaded, and the last-page subscriber treated that as "no page" and
+  // deleted the remembered page — every launch reopened the notebook on page 1.
+  await useAppStore.getState().selectNotebook(junk.id)
+  useAppStore.getState().selectPage(1)
+  assert(
+    useAppStore.getState().currentPageIndex === 1,
+    'last page: selecting the second page sticks',
+  )
+  useAppStore.setState({
+    loaded: false,
+    selectedNotebookId: null,
+    activeNotebook: null,
+    currentPageIndex: 0,
+  })
+  await useAppStore.getState().init()
+  assert(
+    useAppStore.getState().selectedNotebookId === junk.id,
+    'last page: the last notebook is restored',
+  )
+  assert(
+    useAppStore.getState().currentPageIndex === 1,
+    'last page: the last page is restored instead of the first one',
+  )
+
   stub.stop()
   console.log(`\n${passed} passed, ${failed} failed`)
   process.exit(failed > 0 ? 1 : 0)

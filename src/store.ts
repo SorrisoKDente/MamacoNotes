@@ -643,6 +643,8 @@ export const useAppStore = create<AppState>((set, get) => {
     newNotebooks: Notebook[]
     removedLocalNotebookIds: string[]
     pulledFolders: Folder[] | null
+    /** Manifest fingerprints of the pulled bitmaps, stored next to them. */
+    pulledPdfHashes?: Record<string, Record<string, string> | undefined>
   }
 
   async function applySyncChanges(changes: SyncChanges) {
@@ -698,10 +700,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       if (idx >= 0) notebooks[idx] = summary
       else notebooks.push(summary)
-      await db.putNotebook(norm)
+      await db.putNotebook(norm, { pdfHashes: changes.pulledPdfHashes?.[norm.id] })
 
       if (norm.id === prev.selectedNotebookId) {
-        activeNotebook = norm
+        // A reused page comes back light (its bitmap is already in the database),
+        // so the open notebook is read from there: the pages keep their bitmaps
+        // without any of them being loaded into the pull.
+        activeNotebook = (await db.getNotebook(norm.id)) ?? norm
       }
     }
     for (const nb of changes.newNotebooks) {
@@ -2319,7 +2324,7 @@ export const useAppStore = create<AppState>((set, get) => {
             state,
             transport,
             getNotebook: (id) => db.getNotebook(id),
-            getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
+            getPagePdfHash: (pageId) => db.getPagePdfHash(pageId),
             findMissingPdfBitmaps: repairPdfBitmaps
               ? async () => {
                   let scanned: PendingPdfBitmap[] = []
@@ -2357,20 +2362,19 @@ export const useAppStore = create<AppState>((set, get) => {
               newNotebooks: [],
               removedLocalNotebookIds: out.removedLocalNotebookIds,
               pulledFolders: out.pulledFolders,
+              pulledPdfHashes: out.pulledPdfHashes,
             })
-            // Read every pulled notebook back from IndexedDB. A pull can download
-            // all the bitmaps and still leave the stored pages without them (a
-            // record the fingerprint considered unchanged), and then the notes
-            // open blank with nothing in the Logs but successful downloads.
+            // Prove the bitmaps are in the database without loading a single one
+            // of them (a full `getNotebook` here would rehydrate every page of
+            // every pulled notebook, which is what made a PDF pull slow).
             for (const nb of out.pulledNotebooks) {
               try {
-                const stored = await db.getNotebook(nb.id)
-                const pages = stored?.pages ?? []
+                const pdfPageIds = nb.pages.filter((page) => page.pdf).map((page) => page.id)
                 logger.info(`Sync persisted notebook (${nb.name})`, {
                   notebookId: nb.id,
-                  pages: pages.length,
-                  pagesWithPdf: pages.filter((page) => page.pdf).length,
-                  pagesWithBitmap: pages.filter((page) => page.pdf?.dataUrl).length,
+                  pages: nb.pages.length,
+                  pagesWithPdf: pdfPageIds.length,
+                  pagesWithBitmap: await db.countPdfBitmaps(pdfPageIds),
                 })
               } catch (e) {
                 logger.warn(`Sync persisted notebook check failed (${nb.id})`, e)
@@ -2484,6 +2488,7 @@ export const useAppStore = create<AppState>((set, get) => {
           state: resume.state,
           manifest: resume.manifest,
           getNotebook: (id) => db.getNotebook(id),
+          getPagePdfHash: (pageId) => db.getPagePdfHash(pageId),
           getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
           onProgress: (progress) => set({ syncProgress: progress }),
         })
@@ -2777,6 +2782,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         const nb = await downloadNotebook(cloud.webdavPath, transport, id, {
           pdfHashes,
+          getPagePdfHash: (pageId) => db.getPagePdfHash(pageId),
           getPagePdfDataUrl: (pageId) => db.getPagePdfDataUrl(pageId),
         })
         const norm = normalizeRestoredNotebook(nb)
@@ -2923,8 +2929,13 @@ useAppStore.subscribe((state, prev) => {
     return
   }
   if (!state.selectedNotebookId) return
-  const pages = (state.activeNotebook?.id === state.selectedNotebookId) ? state.activeNotebook.pages : []
-  const pageId = pages[state.currentPageIndex]?.id ?? null
+  // The notebook is selected before its pages are loaded (`init` sets the id,
+  // then `selectNotebook` reads it from the database). Treating "no pages yet"
+  // as "no page" used to delete the remembered page during startup, so the app
+  // reopened the right notebook on its first page.
+  if (state.activeNotebook?.id !== state.selectedNotebookId) return
+  const pageId = state.activeNotebook.pages[state.currentPageIndex]?.id
+  if (!pageId) return
   saveLastSession(state.selectedNotebookId, pageId)
   saveLastPage(state.selectedNotebookId, pageId)
 })

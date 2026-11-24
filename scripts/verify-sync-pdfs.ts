@@ -1192,6 +1192,10 @@ console.log('== useServer reuses the local PDF bitmaps that did not change ==')
     state: makeState({ notebooks: { [remote.id]: 3000 } }),
     manifest: parseManifest(t.files.get('base/manifest.json')!),
     getNotebook: async () => undefined,
+    getPagePdfHash: async (pageId) => {
+      const dataUrl = localBitmaps.get(pageId)
+      return dataUrl ? pdfHash(dataUrl) : undefined
+    },
     getPagePdfDataUrl: async (pageId) => localBitmaps.get(pageId),
   })
   assert(out.pulledNotebooks.length === 1, 'conflict reuse: the server copy is applied')
@@ -1212,6 +1216,98 @@ console.log('== useServer reuses the local PDF bitmaps that did not change ==')
     t.downloads.filter((p) => p === 'base/pdfs/p2.png').length === 1,
     'conflict reuse: only the changed bitmap is downloaded',
   )
+}
+
+console.log('== pull: an unchanged bitmap costs no download and no bitmap read ==')
+
+{
+  const t = new FakeTransport()
+  const remote = makeNotebook('nb-pull-reuse', 'PullReuse', 6000, [makeLightPage('p1')])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 6000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: remote.id,
+        name: remote.name,
+        updatedAt: 6000,
+        deleted: false,
+        pdfs: { p1: pdfHash(aDataUrl) },
+      },
+    ],
+  })
+  t.files.set(
+    'base/notebooks/nb-pull-reuse.json',
+    JSON.stringify({ version: 3, exportedAt: 1, notebook: remote }),
+  )
+  t.binaries.set('base/pdfs/p1.png', PNG_A)
+  let hashReads = 0
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [],
+    state: makeState(),
+    transport: t,
+    getNotebook: async () => undefined,
+    getPagePdfHash: async (pageId) => {
+      hashReads++
+      return pageId === 'p1' ? pdfHash(aDataUrl) : undefined
+    },
+  })
+  assert(out.result.errors.length === 0, 'pull reuse: no errors')
+  assert(
+    t.downloads.filter((p) => p === 'base/pdfs/p1.png').length === 0,
+    'pull reuse: the unchanged bitmap is not downloaded',
+  )
+  assert(hashReads === 1, 'pull reuse: only the fingerprint is read, never the bitmap')
+  assert(
+    out.pulledNotebooks[0]?.pages[0]?.pdf?.dataUrl === undefined,
+    'pull reuse: the page stays light (the database already holds the bitmap)',
+  )
+  assert(
+    out.pulledPdfHashes['nb-pull-reuse']?.p1 === pdfHash(aDataUrl),
+    'pull reuse: the manifest fingerprint is returned so the caller can store it',
+  )
+}
+
+console.log('== push: the stored fingerprint skips an image the server already has ==')
+
+{
+  const t = new FakeTransport()
+  const nb = makeNotebook('nb-provenance', 'Provenance', 2000, [makePage('p1', aDataUrl)])
+  seedManifest(t, 'base', {
+    version: 3,
+    updatedAt: 1000,
+    folders: { updatedAt: 0 },
+    notebooks: [
+      {
+        id: nb.id,
+        name: nb.name,
+        updatedAt: 1000,
+        deleted: false,
+        // What the server holds. The local base64 text is a re-encoding, so
+        // hashing it would give another value.
+        pdfs: { p1: 'remote-provenance' },
+      },
+    ],
+  })
+  const out = await runSync({
+    basePath: 'base',
+    folders: [],
+    notebooks: [makeSummary(nb)],
+    state: makeState({ notebooks: { [nb.id]: 1000 } }),
+    transport: t,
+    getNotebook: async () => nb,
+    getPagePdfHash: async (pageId) => (pageId === 'p1' ? 'remote-provenance' : undefined),
+  })
+  assert(out.result.errors.length === 0, 'provenance push: no errors')
+  assert(
+    t.uploads.filter((u) => u.contentType === 'image/png').length === 0,
+    'provenance push: ZERO images uploaded when the stored bitmap matches the manifest',
+  )
+  const entry = parseManifest(t.files.get('base/manifest.json')!).notebooks.find((n) => n.id === nb.id)
+  assert(entry?.pdfs?.p1 === 'remote-provenance', 'provenance push: the remote fingerprint is kept')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)
